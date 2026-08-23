@@ -1,0 +1,192 @@
+# The dsh-ops bundle patch: the prod long-running service over dsh-base.
+# Applied after dsh-base's insert; rows here override base rows by id, with
+# the profile's own cordis.patch.yml and any --patch overlays still to come.
+#
+# The webserver row exposes /health on 127.0.0.1:18000 (overridable via
+# DSH_OPS_PORT) for the systemd unit's `WatchdogSec` probes. ops-webserver
+# plugin (below) registers /health and / routes against the bound socket.
+# ops-* product plugins are mounted after base so the global layer can see
+# `ops-skill` provider contributions.
+
+# ── ops persona: stable service, not one-shot CLI ──────────────────────────
+
+- id: system-prompt
+  config:
+    persona: >-
+      You are the dsh-ops assistant for the "小薇办公助手" ServicePilot product.
+      Your working directory is {{cwd}}. Default to read-only skills and ask
+      before invoking business write-side operations.
+
+# ── disable HMR for the long-running prod surface ───────────────────────────
+# dsh-base enables the `hmr` plugin which restarts the agent on file changes.
+# Ops runs under systemd; restarts would corrupt the session log and lose the
+# bound HTTP socket. We don't run `tsx --watch` in ExecStart either.
+
+- id: hmr
+  disabled: true
+
+# ── ops startup provider: parsed positional task + bind port ────────────────
+
+- insert:
+    - id: code-runtime
+      name: '@deepseek-ai/dsh-code-runtime-worker-thread'
+
+    - id: ops-startup
+      name: '@deepseek-ai/dsh-ops/startup'
+
+    # The bind row: production listens on loopback only. systemd proxies it.
+    - id: webserver
+      name: '@deepseek-ai/dsh-host-webserver'
+      config:
+        host: '127.0.0.1'
+        port: !!js Number(process.env.DSH_OPS_PORT ?? 18000)
+
+    # Routes for /health and /; sits after webserver so `inject` resolves.
+    - id: ops-webserver
+      name: '@deepseek-ai/dsh-ops/webserver'
+
+    # SPA dist served from the fallback seat: claims everything not matched
+    # by an exact route (so `/health` keeps precedence, and `/` renders
+    # apps/web/dist/index.html). The systemd unit pins cwd to the deploy
+    # dir, so the absolute path is resolved at loader time.
+    - id: ops-frontend-static
+      name: '@deepseek-ai/dsh-host-frontend-static'
+      config:
+        distIndex: !!js process.cwd() + '/apps/web/dist/index.html'
+
+    # ── apiproxy mount: `/api/<method>` RPC + `/api/events.{mux,host}` SSE ──
+    # The dsh RPC surface the desktop client (and any other client shape) talks
+    # to. Row order mirrors @deepseek-ai/dsh-web-app's patch: the supporting
+    # services the api-gateway injects mount first so the gateway's `inject`
+    # list resolves, then the gateway itself, then the HTTP/WS carrier that
+    # binds `/api` and the SSE downlinks onto the webserver row above.
+    #
+    # `trustedHosts` is a DNS-rebinding fence (api-request-trust), not auth:
+    # loopback-only by design, so the privileged methods (settings, credentials,
+    # native openers) refuse any non-loopback caller. The desktop client runs
+    # on the user's machine and reaches the host through nginx at :18080;
+    # nginx's upstream is `127.0.0.1:18000`, so every request hits the loopback
+    # fence. The literals below match what nginx forwards; LAN callers would
+    # need a real authentication layer.
+    - id: storage
+      name: '@deepseek-ai/dsh-storage'
+
+    - id: storage-json
+      name: '@deepseek-ai/dsh-storage-json'
+      config:
+        root: !!js dshHomePath('storages')
+
+    - id: storage-domain
+      name: '@deepseek-ai/dsh-storage-domain'
+      config:
+        backend: json
+
+    - id: message-feedback
+      name: '@deepseek-ai/dsh-message-feedback'
+      config:
+        maxNoteBytes: 8192
+
+    # Browser Session export: `/export` command plus the shared download dialog.
+    - id: session-log-download
+      name: '@deepseek-ai/dsh-session-log-export'
+
+    - id: workspace
+      name: '@deepseek-ai/dsh-workspace'
+
+    - id: session-projection-cache
+      name: '@deepseek-ai/dsh-session-projection-cache'
+      config:
+        writeEveryEvents: 200
+        writeIntervalMs: 5000
+
+    - id: session-reference
+      name: '@deepseek-ai/dsh-session-reference'
+
+    - id: file-reference-local
+      name: '@deepseek-ai/dsh-file-reference-local'
+
+    # Whole-log turn/step counts for the chat stats strip (the sessionStats
+    # projection key); the projection registry itself is a base-layer row.
+    - id: session-stats
+      name: '@deepseek-ai/dsh-session-stats'
+
+    # Resolve bind host, SSH launch, and display once at boot, then mount the
+    # matching dual-face directory picker. Mount -native or -browse directly in
+    # an overlay to pin the interaction.
+    - id: directory-picker
+      name: '@deepseek-ai/dsh-host-directory-picker-auto'
+
+    # The API gateway: the transport-agnostic dispatch face every client shape
+    # shares. The base layer's agent-default-model service owns the default model.
+    - id: api-gateway
+      name: '@deepseek-ai/dsh-host-apiproxy'
+
+    - id: connection
+      name: '@deepseek-ai/dsh-client-connection'
+      config:
+        maxRequestBodyBytes: 314572800
+        # Loopback covers direct host calls and curl from ssh. The two
+        # non-loopback authorities are what nginx exposes: `*:18080` serves
+        # any Host on that port, and `xiaowei.119.45.252.25.nip.io` serves
+        # browser access through the nip.io dynamic-DNS alias. The desktop
+        # client connects to `http://119.45.252.25:18080/` (nginx's port),
+        # which forwards the original Host to the backend.
+        #
+        # Security note: `trustedHosts` is a DNS-rebinding fence, not auth.
+        # Privileged methods (settings.*, credentials.*, host.pickDirectory,
+        # host.openPath, agentPreset.{read,copy,openDocument,remove},
+        # llm.discoverModels) gate on an empty trust list, so they refuse any
+        # non-loopback caller regardless. They can only be invoked by an SSH
+        # session on the host.
+        trustedHosts: ['127.0.0.1', 'localhost', '119.45.252.25', 'xiaowei.119.45.252.25.nip.io']
+
+    # ops product surface: order matters because ops-skill registers a
+    # SkillProvider into ctx.skills and ops-subagent-python registers a
+    # SubagentProvider into ctx.subagents; both must mount after base.
+    - id: ops-domain
+      name: '@deepseek-ai/dsh-ops-domain'
+
+    - id: ops-skill
+      name: '@deepseek-ai/dsh-ops-skill'
+
+    - id: ops-runtime
+      name: '@deepseek-ai/dsh-ops-runtime'
+
+    - id: ops-subagent-python
+      name: '@deepseek-ai/dsh-ops-subagent-python'
+      config:
+        providerName: ops-python
+        module: !!js process.env.DSH_OPS_PYTHON_MODULE ?? 'ops_runtime.subagent_main'
+        command: !!js process.env.DSH_OPS_PYTHON ?? 'python3'
+        env: {}
+
+    - id: ops-platform
+      name: '@deepseek-ai/dsh-ops-platform'
+
+    - id: ops-approval-policy
+      name: '@deepseek-ai/dsh-ops-approval-policy'
+
+    - id: ops-package-signing
+      name: '@deepseek-ai/dsh-ops-package-signing'
+
+    - id: ops-loop-guard
+      name: '@deepseek-ai/dsh-ops-loop-guard'
+
+    - id: ops-workbench-conversations
+      name: '@deepseek-ai/dsh-ops-workbench-conversations'
+
+    - id: ops-workbench-memories
+      name: '@deepseek-ai/dsh-ops-workbench-memories'
+
+    - id: ops-workbench-trigger
+      name: '@deepseek-ai/dsh-ops-workbench-trigger'
+
+    - id: ops-workbench-anomaly
+      name: '@deepseek-ai/dsh-ops-workbench-anomaly'
+
+    # The runner mounts last so it sees every service the rest provides.
+    - id: ops-runner
+      name: '@deepseek-ai/dsh-ops'
+      inject: [opsStartup]
+      config:
+        task: !!js ctx.opsStartup.task
