@@ -2,9 +2,9 @@
   "name": "@deepseek-harness/desktop",
   "version": "0.3.0",
   "private": true,
-  "description": "Secure Electron desktop client for the enterprise AI workbench",
+  "description": "Electron desktop client for the dsh (DeepSeek Harness) ops deployment",
   "main": "dist/main/main/index.js",
-  "author": "Enterprise AI Workbench Team",
+  "author": "DeepSeek Harness",
   "license": "UNLICENSED",
   "type": "module",
   "scripts": {

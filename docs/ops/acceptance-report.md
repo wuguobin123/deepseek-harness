@@ -2,7 +2,7 @@
 
 English | [中文](acceptance-report.zh.md)
 
-Generated: 2026-08-23 (Phase 4 + Phase 5 production deploy landed)
+Generated: 2026-08-23 (Phase 4 + Phase 5 production deploy landed; Phase 6 Electron client shipped)
 
 Status of the migration of `/Users/wuguobin/Documents/my-agents` (ServicePilot / 小薇办公助手) onto the dsh (DeepSeek Harness) foundation. The report is the single source of truth for what is in place today, what has been explicitly deferred, and what the operator must confirm before the next phase runs.
 
@@ -219,6 +219,50 @@ $ ssh root@119.45.252.25 'cd /opt/dsh-ops && DSH_HOME=/var/lib/dsh-ops pnpm dsh 
 
 Browser clients point at `http://119.45.252.25:18080/` (the same nginx fronting that was used for the old Electron HTTP API). The nginx upstream is unchanged (`127.0.0.1:18000`); both `/health` and the SPA share the same backend socket.
 
+## Phase 6 — Electron desktop client (PR 7 landed)
+
+The old Electron client has been repurposed (per the operator directive "之前客户端功能直接使用，可以局部改动") and now lives at `apps/desktop/`. It speaks the same dsh RPC envelope and stream frame unions as the dsh web frontend — both surfaces converge on `@deepseek-ai/dsh-host-apiproxy` and the trust-fenced `dsh-client-connection` mount in the ops profile.
+
+### What changed
+
+- **Wire layer** (`PR 4`): REST-style `{ method, path }` requests → dsh `{ type:'client-request', rpcId, method, payload }`. SSE stream (`GET /api/events.mux` / `/api/events.host`) is opened by the main process and fanned as typed IPC events; `X-API-Key` / `X-Tenant-ID` / `X-Actor-ID` headers are gone — the loopback `trustedHosts` fence on `dsh-client-connection` is the only trust gate.
+- **Renderer** (`PR 5 + PR 6`): Home / Assistant / Tasks / Approvals / History / Settings — every page calls a thin `api.<group>.<method>(payload)` wrapper that funnels through `window.workbenchApi.request`. The my-agents feature surfaces (telesales, anomalies, triggers, integrations, automations, browser, document-preview, knowledge, resources) are deleted; no shim is left behind.
+- **Packaging** (`PR 7`): `electron-builder.yml` rewrites to `appId: com.deepseek-harness.desktop`, `productName: DeepSeek Harness`. Default `product-config.json` points at `http://119.45.252.25:18080/`; override at build time with `WORKBENCH_API_BASE_URL`.
+
+### How to ship
+
+```sh
+# Build a release for the operator's machine.
+pnpm --filter @deepseek-harness/desktop run package:mac        # arm64 DMG
+pnpm --filter @deepseek-harness/desktop run package:mac:x64    # x86_64 DMG
+pnpm --filter @deepseek-harness/desktop run package:linux      # AppImage
+pnpm --filter @deepseek-harness/desktop run package:win        # NSIS .exe (needs wine on macOS)
+```
+
+Latest verification build (2026-08-23):
+
+```text
+release/DeepSeek Harness-0.3.0-arm64.dmg       101 MB
+release/mac-arm64/DeepSeek Harness.app          bundle, app.asar 26 MB
+  CFBundleIdentifier   com.deepseek-harness.desktop
+  CFBundleName         DeepSeek Harness
+  Resources/product-config.json    {"apiBaseUrl":"http://119.45.252.25:18080"}
+```
+
+The local artifact is ad-hoc signed. Public distribution still needs an Apple Developer ID + notarization; on operator machines, Gatekeeper quarantine can be cleared with `xattr -dr com.apple.quarantine "/Applications/DeepSeek Harness.app"`.
+
+### Operator handshake
+
+1. Launch `DeepSeek Harness.app`.
+2. Settings page → `baseUrl` field shows the bundled default; press **Probe backend** to confirm `host.describe` returns a model list (this proves `/api/host.describe` reaches `127.0.0.1:18000` through the existing nginx front).
+3. Home → **新建会话** → Assistant → type any prompt → response streams over `/api/events.mux`. Pending approvals surface in **待我处理** within ~1 s; `session/jobs` shows in **进行中的任务**.
+
+### Known limits
+
+- The update-checker is a stub until dsh-ops exposes a releases endpoint. The Settings page keeps the affordance; pressing it reports `up-to-date` unconditionally.
+- The renderer build emits a `Unrecognized target environment "es2024"` Vite warning (root `tsconfig.base.json`). Harmless for the renderer; surface area is owned by the root config, not the desktop package.
+- Packaging on macOS skips code signing (no Developer ID in this environment). Internal-deploy Gatekeeper workaround documented above; public release needs notarization.
+
 ## Cross-references
 
 - Migration plan: [`hashed-cooking-quill.md`](../../../.claude/plans/hashed-cooking-quill.md) (Phase 0/1/2 sections; Phase 3+ de-scoped)
@@ -231,3 +275,4 @@ Browser clients point at `http://119.45.252.25:18080/` (the same nginx fronting 
 - Python peer provider: [`@deepseek-ai/dsh-ops-subagent-python`](../../packages/ops/ops-subagent-python/README.md)
 - Bundled Skill provider: [`@deepseek-ai/dsh-ops-skill`](../../packages/ops/ops-skill/README.md)
 - Phase 0 example: [`examples/ops-minimal`](../../examples/ops-minimal/README.md)
+- Phase 6 Electron client: [`apps/desktop`](../../apps/desktop/README.md)

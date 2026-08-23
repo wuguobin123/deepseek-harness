@@ -1,6 +1,6 @@
-appId: com.enterprise.workbench.desktop
-productName: Enterprise AI Workbench
-copyright: Copyright (c) 2026 Enterprise AI Workbench
+appId: com.deepseek-harness.desktop
+productName: DeepSeek Harness
+copyright: Copyright (c) 2026 DeepSeek Harness
 artifactName: ${productName}-${version}-${arch}.${ext}
 
 directories:
@@ -27,7 +27,7 @@ extraResources:
     to: product-config.json
 
 mac:
-  category: public.app-category.productivity
+  category: public.app-category.developer-tools
   target:
     - dmg
   hardenedRuntime: true
@@ -51,7 +51,7 @@ linux:
     - target: AppImage
       arch:
         - x64
-  category: Office
+  category: Development
   artifactName: ${productName}-${version}.${ext}
 
 win:
