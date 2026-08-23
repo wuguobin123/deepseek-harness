@@ -10,25 +10,25 @@
  * user closes a long-running task by going to its Assistant page and
  * pressing "取消". This page is read-only by design.
  */
-import React from 'react';
-import { useNavigate } from 'react-router-dom';
-import * as api from '../../api';
-import type { MuxFrame } from '../../../shared/contracts';
+import React from 'react'
+import { useNavigate } from 'react-router-dom'
+import * as api from '../../api'
+import type { MuxFrame } from '../../../shared/contracts'
 
 interface JobView {
-  id: string;
-  kind: string;
-  label: string;
-  status: 'running' | 'stopping' | 'completed' | 'killed' | 'failed';
-  detail?: string;
-  startedAt: number;
-  finishedAt?: number;
+  id: string
+  kind: string
+  label: string
+  status: 'running' | 'stopping' | 'completed' | 'killed' | 'failed'
+  detail?: string
+  startedAt: number
+  finishedAt?: number
 }
 
 interface SessionRow {
-  sessionId: string;
-  title?: string;
-  jobs: JobView[];
+  sessionId: string
+  title?: string
+  jobs: JobView[]
 }
 
 const STATUS_LABEL: Record<JobView['status'], string> = {
@@ -36,16 +36,16 @@ const STATUS_LABEL: Record<JobView['status'], string> = {
   stopping: '停止中',
   completed: '已完成',
   killed: '已终止',
-  failed: '失败'
-};
+  failed: '失败',
+}
 
 function isSessionJobsFrame(frame: MuxFrame): frame is Extract<MuxFrame, { type: 'session/jobs' }> {
-  return frame.type === 'session/jobs';
+  return frame.type === 'session/jobs'
 }
 
 function coerceJobs(jobs: ReadonlyArray<unknown>): JobView[] {
   return jobs.map((j) => {
-    const raw = (j ?? {}) as Record<string, unknown>;
+    const raw = (j ?? {}) as Record<string, unknown>
     return {
       id: String(raw.id ?? ''),
       kind: String(raw.kind ?? ''),
@@ -55,79 +55,80 @@ function coerceJobs(jobs: ReadonlyArray<unknown>): JobView[] {
         : 'running') as JobView['status'],
       detail: typeof raw.detail === 'string' ? raw.detail : undefined,
       startedAt: Number(raw.startedAt ?? Date.now()),
-      finishedAt: typeof raw.finishedAt === 'number' ? raw.finishedAt : undefined
-    };
-  });
+      finishedAt: typeof raw.finishedAt === 'number' ? raw.finishedAt : undefined,
+    }
+  })
 }
 
 export function TasksPage(): JSX.Element {
-  const navigate = useNavigate();
-  const [rows, setRows] = React.useState<Map<string, SessionRow> | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
+  const navigate = useNavigate()
+  const [rows, setRows] = React.useState<Map<string, SessionRow> | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
 
   const refreshSessions = React.useCallback(async (): Promise<void> => {
     try {
-      const sessions = await api.session.list({});
+      const result = await api.session.list({})
+      const sessions = result.items
       setRows((prev) => {
-        const next = new Map<string, SessionRow>();
+        const next = new Map<string, SessionRow>()
         for (const s of sessions) {
-          const existing = prev?.get(s.sessionId);
+          const existing = prev?.get(s.sessionId)
           next.set(s.sessionId, {
             sessionId: s.sessionId,
-            title: s.title,
-            jobs: existing?.jobs ?? []
-          });
+            title: api.sessionTitle(s),
+            jobs: existing?.jobs ?? [],
+          })
         }
-        return next;
-      });
-      setError(null);
+        return next
+      })
+      setError(null)
     } catch (err) {
-      setError((err as Error).message);
+      setError((err as Error).message)
     }
-  }, []);
+  }, [])
 
   React.useEffect(() => {
-    void refreshSessions();
-  }, [refreshSessions]);
+    void refreshSessions()
+  }, [refreshSessions])
 
   React.useEffect(() => {
-    let active = true;
-    let unsubscribe: (() => Promise<void>) | null = null;
+    let active = true
+    let unsubscribe: (() => Promise<void>) | null = null
     void api
       .subscribeMux((envelope) => {
-        if (!active) return;
-        const frame = envelope.payload as MuxFrame;
-        if (!isSessionJobsFrame(frame)) return;
+        if (!active) return
+        const frame = envelope.payload as MuxFrame
+        if (!isSessionJobsFrame(frame)) return
         setRows((prev) => {
-          if (!prev) return prev;
-          const next = new Map(prev);
-          const existing = next.get(frame.sessionId);
+          if (!prev) return prev
+          const next = new Map(prev)
+          const existing = next.get(frame.sessionId)
           next.set(frame.sessionId, {
             sessionId: frame.sessionId,
             title: existing?.title,
-            jobs: coerceJobs(frame.jobs)
-          });
-          return next;
-        });
+            jobs: coerceJobs(frame.jobs),
+          })
+          return next
+        })
       })
       .then((u) => {
         if (!active) {
-          void u();
-          return;
+          void u()
+          return
         }
-        unsubscribe = u;
+        unsubscribe = u
       })
       .catch((err: unknown) => {
-        if (active) setError((err as Error).message);
-      });
+        if (active) setError((err as Error).message)
+      })
     return () => {
-      active = false;
-      if (unsubscribe) void unsubscribe();
-    };
-  }, []);
+      active = false
+      if (unsubscribe) void unsubscribe()
+    }
+  }, [])
 
-  const list = rows ? [...rows.values()] : null;
-  const totalRunning = list?.reduce((sum, row) => sum + row.jobs.filter((j) => j.status === 'running').length, 0) ?? 0;
+  const list = rows ? [...rows.values()] : null
+  const totalRunning = list?.reduce((sum, row) => sum + row.jobs.filter(j => j.status === 'running').length, 0) ?? 0
 
   return (
     <section className="page page-tasks" data-testid="page-tasks">
@@ -156,7 +157,7 @@ export function TasksPage(): JSX.Element {
           <p className="page-tasks__meta" data-testid="tasks-meta">
             {totalRunning === 0 ? '当前没有正在运行的作业。' : `${totalRunning} 个作业正在执行。`}
           </p>
-          {list.map((row) => (
+          {list.map(row => (
             <article key={row.sessionId} className="task-card" data-testid={`task-card-${row.sessionId}`}>
               <header className="task-card__header">
                 <button
@@ -174,7 +175,7 @@ export function TasksPage(): JSX.Element {
                 <p className="task-card__empty">暂无作业。</p>
               ) : (
                 <ul className="task-card__list">
-                  {row.jobs.map((job) => (
+                  {row.jobs.map(job => (
                     <li key={job.id} className={`task-card__item task-card__item--${job.status}`}>
                       <span className="task-card__kind">{job.kind}</span>
                       <span className="task-card__label">{job.label}</span>
@@ -189,5 +190,5 @@ export function TasksPage(): JSX.Element {
         </>
       )}
     </section>
-  );
+  )
 }

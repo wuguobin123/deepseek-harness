@@ -7,61 +7,54 @@
  * `useSessionStore.updateBaseUrl` (which round-trips through the IPC bridge
  * and the credential-store).
  */
-import React from 'react';
-import { useSessionStore } from '../../stores/session';
-import * as api from '../../api';
-
-interface HostInfo {
-  name: string;
-  version: string;
-  platform: string;
-  models?: Array<{ provider: string; model: string; label?: string }>;
-}
+import React from 'react'
+import { useSessionStore } from '../../stores/session'
+import * as api from '../../api'
 
 export function SettingsPage(): JSX.Element {
-  const session = useSessionStore((state) => state.session);
-  const updateBaseUrl = useSessionStore((state) => state.updateBaseUrl);
-  const refresh = useSessionStore((state) => state.refresh);
+  const session = useSessionStore(state => state.session)
+  const updateBaseUrl = useSessionStore(state => state.updateBaseUrl)
+  const refresh = useSessionStore(state => state.refresh)
 
-  const [draft, setDraft] = React.useState<string>(session.baseUrl);
-  const [busy, setBusy] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-  const [info, setInfo] = React.useState<HostInfo | null>(null);
+  const [draft, setDraft] = React.useState<string>(session.baseUrl)
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  const [info, setInfo] = React.useState<api.HostDescribe | null>(null)
 
   React.useEffect(() => {
-    setDraft(session.baseUrl);
-  }, [session.baseUrl]);
+    setDraft(session.baseUrl)
+  }, [session.baseUrl])
 
   const onSave = React.useCallback(async () => {
-    setBusy(true);
-    setError(null);
+    setBusy(true)
+    setError(null)
     try {
-      const result = await updateBaseUrl(draft.trim());
+      const result = await updateBaseUrl(draft.trim())
       if (!result.ok) {
-        setError(result.error ?? '保存失败');
-        return;
+        setError(result.error ?? '保存失败')
+        return
       }
-      await refresh();
+      await refresh()
     } catch (err) {
-      setError((err as Error).message);
+      setError((err as Error).message)
     } finally {
-      setBusy(false);
+      setBusy(false)
     }
-  }, [draft, refresh, updateBaseUrl]);
+  }, [draft, refresh, updateBaseUrl])
 
   const onProbe = React.useCallback(async () => {
-    setBusy(true);
-    setError(null);
-    setInfo(null);
+    setBusy(true)
+    setError(null)
+    setInfo(null)
     try {
-      const described = await api.host.describe();
-      setInfo(described);
+      const described = await api.host.describe()
+      setInfo(described)
     } catch (err) {
-      setError((err as Error).message);
+      setError((err as Error).message)
     } finally {
-      setBusy(false);
+      setBusy(false)
     }
-  }, []);
+  }, [])
 
   return (
     <section className="page page-settings" data-testid="page-settings">
@@ -78,7 +71,7 @@ export function SettingsPage(): JSX.Element {
           id="settings-baseurl-input"
           type="text"
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={e => setDraft(e.target.value)}
           placeholder="http://127.0.0.1:18000"
           data-testid="settings-baseurl-input"
         />
@@ -111,30 +104,25 @@ export function SettingsPage(): JSX.Element {
         <div className="settings-card" data-testid="settings-host-info">
           <h2>后端信息</h2>
           <dl className="settings-card__kv">
-            <dt>名称</dt>
-            <dd>{info.name}</dd>
             <dt>版本</dt>
             <dd>{info.version}</dd>
-            <dt>平台</dt>
-            <dd>{info.platform}</dd>
-            {info.models && info.models.length > 0 ? (
+            <dt>当前工作目录</dt>
+            <dd><code>{info.cwd}</code></dd>
+            <dt>主目录</dt>
+            <dd><code>{info.home}</code></dd>
+            <dt>附加会话</dt>
+            <dd>{info.attachedSessions}</dd>
+            {info.provider && info.model ? (
               <>
-                <dt>模型</dt>
-                <dd>
-                  <ul>
-                    {info.models.map((m) => (
-                      <li key={`${m.provider}/${m.model}`}>
-                        <code>{m.provider}/{m.model}</code>
-                        {m.label ? <small> — {m.label}</small> : null}
-                      </li>
-                    ))}
-                  </ul>
-                </dd>
+                <dt>当前模型</dt>
+                <dd><code>{info.provider}/{info.model}</code></dd>
               </>
             ) : null}
+            <dt>支持打开本地路径</dt>
+            <dd>{info.canOpenPath ? '是' : '否'}</dd>
           </dl>
         </div>
       ) : null}
     </section>
-  );
+  )
 }

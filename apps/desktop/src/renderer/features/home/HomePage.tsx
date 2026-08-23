@@ -4,59 +4,48 @@
  * Lists existing sessions for the current workspace, surfaces a single
  * "New session" affordance, and lets the user jump straight into the
  * Assistant view. Errors surface inline; no global toast plumbing.
+ *
+ * `session.list` returns `{ items: SessionSummary[] }` — see
+ * `packages/host/apiproxy/src/api/sessions.schema.ts:70`. Each row carries
+ * `updatedAt` as epoch ms and `blank` as a real boolean; the display title
+ * is sourced from `projections.values.title` via `api.sessionTitle`.
  */
-import React from 'react';
-import { useNavigate } from 'react-router-dom';
-import * as api from '../../api';
+import React from 'react'
+import { useNavigate } from 'react-router-dom'
+import * as api from '../../api'
 
-interface SessionItem {
-  sessionId: string;
-  title?: string;
-  updatedAt?: string;
-  blank?: boolean;
-}
-
-function formatTime(value: string | undefined): string {
-  if (!value) return '';
-  try {
-    return new Date(value).toLocaleString();
-  } catch {
-    return value;
-  }
-}
-
-export function HomePage(): JSX.Element {
-  const navigate = useNavigate();
-  const [sessions, setSessions] = React.useState<SessionItem[] | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
-  const [creating, setCreating] = React.useState(false);
+function HomePage(): JSX.Element {
+  const navigate = useNavigate()
+  const [sessions, setSessions] = React.useState<api.SessionListItem[] | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
+  const [creating, setCreating] = React.useState(false)
 
   const refresh = React.useCallback(async () => {
     try {
-      const list = await api.session.list({});
-      setSessions(list);
-      setError(null);
+      const list = await api.session.list({})
+      setSessions(list.items)
+      setError(null)
     } catch (err) {
-      setSessions([]);
-      setError((err as Error).message);
+      setSessions([])
+      setError((err as Error).message)
     }
-  }, []);
+  }, [])
 
   React.useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    void refresh()
+  }, [refresh])
 
   const onCreate = React.useCallback(async () => {
-    setCreating(true);
+    setCreating(true)
     try {
-      const created = await api.session.create({});
-      navigate(`/assistant/${created.sessionId}`);
+      const created = await api.session.create({})
+      navigate(`/assistant/${created.sessionId}`)
     } catch (err) {
-      setError((err as Error).message);
+      setError((err as Error).message)
     } finally {
-      setCreating(false);
+      setCreating(false)
     }
-  }, [navigate]);
+  }, [navigate])
 
   return (
     <section className="page page-home" data-testid="page-home">
@@ -87,7 +76,7 @@ export function HomePage(): JSX.Element {
         </p>
       ) : (
         <ul className="session-list" data-testid="home-session-list">
-          {sessions.map((s) => (
+          {sessions.map(s => (
             <li key={s.sessionId} className="session-list__item">
               <button
                 type="button"
@@ -96,13 +85,15 @@ export function HomePage(): JSX.Element {
                 data-testid="home-session-row"
                 data-session-id={s.sessionId}
               >
-                <strong>{s.title?.trim() || (s.blank ? '空会话' : '会话')}</strong>
-                <small>{formatTime(s.updatedAt)}</small>
+                <strong>{api.sessionTitle(s)}</strong>
+                <small>{api.formatSessionUpdatedAt(s)}</small>
               </button>
             </li>
           ))}
         </ul>
       )}
     </section>
-  );
+  )
 }
+
+export { HomePage }
