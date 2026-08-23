@@ -1,0 +1,45 @@
+# The Phase 0 zero-milestone: a minimal ops-python profile that boots the
+# dsh-base bundle, mounts the Python subagent provider, and exposes one
+# agent preset so a single turn can be exercised through the new wire.
+#
+# Run with:
+#   pnpm dsh --config examples/ops-minimal/cordis.yml --profile headless "say hi"
+#
+# Notes:
+# - The `ops-subagent-python` row requires a Python interpreter on PATH and
+#   the `ops_runtime.subagent_main` module on PYTHONPATH. `examples/ops-minimal/`
+#   ships a stub Python script that satisfies the wire for the smoke test.
+# - This profile intentionally excludes the web bundle and the LLM route;
+#   the goal of Phase 0 is wire-level verification, not model call.
+
+- insert:
+    - id: timer
+      name: '@deepseek-ai/cordis-plugin-timer'
+
+    - id: sessions
+      name: '@deepseek-ai/dsh-session'
+
+    - id: agents
+      name: '@deepseek-ai/dsh-agent'
+
+    - id: agent-loop
+      name: '@deepseek-ai/dsh-agent-loop'
+
+    - id: tools
+      name: '@deepseek-ai/dsh-tools'
+
+    - id: subagent
+      name: '@deepseek-ai/dsh-subagent'
+
+    - id: subprocess-local
+      name: '@deepseek-ai/dsh-subprocess-local'
+
+    - id: ops-subagent-python
+      name: '@deepseek-ai/dsh-ops-subagent-python'
+      config:
+        providerName: ops-python
+        command: python3
+        module: ops_minimal.subagent_main
+        args: []
+        env:
+          APP_TENANT: demo

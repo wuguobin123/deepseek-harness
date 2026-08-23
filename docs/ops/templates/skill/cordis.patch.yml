@@ -1,0 +1,18 @@
+# Patch overlay that mounts `dsh-skill-filesystem` with a single customSkillDir
+# pointing at the directory containing `hello-scenario/SKILL.md`.
+#
+# Apply with:
+#   pnpm dsh --profile headless --patch docs/ops/templates/skill/cordis.patch.yml "..."
+#
+# Notes:
+# - `includeDefaultRoots: false` keeps this Skill isolated from project and user
+#   skill roots, so the catalog only contains the template Skill during demos.
+# - Set the directory's path relative to where the patch file is applied, or
+#   to an absolute path resolved against the harness cwd.
+
+- id: skill-filesystem
+  config:
+    includeDefaultRoots: false
+    providerName: scenario-template
+    customSkillDirs:
+      - ./hello-scenario

@@ -1,0 +1,19 @@
+# Patch overlay that mounts `dsh-ops-subagent-python` for the Subagent
+# scenario template. The Python peer (hello_subagent.py) lives beside this
+# file and is importable as `-m hello_subagent` once `PYTHONPATH` points at
+# this directory.
+#
+# Apply with:
+#   PYTHONPATH=docs/ops/templates/subagent \
+#     pnpm dsh --profile headless --patch docs/ops/templates/subagent/cordis.patch.yml "..."
+
+- insert:
+    - id: ops-subagent-python
+      name: '@deepseek-ai/dsh-ops-subagent-python'
+      config:
+        providerName: ops-python
+        command: python3
+        module: hello_subagent
+        args: []
+        env:
+          APP_TENANT: scenario-template

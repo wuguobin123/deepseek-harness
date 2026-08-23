@@ -1,0 +1,6 @@
+# Patch overlay reserved for `@deepseek-ai/dsh-ops-loop-guard`. The plugin is a
+# no-op skeleton until the first scenario that triggers one of the five
+# detection classes is接入ed; uncomment the row below when that happens.
+#
+# - id: ops-loop-guard
+#   name: '@deepseek-ai/dsh-ops-loop-guard'

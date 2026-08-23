@@ -1,0 +1,6 @@
+# Patch overlay reserved for `@deepseek-ai/dsh-ops-package-signing`. The plugin
+# is a no-op skeleton until the first signed bundle is接入ed; uncomment the row
+# below when the HMAC-SHA256 verifier lands.
+#
+# - id: ops-package-signing
+#   name: '@deepseek-ai/dsh-ops-package-signing'

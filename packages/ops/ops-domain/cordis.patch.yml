@@ -1,0 +1,6 @@
+# Patch overlay reserved for `@deepseek-ai/dsh-ops-domain`. The plugin is a
+# no-op skeleton until the first TS-side scenario mirror is needed; uncomment
+# the row below when that happens.
+#
+# - id: ops-domain
+#   name: '@deepseek-ai/dsh-ops-domain'

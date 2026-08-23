@@ -1,0 +1,15 @@
+# The Python subagent provider for the ops group. Mount as a peer of
+# `@deepseek-ai/dsh-subagent` and `@deepseek-ai/dsh-subprocess-local`; the
+# schema Config requires `module`, so leaving the row disabled without
+# configuration is the only safe default.
+#
+# Example activation:
+#   - id: ops-subagent-python
+#     name: '@deepseek-ai/dsh-ops-subagent-python'
+#     config:
+#       providerName: ops-python
+#       command: python3
+#       module: ops_runtime.subagent_main
+#       args: ['--wire=stdio']
+#       env:
+#         APP_TENANT: !!env APP_TENANT

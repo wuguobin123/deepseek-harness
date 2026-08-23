@@ -1,0 +1,6 @@
+# Patch overlay reserved for `@deepseek-ai/dsh-ops-workbench-trigger`. The plugin
+# is a no-op skeleton until the first scenario that needs cross-session reminders
+# is接入ed; uncomment the row below when the global trigger implementation lands.
+#
+# - id: ops-workbench-trigger
+#   name: '@deepseek-ai/dsh-ops-workbench-trigger'

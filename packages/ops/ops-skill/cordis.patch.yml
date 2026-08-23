@@ -1,0 +1,7 @@
+# Patch overlay for `@deepseek-ai/dsh-ops-skill`. The plugin scans the
+# bundled `skills/` directory and registers every entry on `ctx.skills`.
+# Add scenarios by dropping directories under `skills/`; no patch change
+# is needed.
+
+- id: ops-skill
+  name: '@deepseek-ai/dsh-ops-skill'

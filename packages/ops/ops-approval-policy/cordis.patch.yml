@@ -1,0 +1,6 @@
+# Patch overlay reserved for `@deepseek-ai/dsh-ops-approval-policy`. The plugin
+# is a no-op skeleton until the first ops scenario drives the policy resolver;
+# uncomment the row below when that happens.
+#
+# - id: ops-approval-policy
+#   name: '@deepseek-ai/dsh-ops-approval-policy'

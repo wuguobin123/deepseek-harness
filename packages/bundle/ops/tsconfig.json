@@ -1,0 +1,34 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../../vendor/loader" },
+    { "path": "../../../vendor/schemastery" },
+    { "path": "../../core/agent" },
+    { "path": "../../core/agent-default-model" },
+    { "path": "../../llm/llm" },
+    { "path": "../../core/session" },
+    { "path": "../../runtime-diagnostics/invariants" },
+    { "path": "../../boot/cmdline" },
+    { "path": "../../host/webserver" },
+    { "path": "../../ops/ops-domain" },
+    { "path": "../../ops/ops-skill" },
+    { "path": "../../ops/ops-runtime" },
+    { "path": "../../ops/ops-subagent-python" },
+    { "path": "../../ops/ops-platform" },
+    { "path": "../../ops/ops-approval-policy" },
+    { "path": "../../ops/ops-package-signing" },
+    { "path": "../../ops/ops-loop-guard" },
+    { "path": "../../ops/ops-workbench-conversations" },
+    { "path": "../../ops/ops-workbench-memories" },
+    { "path": "../../ops/ops-workbench-trigger" },
+    { "path": "../../ops/ops-workbench-anomaly" }
+  ]
+}
