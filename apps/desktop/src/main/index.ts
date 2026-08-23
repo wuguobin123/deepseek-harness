@@ -51,7 +51,7 @@ async function bootstrap(): Promise<void> {
   await app.whenReady()
   registerSecurityHeaders()
 
-  const credentialStore = new CredentialStore()
+  const credentialStore = new CredentialStore(DEFAULT_BASE_URL)
   await credentialStore.load()
 
   const apiClient = new ApiClient({

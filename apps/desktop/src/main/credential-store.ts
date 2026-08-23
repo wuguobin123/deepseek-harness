@@ -15,7 +15,6 @@ import path from 'node:path'
 
 const CREDENTIAL_FILENAME = 'credentials.bin'
 const CREDENTIAL_VERSION = 2
-const DEFAULT_BASE_URL = 'http://127.0.0.1:18000'
 
 interface PersistedCredentials {
   version: number
@@ -32,7 +31,11 @@ export interface Credentials {
 }
 
 export class CredentialStore {
-  private cache: Credentials = { baseUrl: DEFAULT_BASE_URL }
+  private cache: Credentials
+
+  constructor(private readonly defaultBaseUrl: string) {
+    this.cache = { baseUrl: defaultBaseUrl }
+  }
 
   private filePath(): string {
     return path.join(app.getPath('userData'), CREDENTIAL_FILENAME)
@@ -42,19 +45,19 @@ export class CredentialStore {
     try {
       const raw = await fsp.readFile(this.filePath())
       if (!safeStorage.isEncryptionAvailable()) {
-        this.cache = { baseUrl: DEFAULT_BASE_URL }
+        this.cache = { baseUrl: this.defaultBaseUrl }
         return this.cache
       }
       const plain = safeStorage.decryptString(raw)
       const parsed = JSON.parse(plain) as PersistedCredentials
       if (typeof parsed?.baseUrl !== 'string' || parsed.baseUrl.length === 0) {
-        this.cache = { baseUrl: DEFAULT_BASE_URL }
+        this.cache = { baseUrl: this.defaultBaseUrl }
         return this.cache
       }
       this.cache = { baseUrl: parsed.baseUrl }
       return this.cache
     } catch {
-      this.cache = { baseUrl: DEFAULT_BASE_URL }
+      this.cache = { baseUrl: this.defaultBaseUrl }
       return this.cache
     }
   }
