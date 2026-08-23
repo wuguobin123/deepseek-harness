@@ -1,130 +1,150 @@
 /**
- * Generic SSE proxy for the two dsh stream carriers (`/api/events.mux`,
- * `/api/events.host`). The server emits `data:` lines whose body is a
- * ServerRequest envelope `{ type:'server-request', rpcId, method, payload }`;
- * `: connected` keepalive comments are skipped without disturbing parsing.
+ * Generic WebSocket downlink for the two dsh stream carriers
+ * (`/api/events.mux`, `/api/events.host`).
  *
- * Heartbeat: a fresh `data:` line (or the first comment byte) resets an idle
- * timeout; idle streams abort with a typed `SseStreamError`. Mid-stream impl
- * failures on the server emit one `stream/error` frame and then close (the
- * host's contract), so consumers see failures instead of silent disconnects.
+ * The host exposes these paths as WebSocket-upgrade routes — plain GET
+ * returns 426 Upgrade Required (see `packages/client/connection/src/index.ts`
+ * line 150 and `websocket-downlink.ts`). Each message is one JSON
+ * `ServerRequest` envelope `{ type:'server-request', rpcId, method, payload }`.
+ *
+ * Idle streams abort with a typed `WsStreamError`; consumers see failures
+ * instead of silent disconnects. The host never sends mid-stream `stream/error`
+ * frames — a frame whose `payload.type === 'stream/error'` is what an
+ * upstream impl failure becomes on the wire, so we surface it as a parse
+ * success and let the IPC handler fan it out like any other frame.
  */
+import WebSocket from 'ws'
 import { ServerRequestSchema } from '../shared/contracts'
 
-export class SseStreamError extends Error {
-  readonly code: 'NETWORK_ERROR' | 'STREAM_IDLE' | 'BAD_FRAME' | `HTTP_${number}`
-  readonly status: number
-  constructor(code: SseStreamError['code'], message: string, status = 0) {
+export class WsStreamError extends Error {
+  readonly code: 'NETWORK_ERROR' | 'STREAM_IDLE' | 'BAD_FRAME'
+  constructor(code: WsStreamError['code'], message: string) {
     super(message)
-    this.name = 'SseStreamError'
+    this.name = 'WsStreamError'
     this.code = code
-    this.status = status
   }
 }
 
-export interface OpenSseStreamOptions {
+export interface OpenWsStreamOptions {
   /** Idle timeout before the stream is treated as dead. */
   idleTimeoutMs?: number
-  fetchImpl?: typeof fetch
   signal?: AbortSignal
 }
 
 const DEFAULT_IDLE_TIMEOUT_MS = 90_000
 
-export async function* openSseStream(
+export async function* openWsStream(
   url: string,
-  fetchImpl: typeof fetch = fetch,
-  signal?: AbortSignal,
+  options: OpenWsStreamOptions = {},
 ): AsyncGenerator<{ rpcId: string; method: string; payload: unknown }> {
-  const opts: OpenSseStreamOptions = { fetchImpl, signal }
-  yield* openSseStreamInner(url, opts)
-}
+  const idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS
+  const externalSignal = options.signal
+  const socket = new WebSocket(url)
 
-async function* openSseStreamInner(
-  url: string,
-  opts: OpenSseStreamOptions,
-): AsyncGenerator<{ rpcId: string; method: string; payload: unknown }> {
-  const fetchImpl = opts.fetchImpl ?? fetch
-  const idleTimeoutMs = opts.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS
-  const controller = new AbortController()
-  if (opts.signal) {
-    if (opts.signal.aborted) controller.abort()
-    else opts.signal.addEventListener('abort', () => controller.abort(), { once: true })
-  }
+  // The ws library closes when you set readyState to CLOSED via .close(); the
+  // first emit of 'message' tells us the handshake succeeded.
+  const opened = new Promise<void>((resolve, reject) => {
+    const onOpen = (): void => {
+      cleanup()
+      resolve()
+    }
+    const onError = (err: Error): void => {
+      cleanup()
+      reject(err)
+    }
+    const cleanup = (): void => {
+      socket.off('open', onOpen)
+      socket.off('error', onError)
+    }
+    socket.once('open', onOpen)
+    socket.once('error', onError)
+  })
 
-  let response: Response
   try {
-    response = await fetchImpl(url, {
-      method: 'GET',
-      headers: { accept: 'text/event-stream' },
-      signal: controller.signal,
-    })
+    await opened
   } catch (err) {
-    throw new SseStreamError('NETWORK_ERROR', `SSE handshake failed: ${String(err)}`)
-  }
-  if (!response.ok || !response.body) {
-    throw new SseStreamError(`HTTP_${response.status}` as const, `SSE handshake failed: HTTP ${response.status}`, response.status)
+    try { socket.terminate() } catch { /* already gone */ }
+    throw new WsStreamError('NETWORK_ERROR', `WS handshake failed: ${String(err)}`)
   }
 
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
+  // Queue frames as they arrive; the async generator drains it. We can't
+  // await each emit because the generator runs in the consumer's tick.
+  const queue: Array<{ rpcId: string; method: string; payload: unknown }> = []
+  const waiters: Array<(value: IteratorResult<{ rpcId: string; method: string; payload: unknown }>) => void> = []
+  let closed = false
+  let failure: Error | null = null
+
   let idleTimer: ReturnType<typeof setTimeout> | null = null
-  const resetIdle = () => {
+  const resetIdle = (): void => {
     if (idleTimer) clearTimeout(idleTimer)
-    idleTimer = setTimeout(() => controller.abort(), idleTimeoutMs)
+    idleTimer = setTimeout(() => {
+      failure = new WsStreamError('STREAM_IDLE', `WS stream idle for ${idleTimeoutMs}ms`)
+      socket.terminate()
+    }, idleTimeoutMs)
   }
+
+  const deliver = (frame: { rpcId: string; method: string; payload: unknown } | null): void => {
+    const waiter = waiters.shift()
+    if (waiter) {
+      waiter(frame === null ? { value: undefined, done: true } : { value: frame, done: false })
+      return
+    }
+    if (frame !== null) queue.push(frame)
+  }
+
+  socket.on('message', (raw: WebSocket.RawData) => {
+    resetIdle()
+    let parsed: { rpcId: string; method: string; payload?: unknown }
+    try {
+      const json = JSON.parse(raw.toString('utf8'))
+      parsed = ServerRequestSchema.parse(json)
+    } catch (err) {
+      failure = new WsStreamError('BAD_FRAME', `WS data is not a ServerRequest: ${String(err)}`)
+      socket.terminate()
+      return
+    }
+    deliver({ rpcId: parsed.rpcId, method: parsed.method, payload: parsed.payload ?? null })
+  })
+  socket.on('close', () => {
+    closed = true
+    deliver(null)
+  })
+  socket.on('error', (err: Error) => {
+    if (!failure) failure = new WsStreamError('NETWORK_ERROR', `WS stream error: ${err.message}`)
+    closed = true
+    deliver(null)
+  })
+
   resetIdle()
+
+  if (externalSignal) {
+    const onAbort = (): void => {
+      try { socket.close() } catch { /* ignore */ }
+    }
+    if (externalSignal.aborted) onAbort()
+    else externalSignal.addEventListener('abort', onAbort, { once: true })
+  }
 
   try {
     while (true) {
-      const next = await reader.read()
-      if (next.done) return
-      resetIdle()
-      buffer += decoder.decode(next.value, { stream: true })
-      let boundary = findBoundary(buffer)
-      while (boundary) {
-        const frame = buffer.slice(0, boundary.index)
-        buffer = buffer.slice(boundary.index + boundary.length)
-        const parsed = parseFrame(frame)
-        if (parsed) yield parsed
-        boundary = findBoundary(buffer)
+      if (failure) throw failure
+      if (queue.length > 0) {
+        const next = queue.shift() as { rpcId: string; method: string; payload: unknown }
+        yield next
+        continue
       }
+      if (closed) return
+      const next = await new Promise<IteratorResult<{ rpcId: string; method: string; payload: unknown }>>((resolve) => {
+        waiters.push(resolve)
+      })
+      if (next.done) {
+        if (failure) throw failure
+        return
+      }
+      yield next.value
     }
-  } catch (err) {
-    if (controller.signal.aborted && opts.signal?.aborted) return
-    throw new SseStreamError('STREAM_IDLE', `SSE stream interrupted: ${String(err)}`)
   } finally {
     if (idleTimer) clearTimeout(idleTimer)
-    try {
-      reader.releaseLock()
-    } catch {
-      // already released
-    }
+    try { socket.close() } catch { /* ignore */ }
   }
-}
-
-function findBoundary(value: string): { index: number; length: number } | null {
-  const match = /\r?\n\r?\n/.exec(value)
-  return match ? { index: match.index, length: match[0].length } : null
-}
-
-function parseFrame(frame: string): { rpcId: string; method: string; payload: unknown } | null {
-  const dataLines: string[] = []
-  for (const rawLine of frame.split(/\r?\n/)) {
-    if (!rawLine || rawLine.startsWith(':')) continue
-    if (rawLine.startsWith('data:')) {
-      dataLines.push(rawLine.slice(5).trimStart())
-    }
-  }
-  if (dataLines.length === 0) return null
-  const value = dataLines.join('\n')
-  let json: unknown
-  try {
-    json = JSON.parse(value)
-  } catch {
-    throw new SseStreamError('BAD_FRAME', 'SSE data line is not JSON')
-  }
-  const parsed = ServerRequestSchema.parse(json)
-  return { rpcId: parsed.rpcId, method: parsed.method, payload: parsed.payload }
 }

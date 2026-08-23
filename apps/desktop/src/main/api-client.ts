@@ -15,11 +15,10 @@
  */
 import { URL } from 'node:url'
 import { randomUUID } from 'node:crypto'
-import { z } from 'zod'
 import type { ClientRequest, ClientResponse, ServerResponse } from '../shared/contracts'
 import { ClientRequestSchema, ClientResponseSchema, ServerResponseSchema } from '../shared/contracts'
 import type { Credentials } from './credential-store'
-import { openSseStream } from './sse-proxy'
+import { openWsStream } from './sse-proxy'
 
 export interface ApiClientOptions {
   baseUrl: string
@@ -151,16 +150,28 @@ export class ApiClient {
     }
   }
 
-  /** Open GET /api/events.mux and yield parsed ServerRequest envelopes. */
+  /** Open WS /api/events.mux and yield parsed ServerRequest envelopes. */
   streamMux(signal?: AbortSignal): AsyncIterable<{ rpcId: string; method: string; payload: unknown }> {
-    return openSseStream(`${this.baseUrl}/api/events.mux`, this.fetchImpl, signal)
+    return openWsStream(toWebSocketUrl(`${this.baseUrl}/api/events.mux`), { signal })
   }
 
-  /** Open GET /api/events.host and yield parsed ServerRequest envelopes. */
+  /** Open WS /api/events.host and yield parsed ServerRequest envelopes. */
   streamHost(signal?: AbortSignal): AsyncIterable<{ rpcId: string; method: string; payload: unknown }> {
-    return openSseStream(`${this.baseUrl}/api/events.host`, this.fetchImpl, signal)
+    return openWsStream(toWebSocketUrl(`${this.baseUrl}/api/events.host`), { signal })
   }
 }
 
 /** Identity helper: credentials are read directly via snapshot() in the index. */
 export type { Credentials }
+
+/**
+ * Translate an `http(s)://host:port/path` base into the equivalent `ws(s)://`
+ * URL. The host's WebSocket downlinks live under the same origin as the RPC
+ * POST routes; nginx (or another trusted reverse proxy in front of dsh-ops)
+ * must forward the upgrade headers unchanged.
+ */
+function toWebSocketUrl(httpUrl: string): string {
+  const parsed = new URL(httpUrl)
+  parsed.protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:'
+  return parsed.toString()
+}
