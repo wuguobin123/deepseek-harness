@@ -7,6 +7,8 @@ description: 打包并发布 dsh Electron 桌面客户端（DeepSeek Harness.app
 
 Electron 客户端在 `apps/desktop/`。前端 dsh RPC + MuxFrame/HostFrame envelope 由 `apps/desktop/src/shared/contracts.ts` 描述，后端契约在 `packages/host/apiproxy/`。后端部署走 [`dsh-deploy`](../dsh-deploy/SKILL.md)；本 skill 只覆盖桌面端。
 
+> **前置：dsh-ops nginx 必须转发 WebSocket 升级**。`/api/events.mux` 与 `/api/events.host` 是 WebSocket 下行链路（见 `packages/client/connection/src/websocket-downlink.ts`）。nginx 必须在 `/` catch-all location 里加 `proxy_set_header Upgrade $http_upgrade;` 与 `proxy_set_header Connection "upgrade";`，否则会自己回 `HTTP 426 Upgrade Required`，永远到不了后端。已配置于 `/etc/nginx/conf.d/xiaowei-workbench.conf`（:80 + :18080 两个 server）。
+
 ## 一键发布（首选）
 
 仓库根目录执行：
@@ -15,7 +17,7 @@ Electron 客户端在 `apps/desktop/`。前端 dsh RPC + MuxFrame/HostFrame enve
 # 1. 打包四个目标产物
 apps/desktop/scripts/package-release.sh
 
-# 2. 发布到 dsh-ops host（默认 root@119.45.252.25:/var/lib/dsh-ops/releases）
+# 2. 发布到 dsh-ops host（默认 root@119.45.252.25:/var/lib/xiaowei-workbench/releases）
 apps/desktop/scripts/publish-client-release.sh
 
 # 或一条龙：先 --dry-run 验证产物与目标
@@ -38,7 +40,7 @@ apps/desktop/scripts/publish-client-release.sh --dry-run
                                           │
                                           ▼
               ┌────────────────────────────────────────────┐
-              │ /var/lib/dsh-ops/releases/                 │
+              │ /var/lib/xiaowei-workbench/releases/        │
               │   DeepSeek Harness-<ver>-arm64.dmg         │
               │   DeepSeek Harness-<ver>-x64.dmg           │
               │   DeepSeek Harness-<ver>-x64.exe           │
@@ -106,7 +108,7 @@ ssh $DEPLOY_SSH 'cd /var/lib/dsh-ops/releases && ln -sf <real> latest-*'
 ```
 
 - `DEPLOY_SSH` 默认 `root@119.45.252.25`。
-- `RELEASES_DIR` 默认 `/var/lib/dsh-ops/releases`。
+- `RELEASES_DIR` 默认 `/var/lib/xiaowei-workbench/releases`（nginx `location /releases/` 的 `alias` 目标；旧的 `/var/lib/dsh-ops/releases` 不存在且未被 nginx 引用）。
 - 必须免密 SSH（密钥或 ssh-agent）。脚本用 `BatchMode=yes`，交互输密码会直接失败——先 `ssh $DEPLOY_SSH true` 验证。
 - 软链 `latest-mac-arm64.dmg` 等是 install-mac.sh / install-win.bat 的稳定下载入口。
 - `latest.json` 是 update-checker stub 的未来消费契约（version + files 字典 + notes）。

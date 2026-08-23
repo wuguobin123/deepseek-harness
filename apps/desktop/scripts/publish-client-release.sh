@@ -22,7 +22,7 @@
 set -euo pipefail
 
 DEPLOY_SSH="${DEPLOY_SSH:-root@119.45.252.25}"
-RELEASES_DIR="${RELEASES_DIR:-/var/lib/dsh-ops/releases}"
+RELEASES_DIR="${RELEASES_DIR:-/var/lib/xiaowei-workbench/releases}"
 RELEASE_NOTES="${RELEASE_NOTES:-}"
 COS_BUCKET="${COS_BUCKET:-wgb123-1257121815}"
 COS_REGION="${COS_REGION:-ap-beijing}"
