@@ -1,292 +1,166 @@
 /**
- * Main-process HTTP client.
+ * Main-process RPC + SSE client for dsh-ops.
  *
- * Adds X-API-Key, X-Tenant-ID, X-Actor-ID, Idempotency-Key and X-Expected-Version
- * to every request. Retries idempotent methods (GET/PUT) with exponential backoff
- * for transient 5xx / network errors. Streams responses for SSE consumers.
+ * Two surfaces:
+ *  - `call<T>(method, payload)` → POST `/api/<method>` with a `ClientRequest`
+ *    envelope; validates the `ServerResponse` and returns the unwrapped value
+ *    or throws an `RpcError`.
+ *  - `streamMux()` / `streamHost()` → open `GET /api/events.mux` or
+ *    `/api/events.host` and yield parsed frames via the shared sse-proxy.
+ *
+ * Trust: no auth headers are sent. The dsh-ops trust fence
+ * (`dsh-client-connection.trustedHosts`) is the access boundary; requests
+ * whose Host header isn't in the allow-list are rejected before reaching
+ * the RPC dispatcher.
  */
-import { URL } from 'node:url';
-import { Credentials } from './credential-store';
-import { mapWorkbenchResponse } from './wire-mappers';
+import { URL } from 'node:url'
+import { randomUUID } from 'node:crypto'
+import { z } from 'zod'
+import type { ClientRequest, ClientResponse, ServerResponse } from '../shared/contracts'
+import { ClientRequestSchema, ClientResponseSchema, ServerResponseSchema } from '../shared/contracts'
+import type { Credentials } from './credential-store'
+import { openSseStream } from './sse-proxy'
 
 export interface ApiClientOptions {
-  baseUrl: string;
-  credentials: () => Credentials;
-  fetchImpl?: typeof fetch;
-  maxRetries?: number;
-  retryBaseMs?: number;
-  requestTimeoutMs?: number;
-}
-
-export interface ApiRequestOptions {
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
-  path: string;
-  body?: unknown;
-  idempotencyKey?: string;
-  expectedVersion?: number;
-  timeoutMs?: number;
-  signal?: AbortSignal;
-}
-
-export interface ApiResponse<T = unknown> {
-  status: number;
-  body: T;
-}
-
-export interface ApiSseEvent<T = unknown> {
-  event: string;
-  data: T;
-}
-
-const IDEMPOTENT_METHODS = new Set(['GET', 'PUT', 'HEAD', 'OPTIONS']);
-
-export class ApiClient {
-  private baseUrl: string;
-  private readonly getCredentials: () => Credentials;
-  private readonly fetchImpl: typeof fetch;
-  private readonly maxRetries: number;
-  private readonly retryBaseMs: number;
-  private readonly requestTimeoutMs: number;
-
-  constructor(options: ApiClientOptions) {
-    this.baseUrl = ApiClient.normalizeBaseUrl(options.baseUrl);
-    this.getCredentials = options.credentials;
-    this.fetchImpl = options.fetchImpl ?? fetch;
-    this.maxRetries = options.maxRetries ?? 3;
-    this.retryBaseMs = options.retryBaseMs ?? 250;
-    this.requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
-  }
-
-  setBaseUrl(baseUrl: string): void {
-    this.baseUrl = ApiClient.normalizeBaseUrl(baseUrl);
-  }
-
-  getBaseUrl(): string {
-    return this.baseUrl;
-  }
-
-  private static normalizeBaseUrl(baseUrl: string): string {
-    return baseUrl.replace(/\/$/, '');
-  }
-
-  private buildHeaders(idempotencyKey?: string, expectedVersion?: number): Record<string, string> {
-    const headers: Record<string, string> = {
-      Accept: 'application/json'
-    };
-    const creds = this.getCredentials();
-    if (creds.apiKey) headers['X-API-Key'] = creds.apiKey;
-    if (creds.tenantId) headers['X-Tenant-ID'] = creds.tenantId;
-    if (creds.actorId) headers['X-Actor-ID'] = creds.actorId;
-    if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
-    if (typeof expectedVersion === 'number') {
-      headers['If-Match'] = String(expectedVersion);
-      headers['X-Expected-Version'] = String(expectedVersion);
-    }
-    return headers;
-  }
-
-  async request<T = unknown>(options: ApiRequestOptions): Promise<ApiResponse<T>> {
-    const url = new URL(options.path, this.baseUrl).toString();
-    const headers = this.buildHeaders(options.idempotencyKey, options.expectedVersion);
-    let body: string | FormData | undefined;
-    if (options.body !== undefined && options.body !== null) {
-      if (options.body instanceof FormData) {
-        // fetch adds the multipart boundary. Setting Content-Type manually
-        // would make the boundary invalid.
-        body = options.body;
-      } else {
-        headers['Content-Type'] = 'application/json';
-        body = JSON.stringify(options.body);
-      }
-    }
-
-    let lastError: unknown;
-    for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
-      const controller = new AbortController();
-      const timeout = setTimeout(
-        () => controller.abort(),
-        options.timeoutMs ?? this.requestTimeoutMs
-      );
-      const signal = options.signal
-        ? composeSignals(controller.signal, options.signal)
-        : controller.signal;
-      try {
-        const res = await this.fetchImpl(url, {
-          method: options.method,
-          headers,
-          body,
-          signal
-        });
-        clearTimeout(timeout);
-
-        const text = await res.text();
-        let parsed: unknown = null;
-        if (text) {
-          try {
-            parsed = JSON.parse(text);
-          } catch {
-            parsed = text;
-          }
-        }
-
-        if (res.status >= 500 && IDEMPOTENT_METHODS.has(options.method) && attempt < this.maxRetries) {
-          await sleep(backoff(this.retryBaseMs, attempt));
-          continue;
-        }
-
-        return {
-          status: res.status,
-          body: mapWorkbenchResponse(
-            options.path,
-            options.method,
-            parsed,
-            res.status
-          ) as T
-        };
-      } catch (err) {
-        clearTimeout(timeout);
-        lastError = err;
-        if (!IDEMPOTENT_METHODS.has(options.method) || attempt >= this.maxRetries) break;
-        await sleep(backoff(this.retryBaseMs, attempt));
-      }
-    }
-    throw new ApiClientError('NETWORK_ERROR', 'request failed', 0, lastError);
-  }
-
-  async streamSse<T = unknown>(
-    options: ApiRequestOptions,
-    listener: (event: ApiSseEvent<T>) => void
-  ): Promise<void> {
-    const url = new URL(options.path, this.baseUrl).toString();
-    const headers = this.buildHeaders(
-      options.idempotencyKey,
-      options.expectedVersion
-    );
-    headers.Accept = 'text/event-stream';
-    let body: string | undefined;
-    if (options.body !== undefined && options.body !== null) {
-      headers['Content-Type'] = 'application/json';
-      body = JSON.stringify(options.body);
-    }
-    const controller = new AbortController();
-    const idleTimeoutMs = options.timeoutMs ?? Math.max(this.requestTimeoutMs, 90_000);
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    const resetIdleTimeout = () => {
-      if (timeout !== undefined) clearTimeout(timeout);
-      timeout = setTimeout(() => controller.abort(), idleTimeoutMs);
-    };
-    resetIdleTimeout();
-    const signal = options.signal
-      ? composeSignals(controller.signal, options.signal)
-      : controller.signal;
-    try {
-      const response = await this.fetchImpl(url, {
-        method: options.method,
-        headers,
-        body,
-        signal
-      });
-      if (!response.ok || !response.body) {
-        const message = await response.text().catch(() => '');
-        throw new ApiClientError(
-          `HTTP_${response.status}`,
-          message || `stream handshake failed: ${response.status}`,
-          response.status
-        );
-      }
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let streamEnded = false;
-      while (!streamEnded) {
-        const next = await reader.read();
-        if (next.done) {
-          streamEnded = true;
-          continue;
-        }
-        const { value } = next;
-        resetIdleTimeout();
-        buffer += decoder.decode(value, { stream: true });
-        let boundary = findSseBoundary(buffer);
-        while (boundary) {
-          const frame = buffer.slice(0, boundary.index);
-          buffer = buffer.slice(boundary.index + boundary.length);
-          const parsed = parseSseFrame(frame);
-          if (parsed) {
-            listener({
-              event: parsed.event,
-              data: mapWorkbenchResponse(
-                options.path,
-                options.method,
-                parsed.data,
-                response.status
-              ) as T
-            });
-          }
-          boundary = findSseBoundary(buffer);
-        }
-      }
-    } finally {
-      if (timeout !== undefined) clearTimeout(timeout);
-    }
-  }
+  baseUrl: string
+  fetchImpl?: typeof fetch
+  requestTimeoutMs?: number
 }
 
 export class ApiClientError extends Error {
-  readonly code: string;
-  readonly status: number;
-  override readonly cause?: unknown;
-  constructor(code: string, message: string, status: number, cause?: unknown) {
-    super(message);
-    this.name = 'ApiClientError';
-    this.code = code;
-    this.status = status;
-    this.cause = cause;
+  readonly code: string
+  readonly status: number
+  readonly rpcMethod: string
+  override readonly cause?: unknown
+  constructor(rpcMethod: string, code: string, message: string, status: number, cause?: unknown) {
+    super(message)
+    this.name = 'ApiClientError'
+    this.code = code
+    this.status = status
+    this.rpcMethod = rpcMethod
+    this.cause = cause
   }
 }
 
-function backoff(base: number, attempt: number): number {
-  return Math.min(base * 2 ** attempt, 5_000);
-}
+export class ApiClient {
+  private baseUrl: string
+  private readonly fetchImpl: typeof fetch
+  private readonly requestTimeoutMs: number
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+  constructor(options: ApiClientOptions) {
+    this.baseUrl = ApiClient.normalizeBaseUrl(options.baseUrl)
+    this.fetchImpl = options.fetchImpl ?? fetch
+    this.requestTimeoutMs = options.requestTimeoutMs ?? 30_000
+  }
 
-function composeSignals(a: AbortSignal, b: AbortSignal): AbortSignal {
-  const controller = new AbortController();
-  const onAbort = () => controller.abort();
-  a.addEventListener('abort', onAbort);
-  b.addEventListener('abort', onAbort);
-  if (a.aborted || b.aborted) controller.abort();
-  return controller.signal;
-}
+  setBaseUrl(baseUrl: string): void {
+    this.baseUrl = ApiClient.normalizeBaseUrl(baseUrl)
+  }
 
-function findSseBoundary(
-  value: string
-): { index: number; length: number } | null {
-  const match = /\r?\n\r?\n/.exec(value);
-  return match ? { index: match.index, length: match[0].length } : null;
-}
+  getBaseUrl(): string {
+    return this.baseUrl
+  }
 
-function parseSseFrame(
-  frame: string
-): { event: string; data: unknown } | null {
-  let event = 'message';
-  const data: string[] = [];
-  for (const rawLine of frame.split(/\r?\n/)) {
-    if (!rawLine || rawLine.startsWith(':')) continue;
-    if (rawLine.startsWith('event:')) {
-      event = rawLine.slice(6).trim();
-    } else if (rawLine.startsWith('data:')) {
-      data.push(rawLine.slice(5).trimStart());
+  private static normalizeBaseUrl(baseUrl: string): string {
+    return baseUrl.replace(/\/$/, '')
+  }
+
+  /**
+   * POST `/api/<method>` with a `ClientRequest` envelope; returns the
+   * unwrapped `value` or throws `ApiClientError` on protocol/business failure.
+   * Business-layer second parse (the `value` shape) is the caller's job.
+   */
+  async call<T = unknown>(method: string, payload: unknown): Promise<T> {
+    const envelope: ClientRequest = {
+      type: 'client-request',
+      rpcId: randomUUID(),
+      method,
+      payload,
+    }
+    ClientRequestSchema.parse(envelope)
+    const url = `${this.baseUrl}/api/${method}`
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), this.requestTimeoutMs)
+    let response: Response
+    try {
+      response = await this.fetchImpl(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(envelope),
+        signal: controller.signal,
+      })
+    } catch (err) {
+      clearTimeout(timer)
+      throw new ApiClientError(method, 'NETWORK_ERROR', 'request failed', 0, err)
+    }
+    clearTimeout(timer)
+    const text = await response.text()
+    let parsedJson: unknown = null
+    if (text) {
+      try {
+        parsedJson = JSON.parse(text)
+      } catch {
+        throw new ApiClientError(method, `HTTP_${response.status}`, text, response.status)
+      }
+    }
+    if (!response.ok) {
+      throw new ApiClientError(method, `HTTP_${response.status}`, text || `HTTP ${response.status}`, response.status)
+    }
+    let parsed: ServerResponse
+    try {
+      parsed = ServerResponseSchema.parse(parsedJson)
+    } catch (err) {
+      throw new ApiClientError(method, 'BAD_RESPONSE', 'server response did not match ServerResponse schema', response.status, err)
+    }
+    if (parsed.rpcId !== envelope.rpcId) {
+      throw new ApiClientError(method, 'BAD_RESPONSE', 'rpcId mismatch', response.status)
+    }
+    if (parsed.result.ok) {
+      return parsed.result.value as T
+    }
+    const error = parsed.result.error
+    throw new ApiClientError(method, error.code, error.message, response.status, error)
+  }
+
+  /**
+   * POST `/api/respond` with a `ClientResponse` envelope (the answer to a
+   * server-request frame like `approval/requested`). The host returns a
+   * carrier receipt (`accepted: true | false`).
+   */
+  async respond(envelope: ClientResponse): Promise<void> {
+    ClientResponseSchema.parse(envelope)
+    const url = `${this.baseUrl}/api/respond`
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), this.requestTimeoutMs)
+    let response: Response
+    try {
+      response = await this.fetchImpl(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(envelope),
+        signal: controller.signal,
+      })
+    } catch (err) {
+      clearTimeout(timer)
+      throw new ApiClientError('respond', 'NETWORK_ERROR', 'request failed', 0, err)
+    }
+    clearTimeout(timer)
+    if (!response.ok) {
+      const text = await response.text()
+      throw new ApiClientError('respond', `HTTP_${response.status}`, text || `HTTP ${response.status}`, response.status)
     }
   }
-  if (data.length === 0) return null;
-  const value = data.join('\n');
-  try {
-    return { event, data: JSON.parse(value) };
-  } catch {
-    return { event, data: value };
+
+  /** Open GET /api/events.mux and yield parsed ServerRequest envelopes. */
+  streamMux(signal?: AbortSignal): AsyncIterable<{ rpcId: string; method: string; payload: unknown }> {
+    return openSseStream(`${this.baseUrl}/api/events.mux`, this.fetchImpl, signal)
+  }
+
+  /** Open GET /api/events.host and yield parsed ServerRequest envelopes. */
+  streamHost(signal?: AbortSignal): AsyncIterable<{ rpcId: string; method: string; payload: unknown }> {
+    return openSseStream(`${this.baseUrl}/api/events.host`, this.fetchImpl, signal)
   }
 }
+
+/** Identity helper: credentials are read directly via snapshot() in the index. */
+export type { Credentials }

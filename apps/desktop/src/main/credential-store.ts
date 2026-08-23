@@ -1,135 +1,81 @@
 /**
- * Credential store. Wraps Electron's `safeStorage` to encrypt the API key at
- * rest. On macOS the encrypted blob is written to a 0600 file under
- * `app.getPath('userData')`. On platforms without `safeStorage` (rare on
- * supported platforms), we fall back to refusing to persist — the user must
- * re-enter the key each session.
+ * Credential store. Persists the dsh-ops baseUrl at rest via Electron's
+ * `safeStorage`. v1 records (my-agents apiKey/tenantId/actorId) are loaded
+ * once and discarded on read; the only field v2 keeps is baseUrl.
+ *
+ * Trust: the desktop client talks to dsh-ops over loopback (or the nginx
+ * fronting it) and the trust fence on `dsh-client-connection` requires the
+ * request Host to match one of `trustedHosts` (`127.0.0.1`, `localhost`,
+ * `119.45.252.25`, `xiaowei.119.45.252.25.nip.io`). No auth headers are sent —
+ * the trust fence is the access boundary.
  */
-import { app, safeStorage } from 'electron';
-import { promises as fs } from 'node:fs';
-import { promises as fsp } from 'node:fs';
-import path from 'node:path';
+import { app, safeStorage } from 'electron'
+import { promises as fsp } from 'node:fs'
+import path from 'node:path'
 
-const CREDENTIAL_FILENAME = 'credentials.bin';
-const CREDENTIAL_VERSION = 1;
-const LEGACY_LOCAL_BASE_URLS = new Set([
-  'http://127.0.0.1:8080',
-  'http://localhost:8080',
-  'http://127.0.0.1:8001',
-  'http://localhost:8001'
-]);
-const CURRENT_LOCAL_BASE_URL = 'http://127.0.0.1:8000';
+const CREDENTIAL_FILENAME = 'credentials.bin'
+const CREDENTIAL_VERSION = 2
+const DEFAULT_BASE_URL = 'http://127.0.0.1:18000'
 
 interface PersistedCredentials {
-  version: number;
-  apiKey: string;
-  tenantId: string;
-  actorId: string;
-  baseUrl: string;
-}
-
-function migrateLegacyLocalCredentials(
-  credentials: Credentials
-): Credentials {
-  const normalizedBaseUrl = credentials.baseUrl?.replace(/\/$/, '') ?? null;
-  return {
-    ...credentials,
-    baseUrl:
-      normalizedBaseUrl && LEGACY_LOCAL_BASE_URLS.has(normalizedBaseUrl)
-        ? CURRENT_LOCAL_BASE_URL
-        : credentials.baseUrl
-  };
+  version: number
+  /** Legacy fields (v1); loaded-and-dropped on read so old blobs don't break boot. */
+  apiKey?: string
+  tenantId?: string
+  actorId?: string
+  /** v2: the only field we keep. */
+  baseUrl: string
 }
 
 export interface Credentials {
-  apiKey: string | null;
-  tenantId: string | null;
-  actorId: string | null;
-  baseUrl: string | null;
+  baseUrl: string
 }
 
 export class CredentialStore {
-  private cache: Credentials = {
-    apiKey: null,
-    tenantId: null,
-    actorId: null,
-    baseUrl: null
-  };
+  private cache: Credentials = { baseUrl: DEFAULT_BASE_URL }
 
   private filePath(): string {
-    return path.join(app.getPath('userData'), CREDENTIAL_FILENAME);
+    return path.join(app.getPath('userData'), CREDENTIAL_FILENAME)
   }
 
   async load(): Promise<Credentials> {
     try {
-      const raw = await fsp.readFile(this.filePath());
+      const raw = await fsp.readFile(this.filePath())
       if (!safeStorage.isEncryptionAvailable()) {
-        // We refuse to return an unencrypted key. Treat as no credentials.
-        this.cache = { apiKey: null, tenantId: null, actorId: null, baseUrl: null };
-        return this.cache;
+        this.cache = { baseUrl: DEFAULT_BASE_URL }
+        return this.cache
       }
-      const plain = safeStorage.decryptString(raw);
-      const parsed = JSON.parse(plain) as PersistedCredentials;
-      if (parsed.version !== CREDENTIAL_VERSION) {
-        this.cache = { apiKey: null, tenantId: null, actorId: null, baseUrl: null };
-        return this.cache;
+      const plain = safeStorage.decryptString(raw)
+      const parsed = JSON.parse(plain) as PersistedCredentials
+      if (typeof parsed?.baseUrl !== 'string' || parsed.baseUrl.length === 0) {
+        this.cache = { baseUrl: DEFAULT_BASE_URL }
+        return this.cache
       }
-      const loaded = {
-        apiKey: parsed.apiKey,
-        tenantId: parsed.tenantId,
-        actorId: parsed.actorId,
-        baseUrl: parsed.baseUrl
-      };
-      this.cache = migrateLegacyLocalCredentials(loaded);
-      if (
-        this.cache.baseUrl !== loaded.baseUrl
-      ) {
-        try {
-          await this.save(this.cache);
-        } catch {
-          // Keep the safe in-memory migration even if persistence is
-          // temporarily unavailable; the next successful save will retain it.
-        }
-      }
-      return this.cache;
+      this.cache = { baseUrl: parsed.baseUrl }
+      return this.cache
     } catch {
-      this.cache = { apiKey: null, tenantId: null, actorId: null, baseUrl: null };
-      return this.cache;
+      this.cache = { baseUrl: DEFAULT_BASE_URL }
+      return this.cache
     }
   }
 
   async save(input: Credentials): Promise<void> {
-    if (!input.apiKey) {
-      throw new Error('apiKey is required to save credentials');
-    }
     if (!safeStorage.isEncryptionAvailable()) {
-      throw new Error('safeStorage encryption is not available on this platform');
+      throw new Error('safeStorage encryption is not available on this platform')
     }
     const payload: PersistedCredentials = {
       version: CREDENTIAL_VERSION,
-      apiKey: input.apiKey,
-      tenantId: input.tenantId ?? '',
-      actorId: input.actorId ?? '',
-      baseUrl: input.baseUrl ?? ''
-    };
-    const encrypted = safeStorage.encryptString(JSON.stringify(payload));
-    const target = this.filePath();
-    await fs.mkdir(path.dirname(target), { recursive: true });
-    await fs.writeFile(target, encrypted, { mode: 0o600 });
-    await fs.chmod(target, 0o600);
-    this.cache = input;
-  }
-
-  async clear(): Promise<void> {
-    try {
-      await fsp.unlink(this.filePath());
-    } catch {
-      // ignore — best effort
+      baseUrl: input.baseUrl,
     }
-    this.cache = { apiKey: null, tenantId: null, actorId: null, baseUrl: null };
+    const encrypted = safeStorage.encryptString(JSON.stringify(payload))
+    const target = this.filePath()
+    await fsp.mkdir(path.dirname(target), { recursive: true })
+    await fsp.writeFile(target, encrypted, { mode: 0o600 })
+    await fsp.chmod(target, 0o600)
+    this.cache = { baseUrl: input.baseUrl }
   }
 
   snapshot(): Credentials {
-    return { ...this.cache };
+    return { ...this.cache }
   }
 }
