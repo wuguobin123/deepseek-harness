@@ -1,5 +1,5 @@
 @echo off
-rem Enterprise AI Workbench - Windows one-line installer.
+rem dsh Electron - Windows one-line installer.
 rem
 rem Usage (paste into cmd.exe):
 rem   curl -fsSL -o "%TEMP%\install-win.bat" https://wgb123-1257121815.cos.ap-beijing.myqcloud.com/install-win.bat && call "%TEMP%\install-win.bat"
@@ -18,15 +18,13 @@ rem the console codepage (GBK/UTF-8 garbling).
 
 setlocal EnableDelayedExpansion
 
-set "APP_NAME=Enterprise AI Workbench"
+set "APP_NAME=DeepSeek Harness"
 set "PACKAGE=latest-win-x64.exe"
-set "BASE_URL=%WORKBENCH_RELEASES_URL%"
+set "BASE_URL=%DSH_RELEASES_URL%"
 if not defined BASE_URL set "BASE_URL=https://wgb123-1257121815.cos.ap-beijing.myqcloud.com"
 
 set "INSTALL_DIR=%LOCALAPPDATA%\Programs\%APP_NAME%"
-set "LEGACY_DIR=%LOCALAPPDATA%\Programs\@enterprise-workbenchdesktop"
-set "UPDATER1=%LOCALAPPDATA%\enterprise-ai-workbench-updater"
-set "UPDATER2=%LOCALAPPDATA%\@enterprise-workbenchdesktop-updater"
+set "LEGACY_DIR=%LOCALAPPDATA%\Programs\@deepseek-harnessdesktop"
 
 echo ==^> [1/4] Stopping running instances
 taskkill /F /IM "%APP_NAME%.exe" >nul 2>&1
@@ -81,8 +79,6 @@ goto waitloop
 taskkill /F /IM "%APP_NAME%.exe" >nul 2>&1
 if exist "%INSTALL_DIR%" rd /s /q "%INSTALL_DIR%" >nul 2>&1
 if exist "%LEGACY_DIR%" rd /s /q "%LEGACY_DIR%" >nul 2>&1
-if exist "%UPDATER1%" rd /s /q "%UPDATER1%" >nul 2>&1
-if exist "%UPDATER2%" rd /s /q "%UPDATER2%" >nul 2>&1
 
 echo ==^> [4/4] Downloading and installing %PACKAGE%
 where curl >nul 2>&1

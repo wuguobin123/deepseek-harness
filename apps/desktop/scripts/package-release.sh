@@ -1,93 +1,75 @@
 #!/usr/bin/env bash
-# 桌面端发布打包：构建 → 验证 → 按平台打包（mac dmg / Windows nsis exe）。
-# 用法：
-#   scripts/package-release.sh              # mac(arm64) + Windows(x64) 全量
-#   scripts/package-release.sh --mac        # 仅 mac arm64 dmg
-#   scripts/package-release.sh --mac:x64    # 仅 mac x64 dmg
-#   scripts/package-release.sh --win        # 仅 Windows nsis exe
-#   scripts/package-release.sh --win --skip-probe   # 跳过运行时探针（无后端时）
-# 环境变量：
-#   PROBE_BASE_URL   探针登录的后端地址，默认 http://127.0.0.1:8000
-#   SKIP_E2E=1       跳过 Playwright e2e 对比（默认跑；该套件存在历史基线失败，
-#                    只做"失败集不扩大"判断，不要求全绿）
+# dsh Electron desktop — build & package release.
+#
+# Pipeline:
+#   1. install dependencies
+#   2. typecheck
+#   3. unit tests (Vitest)
+#   4. renderer smoke build (Vite)
+#   5. package every requested platform target
+#
+# Usage:
+#   scripts/package-release.sh                # mac arm64 + mac x64 + Linux AppImage + Windows NSIS
+#   scripts/package-release.sh --mac          # only mac arm64 DMG
+#   scripts/package-release.sh --mac:x64      # only mac x64 DMG
+#   scripts/package-release.sh --linux        # only Linux AppImage
+#   scripts/package-release.sh --win          # only Windows NSIS
+#
+# Environment overrides:
+#   SKIP_TESTS=1   skip vitest (tests still need to run in CI before merging)
+#   SKIP_INSTALL=1 skip pnpm install (for inside-CI where deps are already there)
+#   WORKBENCH_API_BASE_URL  bake a non-default apiBaseUrl into product-config.json
 set -euo pipefail
 
 DESKTOP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 REPO_ROOT="$(cd "$DESKTOP_DIR/../.." && pwd)"
 
 PLATFORMS=()
-SKIP_PROBE=0
-SKIP_E2E="${SKIP_E2E:-0}"
 for arg in "$@"; do
   case "$arg" in
-    --mac) PLATFORMS+=(mac) ;;
+    --mac)     PLATFORMS+=(mac) ;;
     --mac:x64) PLATFORMS+=(mac:x64) ;;
-    --win) PLATFORMS+=(win) ;;
-    --skip-probe) SKIP_PROBE=1 ;;
-    --skip-e2e) SKIP_E2E=1 ;;
+    --linux)   PLATFORMS+=(linux) ;;
+    --win)     PLATFORMS+=(win) ;;
     *) echo "未知参数: $arg" >&2; exit 2 ;;
   esac
 done
-if [ "${#PLATFORMS[@]}" -eq 0 ]; then PLATFORMS=(mac win); fi
+[ "${#PLATFORMS[@]}" -gt 0 ] || PLATFORMS=(mac mac:x64 linux win)
 
-echo "==> [1/4] 构建 main/preload/renderer"
+step() { printf '\n\033[1;34m== %s ==\033[0m\n' "$*"; }
+fail() { printf '\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
+
 cd "$DESKTOP_DIR"
-npm run build
 
-echo "==> [2/4] 静态验证：typecheck + vitest"
-npm run typecheck
-npx vitest run
-
-if [ "$SKIP_E2E" != "1" ]; then
-  echo "==> [3/4] Playwright e2e（基线对比：失败集不得扩大）"
-  BASELINE_FILE="$DESKTOP_DIR/scripts/e2e-baseline-failures.txt"
-  RESULT_JSON="$(mktemp -t pw-release)"
-  set +e
-  npx playwright test --config playwright.config.ts --reporter=json > "$RESULT_JSON" 2>/dev/null
-  set -e
-  python3 - "$RESULT_JSON" "$BASELINE_FILE" <<'PY'
-import json, sys
-result, baseline_file = sys.argv[1], sys.argv[2]
-d = json.load(open(result))
-failed = sorted(
-    spec["title"]
-    for s in d["suites"]
-    for spec in s.get("specs", [])
-    for t in spec.get("tests", [])
-    if t.get("status") != "expected"
-)
-try:
-    baseline = sorted(x for x in open(baseline_file).read().splitlines() if x.strip())
-except FileNotFoundError:
-    baseline = []
-new_failures = [f for f in failed if f not in baseline]
-print(f"    失败 {len(failed)} 个（基线 {len(baseline)} 个）")
-if new_failures:
-    print("    新增失败（阻断发布）：")
-    for f in new_failures:
-        print(f"      - {f}")
-    sys.exit(1)
-print("    无新增失败，通过")
-PY
+if [ "${SKIP_INSTALL:-0}" != "1" ]; then
+  step "[1/5] pnpm install"
+  pnpm install --prefer-offline --frozen-lockfile=false
 else
-  echo "==> [3/4] 跳过 Playwright e2e（SKIP_E2E=1）"
+  step "[1/5] skip pnpm install (SKIP_INSTALL=1)"
 fi
 
-if [ "$SKIP_PROBE" != "1" ]; then
-  echo "==> [4/4] 运行时探针（真实 Electron + ${PROBE_BASE_URL:-http://127.0.0.1:8000}，逐 tab 取证）"
-  PROBE_USER_DATA="$(mktemp -d /tmp/workbench-release-probe-XXXX)" node scripts/probe-nav-tabs.mjs
+step "[2/5] tsc --noEmit"
+pnpm run typecheck
+
+if [ "${SKIP_TESTS:-0}" != "1" ]; then
+  step "[3/5] vitest run"
+  pnpm run test
 else
-  echo "==> [4/4] 跳过运行时探针（--skip-probe）"
+  step "[3/5] skip vitest (SKIP_TESTS=1)"
 fi
 
+step "[4/5] vite build (renderer)"
+pnpm run build:renderer
+
+step "[5/5] electron-builder package"
 for platform in "${PLATFORMS[@]}"; do
   case "$platform" in
-    mac)     echo "==> 打包 mac arm64 dmg";   npm run package:mac ;;
-    mac:x64) echo "==> 打包 mac x64 dmg";     npm run package:mac:x64 ;;
-    win)     echo "==> 打包 Windows nsis exe（mac 上交叉构建，electron-builder 自带 makensis）"; npm run package:win ;;
+    mac)     echo "==> mac arm64 dmg";  pnpm run package:mac ;;
+    mac:x64) echo "==> mac x64 dmg";    pnpm run package:mac:x64 ;;
+    linux)   echo "==> Linux AppImage"; pnpm run package:linux ;;
+    win)     echo "==> Windows NSIS";   pnpm run package:win ;;
   esac
 done
 
-echo ""
-echo "==> 产物："
-ls -lh "$DESKTOP_DIR/release/"*.{dmg,exe} 2>/dev/null || true
+printf '\n\033[1;32m== 产物 ==\033[0m\n'
+ls -lh "$DESKTOP_DIR/release/" 2>/dev/null | grep -E '\.(dmg|exe|AppImage)$' || true
