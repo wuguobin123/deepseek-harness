@@ -1,0 +1,63 @@
+appId: com.enterprise.workbench.desktop
+productName: Enterprise AI Workbench
+copyright: Copyright (c) 2026 Enterprise AI Workbench
+artifactName: ${productName}-${version}-${arch}.${ext}
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - package.json
+  - "!**/*.map"
+  - "!**/*.tsbuildinfo"
+  - "!**/__tests__/**"
+  - "!**/tests/**"
+
+asar: true
+asarUnpack:
+  - "**/*.node"
+
+extraMetadata:
+  main: dist/main/main/index.js
+
+extraResources:
+  - from: dist/product-config.json
+    to: product-config.json
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - dmg
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: false
+
+dmg:
+  title: ${productName}
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  category: Office
+  artifactName: ${productName}-${version}.${ext}
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+publish: null

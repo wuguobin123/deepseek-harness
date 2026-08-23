@@ -1,0 +1,12 @@
+automatically executes a clear natural-language command
+does not expose embedded development credentials to first-time users
+keeps a business workflow inside the conversation workbench
+keeps the user in settings when connection validation fails
+loads the AI workbench home and opens knowledge Q&A
+renders a high-intent summary when an optional source URI is null
+retries a failed assistant request without duplicating the user message
+routes a GitHub URL analysis query through the conversation agent
+routes a GitHub skill install query to the agent instead of opening the URL
+routes a public weather query to realtime data without business clarification
+routes browser wording through the agent instead of a renderer shortcut
+streams an assistant answer before publishing the completed turn
