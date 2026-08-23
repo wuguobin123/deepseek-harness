@@ -1,51 +1,32 @@
 import React from 'react';
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import type { SessionState } from '../shared/contracts';
-import { AnomaliesPage } from './features/anomalies/AnomaliesPage';
-import { AnomalyDetailPage } from './features/anomalies/AnomalyDetailPage';
 import { ApprovalsPage } from './features/approvals/ApprovalsPage';
 import { AssistantPage } from './features/assistant/AssistantPage';
 import { AssistantProvider } from './features/assistant/AssistantContext';
-import { BrowserWorkspaceProvider } from './features/browser/BrowserWorkspaceContext';
-import { DocumentPreviewProvider } from './features/document-preview/DocumentPreviewContext';
-import { AutomationsPage } from './features/automations/AutomationsPage';
 import { HistoryPage } from './features/history/HistoryPage';
-import { IntegrationsPage } from './features/integrations/IntegrationsPage';
-import { KnowledgePage } from './features/knowledge/KnowledgePage';
-import { ResourcesPage } from './features/resources/ResourcesPage';
+import { HomePage } from './features/home/HomePage';
 import { SettingsPage } from './features/settings/SettingsPage';
 import { TasksPage } from './features/tasks/TasksPage';
-import { TelesalesPage } from './features/telesales/TelesalesPage';
-import { TriggersPage } from './features/triggers/TriggersPage';
 import {
   IconApproval,
-  IconBell,
   IconBook,
   IconGear,
   IconHome,
   IconLogo,
-  IconPlay,
-  IconPlug,
-  IconRobot
+  IconPlay
 } from './components/icons';
 import { useSessionStore } from './stores/session';
-import { workbenchApi } from './api';
-import { t } from './i18n';
-import { ToolsLauncher } from './components/ToolsLauncher/ToolsLauncher';
-import { UpdateBadge } from './components/UpdateBadge';
+import * as api from './api';
 
 const NAV_ITEMS = [
   { to: '/', testId: 'nav-home', label: '工作台', Icon: IconHome, end: true },
   { to: '/tasks', testId: 'nav-tasks', label: '任务', Icon: IconPlay },
-  { to: '/approvals', testId: 'nav-approvals', label: '待我处理', Icon: IconApproval }
+  { to: '/approvals', testId: 'nav-approvals', label: '待我处理', Icon: IconApproval },
+  { to: '/history', testId: 'nav-history', label: '历史', Icon: IconBook }
 ] as const;
 
-const RESOURCE_NAV_ITEMS = [
-  { to: '/knowledge', testId: 'nav-knowledge', label: '知识库', Icon: IconBook },
-  { to: '/integrations', testId: 'nav-integrations', label: '业务系统', Icon: IconPlug },
-  { to: '/automations', testId: 'nav-automations', label: '自动化', Icon: IconRobot },
-  { to: '/settings', testId: 'nav-settings', label: '设置', Icon: IconGear }
-] as const;
+const SETTINGS_NAV_ITEM = { to: '/settings', testId: 'nav-settings', label: '设置', Icon: IconGear } as const;
 
 function Shell({ session }: { session: SessionState }): JSX.Element {
   const location = useLocation();
@@ -53,25 +34,21 @@ function Shell({ session }: { session: SessionState }): JSX.Element {
 
   React.useEffect(() => {
     let active = true;
-    void workbenchApi
-      .request({ method: 'GET', path: '/api/context' })
-      .then((response) => {
-        if (active) setServiceOnline(response.status >= 200 && response.status < 400);
-      })
-      .catch(() => {
-        if (active) setServiceOnline(false);
-      });
+    void api.host
+      .describe()
+      .then(() => active && setServiceOnline(true))
+      .catch(() => active && setServiceOnline(false));
     return () => {
       active = false;
     };
-  }, [session.actorId, session.baseUrl, session.hasApiKey, session.tenantId]);
+  }, [session.baseUrl]);
 
   return (
     <div className="shell" data-testid="shell">
       <aside className="sidebar" aria-label="主导航">
         <div className="sidebar__brand">
           <span className="sidebar__logo" aria-hidden="true"><IconLogo size={13} /></span>
-          <h1 className="sidebar__title">{t('app.title')}</h1>
+          <h1 className="sidebar__title">DeepSeek Harness</h1>
         </div>
         <nav className="sidebar__nav">
           <ul className="nav-primary">
@@ -82,7 +59,7 @@ function Shell({ session }: { session: SessionState }): JSX.Element {
                   end={'end' in item ? item.end : false}
                   data-testid={testId}
                   className={({ isActive }) =>
-                    isActive || (to === '/' && location.pathname === '/assistant')
+                    isActive || (to === '/' && location.pathname.startsWith('/assistant'))
                       ? 'active'
                       : undefined
                   }
@@ -93,59 +70,42 @@ function Shell({ session }: { session: SessionState }): JSX.Element {
               </li>
             ))}
           </ul>
-          <span className="nav-section__label">资源与配置</span>
-          <ul className="nav-resources">
-            {RESOURCE_NAV_ITEMS.map(({ to, testId, label, Icon }) => (
-              <li key={to}>
-                <NavLink to={to} data-testid={testId}>
-                  <Icon size={16} />
-                  {label}
-                </NavLink>
-              </li>
-            ))}
-          </ul>
         </nav>
         <div className="sidebar__footer">
-          <span className="sidebar__avatar" aria-hidden="true">
-            {(session.actorId || '?').slice(0, 1).toUpperCase()}
-          </span>
-          <div>
-            <strong title={session.actorId}>{session.actorId}</strong>
-            <small data-testid="session-label" title={`${session.tenantId} · ${session.actorId}`}>
-              {session.tenantId}
-            </small>
+          <NavLink
+            to={SETTINGS_NAV_ITEM.to}
+            data-testid={SETTINGS_NAV_ITEM.testId}
+            className={({ isActive }) => (isActive ? 'sidebar__settings is-active' : 'sidebar__settings')}
+          >
+            <SETTINGS_NAV_ITEM.Icon size={16} />
+            {SETTINGS_NAV_ITEM.label}
+          </NavLink>
+          <div className="sidebar__footer-status" data-testid="service-status">
+            <span className={`service-status ${serviceOnline === false ? 'is-offline' : ''}`}>
+              <i />
+              {serviceOnline === null ? '正在检查服务' : serviceOnline ? '服务正常' : '服务未连接'}
+            </span>
           </div>
-          <span className="sidebar__tenant">当前租户</span>
         </div>
       </aside>
       <div className="workspace">
         <header className="topbar">
-          <span className={`service-status ${serviceOnline === false ? 'is-offline' : ''}`}>
-            <i />
-            {serviceOnline === null ? '正在检查服务' : serviceOnline ? '服务正常' : '服务未连接'}
+          <span className="topbar__title" data-testid="topbar-base-url" title={session.baseUrl}>
+            {session.baseUrl}
           </span>
-          <button type="button" className="topbar__icon" aria-label="通知"><IconBell size={16} /></button>
-          <ToolsLauncher />
-          <UpdateBadge />
         </header>
         <main className="main" data-testid="main">
-          <Routes>
-            <Route path="/" element={<AssistantPage home />} />
-            <Route path="/assistant" element={<AssistantPage />} />
-            <Route path="/tasks" element={<TasksPage />} />
-            <Route path="/approvals" element={<ApprovalsPage />} />
-            <Route path="/telesales" element={<TelesalesPage />} />
-            <Route path="/anomalies" element={<AnomaliesPage />} />
-            <Route path="/anomalies/:id" element={<AnomalyDetailPage />} />
-            <Route path="/automations" element={<AutomationsPage />} />
-            <Route path="/triggers" element={<TriggersPage />} />
-            <Route path="/history" element={<HistoryPage />} />
-            <Route path="/knowledge" element={<KnowledgePage />} />
-            <Route path="/integrations" element={<IntegrationsPage />} />
-            <Route path="/resources" element={<ResourcesPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          <AssistantProvider>
+            <Routes>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/assistant/:sessionId" element={<AssistantPage />} />
+              <Route path="/tasks" element={<TasksPage />} />
+              <Route path="/approvals" element={<ApprovalsPage />} />
+              <Route path="/history" element={<HistoryPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </AssistantProvider>
         </main>
       </div>
     </div>
@@ -165,26 +125,10 @@ export function App(): JSX.Element {
     return (
       <div className="boot" data-testid="boot">
         <span className="spinner" aria-hidden="true" />
-        {t('app.boot.loading')}
+        正在加载…
       </div>
     );
   }
 
-  if (!session.hasApiKey) {
-    return (
-      <div className="boot" data-testid="need-credentials">
-        <SettingsPage embedded />
-      </div>
-    );
-  }
-
-  return (
-    <BrowserWorkspaceProvider>
-      <DocumentPreviewProvider>
-        <AssistantProvider>
-          <Shell session={session} />
-        </AssistantProvider>
-      </DocumentPreviewProvider>
-    </BrowserWorkspaceProvider>
-  );
+  return <Shell session={session} />;
 }

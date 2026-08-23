@@ -1,31 +1,24 @@
+/**
+ * Session store (renderer-side).
+ *
+ * Persists the dsh-ops baseUrl through `workbenchApi.updateSession` and
+ * exposes the current value to the rest of the renderer. Authentication is
+ * out of scope — the desktop client trusts the loopback / `trustedHosts`
+ * fence on `dsh-client-connection`.
+ */
 import { create } from 'zustand';
-import type {
-  AccountAuthentication,
-  SessionState,
-  SessionUpdate
-} from '../../shared/contracts';
-import { workbenchApi } from '../api';
+import type { SessionState } from '../../shared/contracts';
+import * as api from '../api';
 
 interface SessionStoreState {
   initialized: boolean;
   session: SessionState;
   error: string | null;
   refresh: () => Promise<void>;
-  update: (input: SessionUpdate) => Promise<void>;
-  authenticate: (input: AccountAuthentication) => Promise<boolean>;
-  sendVerificationCode: (input: { baseUrl: string; email: string }) => Promise<
-    | { ok: true; expiresInSeconds: number; retryAfterSeconds: number }
-    | { ok: false; retryAfterSeconds: number }
-  >;
-  logout: () => Promise<void>;
+  updateBaseUrl: (baseUrl: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
-const EMPTY_SESSION: SessionState = {
-  tenantId: '',
-  actorId: '',
-  baseUrl: '',
-  hasApiKey: false
-};
+const EMPTY_SESSION: SessionState = { baseUrl: '', version: '2' };
 
 export const useSessionStore = create<SessionStoreState>((set) => ({
   initialized: false,
@@ -33,49 +26,22 @@ export const useSessionStore = create<SessionStoreState>((set) => ({
   error: null,
   async refresh() {
     try {
-      const session = await workbenchApi.getSession();
+      const session = await api.getSession();
       set({ initialized: true, session, error: null });
     } catch (err) {
       set({ initialized: true, session: EMPTY_SESSION, error: (err as Error).message });
     }
   },
-  async update(input: SessionUpdate) {
-    const result = await workbenchApi.updateSession(input);
+  async updateBaseUrl(baseUrl: string) {
+    const result = await api.updateSession({ baseUrl });
     if (!result.ok) {
-      const message = result.error?.message ?? 'failed to update session';
-      set({ error: message });
-      return;
+      set({ error: result.error.message });
+      return { ok: false, error: result.error.message };
     }
-    if (result.session) {
-      set({ session: result.session, error: null });
-      return;
+    if (window.workbenchApi.setBaseUrl) {
+      window.workbenchApi.setBaseUrl(baseUrl);
     }
-    const session = await workbenchApi.getSession();
-    set({ session });
-  },
-  async authenticate(input: AccountAuthentication) {
-    const result = await workbenchApi.authenticateSession(input);
-    if (!result.ok || !result.session) {
-      set({ error: result.error?.message ?? '登录失败' });
-      return false;
-    }
-    set({ session: result.session, error: null, initialized: true });
-    return true;
-  },
-  async sendVerificationCode(input: { baseUrl: string; email: string }) {
-    const result = await workbenchApi.sendEmailVerificationCode(input);
-    if (!result.ok) {
-      set({ error: result.error?.message ?? '验证码发送失败' });
-      return { ok: false as const, retryAfterSeconds: result.error?.retry_after_seconds ?? 0 };
-    }
-    return {
-      ok: true as const,
-      expiresInSeconds: result.expires_in_seconds,
-      retryAfterSeconds: result.retry_after_seconds
-    };
-  },
-  async logout() {
-    await workbenchApi.logoutSession();
-    set({ session: EMPTY_SESSION, error: null, initialized: true });
+    set({ session: { baseUrl, version: '2' }, error: null });
+    return { ok: true };
   }
 }));
