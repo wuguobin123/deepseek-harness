@@ -8,10 +8,13 @@
  *  - `streamMux()` / `streamHost()` → open `GET /api/events.mux` or
  *    `/api/events.host` and yield parsed frames via the shared sse-proxy.
  *
- * Trust: no auth headers are sent. The dsh-ops trust fence
- * (`dsh-client-connection.trustedHosts`) is the access boundary; requests
- * whose Host header isn't in the allow-list are rejected before reaching
- * the RPC dispatcher.
+ * Trust: requests are gated twice — first by the dsh-ops `trustedHosts`
+ * fence on the server side (loopback / nginx fronting), then by a bearer
+ * token set via `setToken()`. Public methods
+ * (`account.signup|signin|signout|emailCode`) ignore the token; every
+ * privileged method (`host.describe`, `account.wallet.credit`, etc.)
+ * requires `Authorization: Bearer <token>` and the host validates it
+ * against `ctx.identity.validate()` before dispatch.
  */
 import { URL } from 'node:url'
 import { randomUUID } from 'node:crypto'
@@ -45,6 +48,8 @@ export class ApiClient {
   private baseUrl: string
   private readonly fetchImpl: typeof fetch
   private readonly requestTimeoutMs: number
+  /** Bearer token set by `setToken`; `null` (default) omits the Authorization header. */
+  private token: string | null = null
 
   constructor(options: ApiClientOptions) {
     this.baseUrl = ApiClient.normalizeBaseUrl(options.baseUrl)
@@ -58,6 +63,32 @@ export class ApiClient {
 
   getBaseUrl(): string {
     return this.baseUrl
+  }
+
+  /**
+   * Install or clear the bearer token used to authenticate privileged
+   * RPC calls. Passing `null` removes the `Authorization` header — the
+   * public account.* methods still work; privileged methods will be
+   * rejected by the host fence with `unauthenticated`.
+   */
+  setToken(token: string | null): void {
+    this.token = token !== null && token.length > 0 ? token : null
+  }
+
+  /** Read the currently-installed bearer token. Used by IPC handlers to fan tokens into `account.signout`. */
+  getToken(): string | null {
+    return this.token
+  }
+
+  /** Compose the JSON request headers, layering `Authorization` when a token is installed. */
+  private requestHeaders(): Record<string, string> {
+    if (this.token === null) {
+      return { 'content-type': 'application/json' }
+    }
+    return {
+      'content-type': 'application/json',
+      authorization: `Bearer ${this.token}`,
+    }
   }
 
   private static normalizeBaseUrl(baseUrl: string): string {
@@ -84,7 +115,7 @@ export class ApiClient {
     try {
       response = await this.fetchImpl(url, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: this.requestHeaders(),
         body: JSON.stringify(envelope),
         signal: controller.signal,
       })
@@ -135,7 +166,7 @@ export class ApiClient {
     try {
       response = await this.fetchImpl(url, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: this.requestHeaders(),
         body: JSON.stringify(envelope),
         signal: controller.signal,
       })

@@ -21,7 +21,7 @@ import { ApiClient } from './api-client'
 import { CredentialStore } from './credential-store'
 import { UpdateChecker } from './update-checker'
 import { createIpcHandlers, installSecurityGuards } from './ipc-handlers'
-import { IpcChannels } from '../shared/contracts'
+import { AuthStateSchema, IpcChannels, type AuthState } from '../shared/contracts'
 
 function configuredBaseUrl(): string {
   const environmentUrl = process.env.WORKBENCH_API_BASE_URL
@@ -57,6 +57,13 @@ async function bootstrap(): Promise<void> {
   const apiClient = new ApiClient({
     baseUrl: credentialStore.snapshot().baseUrl || DEFAULT_BASE_URL,
   })
+  // Bootstrap the bearer token from the persisted v3 blob (workbuddy
+  // multi-user backend). When the user signs in via SignInCard, the IPC
+  // handlers update this same token and broadcast a fresh AuthState.
+  const persistedToken = credentialStore.snapshot().sessionToken
+  if (persistedToken !== undefined && persistedToken.length > 0) {
+    apiClient.setToken(persistedToken)
+  }
 
   // Stub update checker (always up-to-date until dsh-ops exposes a releases endpoint).
   const updateChecker = new UpdateChecker({
@@ -68,12 +75,21 @@ async function bootstrap(): Promise<void> {
   updateChecker.start()
   app.on('will-quit', () => updateChecker.stop())
 
+  /** Validate and forward AuthState changes to every renderer window. */
+  function broadcastAuthState(state: AuthState): void {
+    const parsed = AuthStateSchema.parse(state)
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send(IpcChannels.AuthStateEvent, parsed)
+    }
+  }
+
   mainWindow = createMainWindow()
   const ipc = createIpcHandlers({
     apiClient,
     credentialStore,
     baseUrl: () => credentialStore.snapshot().baseUrl || DEFAULT_BASE_URL,
     updateChecker: () => updateChecker,
+    broadcastAuthState,
   })
   ipc.install()
 
@@ -91,6 +107,7 @@ async function bootstrap(): Promise<void> {
         credentialStore,
         baseUrl: () => credentialStore.snapshot().baseUrl || DEFAULT_BASE_URL,
         updateChecker: () => updateChecker,
+        broadcastAuthState,
       })
       fresh.install()
       installSecurityGuards(mainWindow)

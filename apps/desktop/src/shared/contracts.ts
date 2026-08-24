@@ -161,6 +161,68 @@ export const SessionStateSchema = z.object({
 export type SessionState = z.infer<typeof SessionStateSchema>
 
 // ---------------------------------------------------------------------------
+// Auth state + account wire-method inputs
+// ---------------------------------------------------------------------------
+
+/**
+ * Renderer-facing view of the current bearer session.
+ *
+ * `signedIn: false` carries no other fields — the cold-start gate reads the
+ * `signedIn` discriminant first and renders SignInCard without consulting
+ * the rest. Persisted via `credential-store` v3 and broadcast over
+ * `IpcChannels.AuthStateEvent` whenever it changes.
+ */
+export const AuthStateSchema = z.discriminatedUnion('signedIn', [
+  z.object({
+    signedIn: z.literal(false),
+  }),
+  z.object({
+    signedIn: z.literal(true),
+    userId: z.string().min(1),
+    displayName: z.string().nullable(),
+    /** Absolute unix-millisecond expiry of the session this view came from. */
+    expiresAt: z.number().int().positive(),
+  }),
+])
+
+export type AuthState = z.infer<typeof AuthStateSchema>
+
+/** account.signin / account.signup request shape (shared by sign-in / sign-up forms). */
+export const SignInInputSchema = z.object({
+  email: z.string().min(1).max(254),
+  password: z.string().min(1).max(1024),
+})
+
+export type SignInInput = z.infer<typeof SignInInputSchema>
+
+/** account.signup extra fields on top of SignInInput. */
+export const SignUpInputSchema = SignInInputSchema.extend({
+  displayName: z.string().max(254).optional(),
+  /**
+   * Six-digit verification code produced by a prior `account.emailCode` call.
+   * The backend rejects signup without it when email-verification is enabled.
+   */
+  verificationCode: z.string().regex(/^\d{6}$/).optional(),
+})
+
+export type SignUpInput = z.infer<typeof SignUpInputSchema>
+
+/** account.emailCode request shape. */
+export const RequestEmailCodeInputSchema = z.object({
+  email: z.string().min(1).max(254),
+})
+
+export type RequestEmailCodeInput = z.infer<typeof RequestEmailCodeInputSchema>
+
+/** account.emailCode response shape. */
+export const RequestEmailCodeValueSchema = z.object({
+  expiresInSeconds: z.number().int().positive(),
+  retryAfterSeconds: z.number().int().nonnegative(),
+})
+
+export type RequestEmailCodeValue = z.infer<typeof RequestEmailCodeValueSchema>
+
+// ---------------------------------------------------------------------------
 // Client update check (stub: always up-to-date until dsh-ops exposes a releases endpoint)
 // ---------------------------------------------------------------------------
 
@@ -202,6 +264,13 @@ export const IpcChannels = {
   GetAppUpdateState: 'workbench:update:get-state',
   CheckAppUpdate: 'workbench:update:check',
   OpenAppUpdateDownload: 'workbench:update:open-download',
+  // auth: bearer session lifecycle (workbuddy multi-user surface)
+  GetAuthState: 'workbench:auth:get-state',
+  RequestEmailCode: 'workbench:auth:request-email-code',
+  SignUp: 'workbench:auth:sign-up',
+  SignIn: 'workbench:auth:sign-in',
+  SignOut: 'workbench:auth:sign-out',
+  AuthStateEvent: 'workbench:auth:state',
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
@@ -221,6 +290,12 @@ export const WORKBENCH_API_KEYS = [
   'checkAppUpdate',
   'openAppUpdateDownload',
   'subscribeAppUpdateState',
+  'getAuthState',
+  'requestEmailCode',
+  'signUp',
+  'signIn',
+  'signOut',
+  'subscribeAuthState',
 ] as const
 
 export type WorkbenchApiKey = (typeof WORKBENCH_API_KEYS)[number]

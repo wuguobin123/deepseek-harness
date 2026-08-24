@@ -11,6 +11,10 @@
  *  - `GetAppUpdateState` / `CheckAppUpdate` / `OpenAppUpdateDownload` →
  *    forwarded to the (stubbed) UpdateChecker; the IPC channel remains so
  *    the renderer can keep its "check for updates" affordance.
+ *  - `GetAuthState` / `RequestEmailCode` / `SignUp` / `SignIn` / `SignOut`
+ *    → bearer session lifecycle for the workbuddy multi-user backend;
+ *    persist the resulting token, install it on `ApiClient`, and broadcast
+ *    the new `AuthState` over `IpcChannels.AuthStateEvent`.
  *
  * The renderer never holds raw `ipcRenderer`; the preload exposes only
  * `WORKBENCH_API_KEYS`.
@@ -22,9 +26,14 @@ import {
   IpcChannels,
   MuxFrameSchema,
   HostFrameSchema,
+  RequestEmailCodeInputSchema,
   SessionStateSchema,
+  SignInInputSchema,
+  SignUpInputSchema,
+  type AuthState,
   type HostFrame,
   type MuxFrame,
+  type RequestEmailCodeValue,
 } from '../shared/contracts'
 import { ApiClient } from './api-client'
 import { CredentialStore } from './credential-store'
@@ -35,6 +44,12 @@ interface HandlersDeps {
   credentialStore: CredentialStore
   baseUrl: () => string
   updateChecker: () => UpdateChecker
+  /**
+   * Hook called whenever the auth state changes — `index.ts` wires this
+   * to `mainWindow.webContents.send(IpcChannels.AuthStateEvent, state)`.
+   * Receivers (the renderer `useAuthStore`) re-read state on every fan-out.
+   */
+  broadcastAuthState: (state: AuthState) => void
 }
 
 const RequestInputSchema = z.object({
@@ -245,6 +260,160 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Auth — workbuddy multi-user bearer session lifecycle
+  // -------------------------------------------------------------------------
+
+  /** Persist a fresh session, install the bearer token, fan the new state out. */
+  async function installSession(input: {
+    baseUrl: string
+    sessionToken: string
+    userId: string
+    displayName: string | null
+    expiresAt: number
+  }): Promise<AuthState> {
+    await deps.credentialStore.save({
+      baseUrl: input.baseUrl,
+      sessionToken: input.sessionToken,
+      userId: input.userId,
+      displayName: input.displayName,
+      expiresAt: input.expiresAt,
+    })
+    deps.apiClient.setToken(input.sessionToken)
+    const next: AuthState = deps.credentialStore.authState()
+    deps.broadcastAuthState(next)
+    return next
+  }
+
+  /** Clear the persisted session, drop the bearer token, broadcast signed-out state. */
+  async function clearSession(): Promise<AuthState> {
+    const baseUrl = deps.credentialStore.snapshot().baseUrl
+    await deps.credentialStore.save({ baseUrl })
+    deps.apiClient.setToken(null)
+    const next: AuthState = { signedIn: false }
+    deps.broadcastAuthState(next)
+    return next
+  }
+
+  async function handleGetAuthState(): Promise<AuthState> {
+    return deps.credentialStore.authState()
+  }
+
+  async function handleRequestEmailCode(
+    _event: Electron.IpcMainInvokeEvent,
+    raw: unknown,
+  ): Promise<{ ok: true; value: RequestEmailCodeValue } | { ok: false; error: { code: string; message: string } }> {
+    const parsed = RequestEmailCodeInputSchema.safeParse(raw)
+    if (!parsed.success) {
+      return { ok: false, error: { code: 'INVALID_INPUT', message: parsed.error.message } }
+    }
+    try {
+      // Public method: no bearer required, so this works even when the
+      // user is fully signed out. The host rate-limits via its
+      // email-verification seam (RESEND_COOLDOWN / RATE_LIMIT_EXCEEDED).
+      const value = await deps.apiClient.call<RequestEmailCodeValue>(
+        'account.emailCode',
+        parsed.data,
+      )
+      return { ok: true, value }
+    } catch (err) {
+      return {
+        ok: false,
+        error: {
+          code: (err as { code?: string }).code ?? 'unknown',
+          message: err instanceof Error ? err.message : String(err),
+        },
+      }
+    }
+  }
+
+  async function handleSignUp(
+    _event: Electron.IpcMainInvokeEvent,
+    raw: unknown,
+  ): Promise<{ ok: true; value: AuthState } | { ok: false; error: { code: string; message: string } }> {
+    const parsed = SignUpInputSchema.safeParse(raw)
+    if (!parsed.success) {
+      return { ok: false, error: { code: 'INVALID_INPUT', message: parsed.error.message } }
+    }
+    try {
+      // Public method: the host fires the welcome bonus + provisions an
+      // AES-encrypted user-model-key inside `account.signup`, so the
+      // response carries a fully-formed bearer session.
+      const signedIn = await deps.apiClient.call<{
+        userId: string
+        displayName: string | null
+        sessionToken: string
+        expiresAt: number
+      }>('account.signup', parsed.data)
+      const state = await installSession({
+        baseUrl: deps.credentialStore.snapshot().baseUrl,
+        sessionToken: signedIn.sessionToken,
+        userId: signedIn.userId,
+        displayName: signedIn.displayName,
+        expiresAt: signedIn.expiresAt,
+      })
+      return { ok: true, value: state }
+    } catch (err) {
+      return {
+        ok: false,
+        error: {
+          code: (err as { code?: string }).code ?? 'unknown',
+          message: err instanceof Error ? err.message : String(err),
+        },
+      }
+    }
+  }
+
+  async function handleSignIn(
+    _event: Electron.IpcMainInvokeEvent,
+    raw: unknown,
+  ): Promise<{ ok: true; value: AuthState } | { ok: false; error: { code: string; message: string } }> {
+    const parsed = SignInInputSchema.safeParse(raw)
+    if (!parsed.success) {
+      return { ok: false, error: { code: 'INVALID_INPUT', message: parsed.error.message } }
+    }
+    try {
+      const signedIn = await deps.apiClient.call<{
+        userId: string
+        displayName: string | null
+        sessionToken: string
+        expiresAt: number
+      }>('account.signin', parsed.data)
+      const state = await installSession({
+        baseUrl: deps.credentialStore.snapshot().baseUrl,
+        sessionToken: signedIn.sessionToken,
+        userId: signedIn.userId,
+        displayName: signedIn.displayName,
+        expiresAt: signedIn.expiresAt,
+      })
+      return { ok: true, value: state }
+    } catch (err) {
+      return {
+        ok: false,
+        error: {
+          code: (err as { code?: string }).code ?? 'unknown',
+          message: err instanceof Error ? err.message : String(err),
+        },
+      }
+    }
+  }
+
+  async function handleSignOut(): Promise<{ ok: true; value: AuthState }> {
+    const token = deps.apiClient.getToken()
+    if (token !== null) {
+      // Best-effort: a network failure here must not strand the user in a
+      // half-cleared state. The host treats unknown session tokens as
+      // already-revoked (idempotent), so the next signin reissues a token.
+      try {
+        await deps.apiClient.call('account.signout', { sessionToken: token })
+      } catch {
+        // ignore — we still clear local state.
+      }
+    }
+    const state = await clearSession()
+    return { ok: true, value: state }
+  }
+
   function install(): void {
     ipcMain.handle(IpcChannels.Request, handleRequest)
     ipcMain.handle(IpcChannels.Respond, handleRespond)
@@ -257,6 +426,11 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
     ipcMain.handle(IpcChannels.GetAppUpdateState, handleGetAppUpdateState)
     ipcMain.handle(IpcChannels.CheckAppUpdate, handleCheckAppUpdate)
     ipcMain.handle(IpcChannels.OpenAppUpdateDownload, handleOpenAppUpdateDownload)
+    ipcMain.handle(IpcChannels.GetAuthState, handleGetAuthState)
+    ipcMain.handle(IpcChannels.RequestEmailCode, handleRequestEmailCode)
+    ipcMain.handle(IpcChannels.SignUp, handleSignUp)
+    ipcMain.handle(IpcChannels.SignIn, handleSignIn)
+    ipcMain.handle(IpcChannels.SignOut, handleSignOut)
   }
 
   function uninstall(): void {
@@ -271,6 +445,11 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
     ipcMain.removeHandler(IpcChannels.GetAppUpdateState)
     ipcMain.removeHandler(IpcChannels.CheckAppUpdate)
     ipcMain.removeHandler(IpcChannels.OpenAppUpdateDownload)
+    ipcMain.removeHandler(IpcChannels.GetAuthState)
+    ipcMain.removeHandler(IpcChannels.RequestEmailCode)
+    ipcMain.removeHandler(IpcChannels.SignUp)
+    ipcMain.removeHandler(IpcChannels.SignIn)
+    ipcMain.removeHandler(IpcChannels.SignOut)
     if (mux) {
       mux.controller.abort()
       void mux.task.catch(() => undefined)

@@ -14,8 +14,10 @@
  * the matching bridge keys so feature pages don't reach past `api.ts`.
  */
 import type {
+  AuthState,
   HostFrame,
   MuxFrame,
+  RequestEmailCodeValue,
   SessionState,
 } from '../shared/contracts'
 import type { WorkbenchApi } from '../preload/index'
@@ -230,6 +232,49 @@ export const update = {
   subscribe: (
     listener: (state: { status: 'idle' | 'checking' | 'up-to-date' | 'available' | 'error'; currentVersion: string }) => void,
   ) => bridge().subscribeAppUpdateState(listener),
+}
+
+// ----- Auth (workbuddy multi-user bearer session lifecycle) -----
+
+/**
+ * Renderer-side wrappers around the `workbench:auth:*` IPC bridge. The
+ * success branch returns the canonical `AuthState` projection so the
+ * `useAuthStore` can write it directly; the failure branch surfaces the
+ * host's wire code so SignInCard can map `RESEND_COOLDOWN` / `WRONG_CODE` /
+ * `CODE_LOCKED` etc. into localized copy.
+ */
+export const auth = {
+  /** Cold-start probe: read the persisted AuthState. */
+  getState: async (): Promise<AuthState> => bridge().getAuthState(),
+  /**
+   * Mint a 6-digit verification code. Public method; works when fully
+   * signed out. The host returns `retryAfterSeconds` so the UI can drive
+   * the cooldown timer.
+   */
+  requestEmailCode: async (input: { email: string }): Promise<
+    | { ok: true; value: RequestEmailCodeValue }
+    | { ok: false; error: { code: string; message: string } }
+  > => bridge().requestEmailCode(input),
+  /** Register an account; the host fires the welcome bonus + provisions an API key. */
+  signUp: async (input: {
+    email: string
+    password: string
+    displayName?: string
+    verificationCode?: string
+  }): Promise<
+    | { ok: true; value: AuthState }
+    | { ok: false; error: { code: string; message: string } }
+  > => bridge().signUp(input),
+  /** Sign in to an existing account. */
+  signIn: async (input: { email: string; password: string }): Promise<
+    | { ok: true; value: AuthState }
+    | { ok: false; error: { code: string; message: string } }
+  > => bridge().signIn(input),
+  /** Revoke the current bearer and clear the persisted session. */
+  signOut: async (): Promise<{ ok: true; value: AuthState }> => bridge().signOut(),
+  /** Subscribe to AuthState fan-out (one fan-out per sign-in / sign-out / cold-start). */
+  subscribe: async (listener: (state: AuthState) => void): Promise<() => void> =>
+    bridge().subscribeAuthState(listener),
 }
 
 // ----- Helpers for consumers -----

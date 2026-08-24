@@ -18,14 +18,21 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import {
   AppUpdateStateSchema,
+  AuthStateSchema,
   ClientResponseSchema,
   IpcChannels,
+  RequestEmailCodeInputSchema,
+  RequestEmailCodeValueSchema,
   SessionStateSchema,
+  SignInInputSchema,
+  SignUpInputSchema,
   WORKBENCH_API_KEYS,
   type AppUpdateState,
+  type AuthState,
   type ClientResponse,
   type HostFrame,
   type MuxFrame,
+  type RequestEmailCodeValue,
   type SessionState,
 } from '../shared/contracts'
 
@@ -37,15 +44,16 @@ function ensureChannel(channel: string): void {
   }
 }
 
+/** Canonical `ok / error` envelope every IPC handler returns. */
+type IpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
+
 const api = {
   /** Generic RPC bridge: POST /api/<method> with a ClientRequest envelope. */
-  async request(method: string, payload: unknown): Promise<{ ok: true; value: unknown } | { ok: false; error: { code: string; message: string } }> {
+  async request(method: string, payload: unknown): Promise<IpcResult<unknown>> {
     if (typeof method !== 'string' || method.length === 0) {
       return { ok: false, error: { code: 'INVALID_INPUT', message: 'method must be a non-empty string' } }
     }
-    return ipcRenderer.invoke(IpcChannels.Request, { method, payload }) as Promise<
-      { ok: true; value: unknown } | { ok: false; error: { code: string; message: string } }
-    >
+    return ipcRenderer.invoke(IpcChannels.Request, { method, payload }) as Promise<IpcResult<unknown>>
   },
 
   /** Subscribe to MuxFrames via the SSE carrier GET /api/events.mux. */
@@ -93,7 +101,11 @@ const api = {
   },
 
   /** POST /api/respond with a ClientResponse envelope. */
-  async respond(rpcId: string, value: unknown, error?: { code: string; message: string; details?: Record<string, unknown> }): Promise<void> {
+  async respond(
+    rpcId: string,
+    value: unknown,
+    error?: { code: string; message: string; details?: Record<string, unknown> },
+  ): Promise<void> {
     const envelope: ClientResponse = error
       ? { type: 'client-response', rpcId, result: { ok: false, error: { code: error.code, message: error.message, details: error.details ?? {} } } }
       : { type: 'client-response', rpcId, result: { ok: true, value } }
@@ -106,14 +118,12 @@ const api = {
     return SessionStateSchema.parse(session)
   },
 
-  async updateSession(input: { baseUrl: string }): Promise<{ ok: true; value: { baseUrl: string } } | { ok: false; error: { code: string; message: string } }> {
+  async updateSession(input: { baseUrl: string }): Promise<IpcResult<{ baseUrl: string }>> {
     const parsed = SessionStateSchema.safeParse(input)
     if (!parsed.success) {
       return { ok: false, error: { code: 'INVALID_INPUT', message: parsed.error.message } }
     }
-    return ipcRenderer.invoke(IpcChannels.UpdateSession, parsed.data) as Promise<
-      { ok: true; value: { baseUrl: string } } | { ok: false; error: { code: string; message: string } }
-    >
+    return ipcRenderer.invoke(IpcChannels.UpdateSession, parsed.data) as Promise<IpcResult<{ baseUrl: string }>>
   },
 
   async getAppUpdateState(): Promise<AppUpdateState> {
@@ -139,6 +149,101 @@ const api = {
     ensureChannel(channel)
     const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => {
       const parsed = AppUpdateStateSchema.safeParse(payload)
+      if (!parsed.success) return
+      listener(parsed.data)
+    }
+    ipcRenderer.on(channel, handler)
+    return () => {
+      ipcRenderer.removeListener(channel, handler)
+    }
+  },
+
+  // -------------------------------------------------------------------------
+  // Auth — workbuddy multi-user bearer session lifecycle
+  // -------------------------------------------------------------------------
+
+  /** Cold-start probe: returns the currently-installed AuthState. */
+  async getAuthState(): Promise<AuthState> {
+    const raw = await ipcRenderer.invoke(IpcChannels.GetAuthState)
+    return AuthStateSchema.parse(raw)
+  },
+
+  /**
+   * Mint a fresh 6-digit email verification code. Public method — works
+   * even when fully signed out (the user is trying to sign up).
+   * @returns the value envelope `{ expiresInSeconds, retryAfterSeconds }`
+   *   the host echoes back so the UI can drive the cooldown timer.
+   */
+  async requestEmailCode(input: { email: string }): Promise<IpcResult<RequestEmailCodeValue>> {
+    const parsed = RequestEmailCodeInputSchema.safeParse(input)
+    if (!parsed.success) {
+      return { ok: false, error: { code: 'INVALID_INPUT', message: parsed.error.message } }
+    }
+    const result = await ipcRenderer.invoke(IpcChannels.RequestEmailCode, parsed.data)
+    if (result && typeof result === 'object' && 'ok' in result && (result as { ok: boolean }).ok) {
+      const value = RequestEmailCodeValueSchema.parse((result as { value: unknown }).value)
+      return { ok: true, value }
+    }
+    return result as { ok: false; error: { code: string; message: string } }
+  },
+
+  /**
+   * Register one account. Requires a verification code when the host's
+   * email-verification seam is enabled. On success the bearer token is
+   * persisted, installed on the main-process `ApiClient`, and broadcast.
+   */
+  async signUp(input: {
+    email: string
+    password: string
+    displayName?: string
+    verificationCode?: string
+  }): Promise<IpcResult<AuthState>> {
+    const parsed = SignUpInputSchema.safeParse(input)
+    if (!parsed.success) {
+      return { ok: false, error: { code: 'INVALID_INPUT', message: parsed.error.message } }
+    }
+    const result = await ipcRenderer.invoke(IpcChannels.SignUp, parsed.data)
+    if (result && typeof result === 'object' && 'ok' in result && (result as { ok: boolean }).ok) {
+      const value = AuthStateSchema.parse((result as { value: unknown }).value)
+      return { ok: true, value }
+    }
+    return result as { ok: false; error: { code: string; message: string } }
+  },
+
+  /** Sign-in for an existing account. Same persistence + broadcast flow as signUp. */
+  async signIn(input: { email: string; password: string }): Promise<IpcResult<AuthState>> {
+    const parsed = SignInInputSchema.safeParse(input)
+    if (!parsed.success) {
+      return { ok: false, error: { code: 'INVALID_INPUT', message: parsed.error.message } }
+    }
+    const result = await ipcRenderer.invoke(IpcChannels.SignIn, parsed.data)
+    if (result && typeof result === 'object' && 'ok' in result && (result as { ok: boolean }).ok) {
+      const value = AuthStateSchema.parse((result as { value: unknown }).value)
+      return { ok: true, value }
+    }
+    return result as { ok: false; error: { code: string; message: string } }
+  },
+
+  /** Revoke the current bearer token and clear the persisted session. */
+  async signOut(): Promise<{ ok: true; value: AuthState }> {
+    const result = await ipcRenderer.invoke(IpcChannels.SignOut)
+    const value = AuthStateSchema.parse((result as { value: unknown }).value)
+    return { ok: true, value }
+  },
+
+  /**
+   * Subscribe to AuthState fan-out from main. The renderer stores the
+   * latest snapshot in `useAuthStore`; cold-start should also `getAuthState`
+   * once in case the broadcast raced the subscription.
+   */
+  async subscribeAuthState(listener: (state: AuthState) => void): Promise<() => void> {
+    if (typeof listener !== 'function') {
+      throw new TypeError('listener must be a function')
+    }
+    const channel = IpcChannels.AuthStateEvent
+    ensureChannel(channel)
+    const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+      const parsed = AuthStateSchema.safeParse(payload)
       if (!parsed.success) return
       listener(parsed.data)
     }
