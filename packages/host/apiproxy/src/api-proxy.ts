@@ -100,6 +100,19 @@ import type {
 } from '@deepseek-ai/dsh-user-questions'
 import { UserQuestionError } from '@deepseek-ai/dsh-user-questions'
 import { DirectoryPickerError } from '@deepseek-ai/dsh-host-directory-picker'
+// ---- workbuddy multi-user account seam ----
+import type { IdentityService, SignedIn, AuthenticatedView } from '@deepseek-ai/dsh-account-identity'
+import { IdentityError } from '@deepseek-ai/dsh-account-identity'
+import type { EmailVerificationService } from '@deepseek-ai/dsh-account-email-verification'
+import { EmailVerificationError } from '@deepseek-ai/dsh-account-email-verification'
+import type { WalletService, WalletView, LedgerEntry } from '@deepseek-ai/dsh-account-wallet'
+import { WalletError } from '@deepseek-ai/dsh-account-wallet'
+import type { UserModelKeyService, ModelKeyView, ProvisionedKey } from '@deepseek-ai/dsh-account-model-keys'
+import { ModelKeyError } from '@deepseek-ai/dsh-account-model-keys'
+import type { ArtifactRegistry, ArtifactView as ArtifactRegistryView } from '@deepseek-ai/dsh-artifact'
+import { ArtifactError } from '@deepseek-ai/dsh-artifact'
+import { SessionId as brandSessionId } from '@deepseek-ai/dsh-session'
+import type { RpcErrorCode } from './api/rpc.ts'
 import {
   ApiRemoteSessionNotFound as SessionNotFound,
   ApiRemoteSubagentSessionOwnership as SubagentSessionOwnership,
@@ -3638,5 +3651,466 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       pending.resolve(payload.answer)
       return Promise.resolve({ accepted: true })
     },
+
+    // ---- workbuddy multi-user account seam ----
+    // Anonymous callers may grow the user base: signup / signin / emailCode
+    // are non-privileged. signout / state require a valid bearer in the
+    // Authorization header; the connection-plugin fence verifies the token
+    // before the request reaches this block. Privileged mutation methods
+    // (wallet.credit/debit/setQuota/refreshDaily/grantWelcomeBonus,
+    // modelKeys.provision/revoke) are still loopback-only — the fence
+    // rejects any non-loopback caller regardless of bearer. The wallet
+    // signup trigger chain (welcome bonus + model-key provision) lives in
+    // `account.signup` so a single round trip creates the user, grants 20
+    // CNY, and mints the first API key.
+    account: {
+      async signup(request): Promise<RpcResponse<SignedIn>> {
+        const identity = ctx.get('identity') as IdentityService | undefined
+        if (identity === undefined) return err(request, { code: 'internal', message: 'identity service is not mounted', details: {} })
+        const emailVerification = ctx.get('emailVerification') as EmailVerificationService | undefined
+        const wallet = ctx.get('wallet') as WalletService | undefined
+        const userModelKeys = ctx.get('userModelKeys') as UserModelKeyService | undefined
+        try {
+          // Verification gate (when the seam is on): the renderer is required
+          // to round-trip account.emailCode first; the host surfaces a stable
+          // code the renderer can branch on without parsing the message.
+          if (emailVerification !== undefined && emailVerification.isEnabled()) {
+            const code = request.payload.verificationCode
+            if (typeof code !== 'string' || code.length === 0) {
+              return err(request, { code: 'verification-code-required', message: '请先获取邮箱验证码', details: {} })
+            }
+            try {
+              await emailVerification.verifyCode({ email: request.payload.email, code })
+            } catch (verErr) {
+              if (verErr instanceof EmailVerificationError) {
+                const wireCode = emailVerificationCodeToWire(verErr.code)
+                return err(request, { code: wireCode, message: verErr.message, ...emailVerificationErrorDetails(verErr) } as RpcError)
+              }
+              throw verErr
+            }
+          }
+          const signed = await identity.signup({
+            email: request.payload.email,
+            password: request.payload.password,
+            ...(request.payload.displayName !== undefined ? { displayName: request.payload.displayName } : {}),
+          })
+          // Trigger chain: best-effort welcome bonus + first model key. A
+          // failure here does NOT roll back the identity row — the user has
+          // signed up and a follow-up script can repair the wallet/key side.
+          if (wallet !== undefined) {
+            try {
+              await wallet.grantWelcomeBonus({ userId: signed.userId })
+            } catch (walletErr) {
+              ctx.logger.warn?.('workbuddy: welcome bonus failed userId=%s reason=%s', String(signed.userId), String((walletErr as Error).message))
+            }
+          }
+          if (userModelKeys !== undefined) {
+            try {
+              await userModelKeys.provision({ userId: signed.userId, label: `workbuddy-${shortUserId(String(signed.userId))}` })
+            } catch (keyErr) {
+              ctx.logger.warn?.('workbuddy: model-key provision failed userId=%s reason=%s', String(signed.userId), String((keyErr as Error).message))
+            }
+          }
+          return { rpcId: request.rpcId, result: { ok: true, value: signed } }
+        } catch (signErr) {
+          if (signErr instanceof IdentityError) {
+            const wireCode = identityErrorCodeToWire(signErr.code)
+            return err(request, { code: wireCode, message: signErr.message, details: {} } as RpcError)
+          }
+          throw signErr
+        }
+      },
+
+      async emailCode(request): Promise<RpcResponse<{ expiresInSeconds: number; retryAfterSeconds: number }>> {
+        const verification = ctx.get('emailVerification') as EmailVerificationService | undefined
+        if (verification === undefined) {
+          return err(request, { code: 'internal', message: 'email-verification service is not mounted', details: {} })
+        }
+        try {
+          const value = await verification.requestCode({ email: request.payload.email })
+          return { rpcId: request.rpcId, result: { ok: true, value } }
+        } catch (verErr) {
+          if (verErr instanceof EmailVerificationError) {
+            const wireCode = emailVerificationCodeToWire(verErr.code)
+            return err(request, { code: wireCode, message: verErr.message, ...emailVerificationErrorDetails(verErr) } as RpcError)
+          }
+          throw verErr
+        }
+      },
+
+      async signin(request): Promise<RpcResponse<SignedIn>> {
+        const identity = ctx.get('identity') as IdentityService | undefined
+        if (identity === undefined) return err(request, { code: 'internal', message: 'identity service is not mounted', details: {} })
+        try {
+          const signed = await identity.signin({ email: request.payload.email, password: request.payload.password })
+          return { rpcId: request.rpcId, result: { ok: true, value: signed } }
+        } catch (signErr) {
+          if (signErr instanceof IdentityError) {
+            return err(request, { code: identityErrorCodeToWire(signErr.code), message: signErr.message, details: {} } as RpcError)
+          }
+          throw signErr
+        }
+      },
+
+      async signout(request): Promise<RpcResponse<{ revoked: true }>> {
+        const identity = ctx.get('identity') as IdentityService | undefined
+        if (identity === undefined) return err(request, { code: 'internal', message: 'identity service is not mounted', details: {} })
+        // Idempotent: an unknown / already-revoked token resolves with
+        // { revoked: true } per the seam's own contract.
+        await identity.signout({ sessionToken: request.payload.sessionToken as never })
+        return { rpcId: request.rpcId, result: { ok: true, value: { revoked: true as const } } }
+      },
+
+      async state(request): Promise<RpcResponse<AuthenticatedView | null>> {
+        const identity = ctx.get('identity') as IdentityService | undefined
+        if (identity === undefined) return { rpcId: request.rpcId, result: { ok: true, value: null } }
+        const view = await identity.validate({ sessionToken: request.payload.sessionToken as never })
+        return { rpcId: request.rpcId, result: { ok: true, value: view } }
+      },
+    },
+
+    wallet: {
+      async get(request): Promise<RpcResponse<WalletView>> {
+        const wallet = ctx.get('wallet') as WalletService | undefined
+        if (wallet === undefined) return err(request, { code: 'internal', message: 'wallet service is not mounted', details: {} })
+        try {
+          const view = await wallet.get({ userId: request.payload.userId as never })
+          return { rpcId: request.rpcId, result: { ok: true, value: view } }
+        } catch (walletErr) {
+          if (walletErr instanceof WalletError) {
+            return err(request, {
+              code: walletErrorCodeToWire(walletErr.code),
+              message: walletErr.message,
+              ...walletErrorDetails(walletErr),
+            } as RpcError)
+          }
+          throw walletErr
+        }
+      },
+      async credit(request): Promise<RpcResponse<WalletView>> {
+        const wallet = ctx.get('wallet') as WalletService | undefined
+        if (wallet === undefined) return err(request, { code: 'internal', message: 'wallet service is not mounted', details: {} })
+        try {
+          const view = await wallet.credit({
+            userId: request.payload.userId as never,
+            amountMicros: request.payload.amountMicros,
+            reason: request.payload.reason,
+            ...(request.payload.idempotencyKey !== undefined ? { idempotencyKey: request.payload.idempotencyKey } : {}),
+          })
+          return { rpcId: request.rpcId, result: { ok: true, value: view } }
+        } catch (walletErr) {
+          if (walletErr instanceof WalletError) {
+            return err(request, {
+              code: walletErrorCodeToWire(walletErr.code),
+              message: walletErr.message,
+              ...walletErrorDetails(walletErr),
+            } as RpcError)
+          }
+          throw walletErr
+        }
+      },
+      async debit(request): Promise<RpcResponse<WalletView>> {
+        const wallet = ctx.get('wallet') as WalletService | undefined
+        if (wallet === undefined) return err(request, { code: 'internal', message: 'wallet service is not mounted', details: {} })
+        try {
+          const view = await wallet.debit({
+            userId: request.payload.userId as never,
+            amountMicros: request.payload.amountMicros,
+            reason: request.payload.reason,
+            ...(request.payload.idempotencyKey !== undefined ? { idempotencyKey: request.payload.idempotencyKey } : {}),
+          })
+          return { rpcId: request.rpcId, result: { ok: true, value: view } }
+        } catch (walletErr) {
+          if (walletErr instanceof WalletError) {
+            return err(request, {
+              code: walletErrorCodeToWire(walletErr.code),
+              message: walletErr.message,
+              ...walletErrorDetails(walletErr),
+            } as RpcError)
+          }
+          throw walletErr
+        }
+      },
+      async setQuota(request): Promise<RpcResponse<WalletView>> {
+        const wallet = ctx.get('wallet') as WalletService | undefined
+        if (wallet === undefined) return err(request, { code: 'internal', message: 'wallet service is not mounted', details: {} })
+        try {
+          const view = await wallet.setQuota({
+            userId: request.payload.userId as never,
+            balanceMicros: request.payload.balanceMicros,
+            reason: request.payload.reason,
+          })
+          return { rpcId: request.rpcId, result: { ok: true, value: view } }
+        } catch (walletErr) {
+          if (walletErr instanceof WalletError) {
+            return err(request, {
+              code: walletErrorCodeToWire(walletErr.code),
+              message: walletErr.message,
+              ...walletErrorDetails(walletErr),
+            } as RpcError)
+          }
+          throw walletErr
+        }
+      },
+      async refreshDaily(request): Promise<RpcResponse<WalletView>> {
+        const wallet = ctx.get('wallet') as WalletService | undefined
+        if (wallet === undefined) return err(request, { code: 'internal', message: 'wallet service is not mounted', details: {} })
+        try {
+          const view = await wallet.refreshDaily({
+            userId: request.payload.userId as never,
+            idempotencyKey: request.payload.idempotencyKey,
+          })
+          return { rpcId: request.rpcId, result: { ok: true, value: view } }
+        } catch (walletErr) {
+          if (walletErr instanceof WalletError) {
+            return err(request, {
+              code: walletErrorCodeToWire(walletErr.code),
+              message: walletErr.message,
+              ...walletErrorDetails(walletErr),
+            } as RpcError)
+          }
+          throw walletErr
+        }
+      },
+      async grantWelcomeBonus(request): Promise<RpcResponse<WalletView>> {
+        const wallet = ctx.get('wallet') as WalletService | undefined
+        if (wallet === undefined) return err(request, { code: 'internal', message: 'wallet service is not mounted', details: {} })
+        try {
+          const view = await wallet.grantWelcomeBonus({ userId: request.payload.userId as never })
+          return { rpcId: request.rpcId, result: { ok: true, value: view } }
+        } catch (walletErr) {
+          if (walletErr instanceof WalletError) {
+            return err(request, {
+              code: walletErrorCodeToWire(walletErr.code),
+              message: walletErr.message,
+              ...walletErrorDetails(walletErr),
+            } as RpcError)
+          }
+          throw walletErr
+        }
+      },
+      async listLedger(request): Promise<RpcResponse<{ items: LedgerEntry[] }>> {
+        const wallet = ctx.get('wallet') as WalletService | undefined
+        if (wallet === undefined) return err(request, { code: 'internal', message: 'wallet service is not mounted', details: {} })
+        try {
+          const items = await wallet.listLedger({
+            userId: request.payload.userId as never,
+            ...(request.payload.limit !== undefined ? { limit: request.payload.limit } : {}),
+          })
+          return { rpcId: request.rpcId, result: { ok: true, value: { items } } }
+        } catch (walletErr) {
+          if (walletErr instanceof WalletError) {
+            return err(request, {
+              code: walletErrorCodeToWire(walletErr.code),
+              message: walletErr.message,
+              ...walletErrorDetails(walletErr),
+            } as RpcError)
+          }
+          throw walletErr
+        }
+      },
+    },
+
+    modelKeys: {
+      async provision(request): Promise<RpcResponse<ProvisionedKey>> {
+        const userModelKeys = ctx.get('userModelKeys') as UserModelKeyService | undefined
+        if (userModelKeys === undefined) return err(request, { code: 'internal', message: 'user-model-keys service is not mounted', details: {} })
+        try {
+          const view = await userModelKeys.provision({
+            userId: request.payload.userId as never,
+            ...(request.payload.label !== undefined ? { label: request.payload.label } : {}),
+          })
+          return { rpcId: request.rpcId, result: { ok: true, value: view } }
+        } catch (keyErr) {
+          if (keyErr instanceof ModelKeyError) {
+            return err(request, {
+              code: modelKeyErrorCodeToWire(keyErr.code),
+              message: keyErr.message,
+              ...modelKeyErrorDetails(keyErr, undefined),
+            } as RpcError)
+          }
+          throw keyErr
+        }
+      },
+      async list(request): Promise<RpcResponse<{ items: ModelKeyView[] }>> {
+        const userModelKeys = ctx.get('userModelKeys') as UserModelKeyService | undefined
+        if (userModelKeys === undefined) return err(request, { code: 'internal', message: 'user-model-keys service is not mounted', details: {} })
+        const items = await userModelKeys.list({ userId: request.payload.userId as never })
+        return { rpcId: request.rpcId, result: { ok: true, value: { items } } }
+      },
+      async revoke(request): Promise<RpcResponse<{ revoked: boolean }>> {
+        const userModelKeys = ctx.get('userModelKeys') as UserModelKeyService | undefined
+        if (userModelKeys === undefined) return err(request, { code: 'internal', message: 'user-model-keys service is not mounted', details: {} })
+        try {
+          const out = await userModelKeys.revoke({ keyId: request.payload.keyId as never })
+          return { rpcId: request.rpcId, result: { ok: true, value: out } }
+        } catch (keyErr) {
+          if (keyErr instanceof ModelKeyError) {
+            return err(request, {
+              code: modelKeyErrorCodeToWire(keyErr.code),
+              message: keyErr.message,
+              ...modelKeyErrorDetails(keyErr, request.payload.keyId),
+            } as RpcError)
+          }
+          throw keyErr
+        }
+      },
+    },
+
+    artifactRegistry: {
+      async list(request): Promise<RpcResponse<{ items: ArtifactRegistryView[] }>> {
+        const registry = ctx.get('artifactRegistry') as ArtifactRegistry | undefined
+        if (registry === undefined) return err(request, { code: 'internal', message: 'artifact registry is not mounted', details: {} })
+        const readonlyItems = await registry.list({
+          ...(request.payload.workspaceId !== undefined ? { workspaceId: brandWorkspaceId(request.payload.workspaceId) } : {}),
+          ...(request.payload.sessionId !== undefined ? { sessionId: brandSessionId(request.payload.sessionId) } : {}),
+        })
+        return { rpcId: request.rpcId, result: { ok: true, value: { items: [...readonlyItems] } } }
+      },
+      async read(request): Promise<RpcResponse<{ view: ArtifactRegistryView; bytesBase64: string }>> {
+        const registry = ctx.get('artifactRegistry') as ArtifactRegistry | undefined
+        if (registry === undefined) return err(request, { code: 'internal', message: 'artifact registry is not mounted', details: {} })
+        try {
+          const stored = await registry.read({ artifactId: request.payload.artifactId }, undefined)
+          const bytesBase64 = Buffer.from(stored.data).toString('base64')
+          return { rpcId: request.rpcId, result: { ok: true, value: { view: stored.view, bytesBase64 } } }
+        } catch (artErr) {
+          if (artErr instanceof ArtifactError) {
+            return err(request, {
+              code: artifactErrorCodeToWire(artErr.code),
+              message: artErr.message,
+              ...artifactErrorDetails(artErr),
+            } as RpcError)
+          }
+          throw artErr
+        }
+      },
+      async remove(request): Promise<RpcResponse<{ removed: true }>> {
+        const registry = ctx.get('artifactRegistry') as ArtifactRegistry | undefined
+        if (registry === undefined) return err(request, { code: 'internal', message: 'artifact registry is not mounted', details: {} })
+        // Idempotent: an unknown id resolves with { removed: true } per the contract.
+        await registry.remove({ artifactId: request.payload.artifactId })
+        return { rpcId: request.rpcId, result: { ok: true, value: { removed: true as const } } }
+      },
+    },
   }
+}
+
+// ---- workbuddy error translation ----
+
+/** Map identity-seam error codes to the closed wire-code union. */
+function identityErrorCodeToWire(code: IdentityError['code']): RpcErrorCode {
+  switch (code) {
+    case 'EMAIL_TAKEN': return 'email-taken'
+    case 'UNAUTHENTICATED':
+    case 'SESSION_EXPIRED': return 'unauthenticated'
+    case 'BAD_REQUEST': return 'bad-request'
+    case 'IDENTITY_UNAVAILABLE': return 'internal'
+  }
+}
+
+/** Map email-verification-seam error codes to the closed wire-code union. */
+function emailVerificationCodeToWire(code: EmailVerificationError['code']): RpcErrorCode {
+  switch (code) {
+    case 'RESEND_COOLDOWN': return 'email-code-resend-cooldown'
+    case 'RATE_LIMIT_EXCEEDED': return 'email-code-rate-limit'
+    case 'WRONG_CODE': return 'email-code-wrong'
+    case 'CODE_EXPIRED': return 'email-code-expired'
+    case 'CODE_LOCKED': return 'email-code-locked'
+    case 'EMAIL_VERIFICATION_DISABLED': return 'internal'
+    case 'VERIFICATION_CODE_REQUIRED':
+    case 'CODE_NOT_FOUND': return 'bad-request'
+    case 'EMAIL_INVALID': return 'bad-request'
+  }
+}
+
+/** Carry the seam's retry hint to the wire so a client UI can show the cooldown. */
+function emailVerificationErrorDetails(err: EmailVerificationError): { details: { retryAfterSeconds: number } } {
+  return { details: { retryAfterSeconds: err.retryAfterSeconds ?? 0 } }
+}
+
+/** Map wallet-seam error codes to the closed wire-code union. */
+function walletErrorCodeToWire(code: WalletError['code']): RpcErrorCode {
+  switch (code) {
+    case 'INSUFFICIENT_BALANCE': return 'insufficient-balance'
+    case 'DUPLICATE_REFRESH':
+    case 'BAD_REQUEST': return 'bad-request'
+    case 'WALLET_UNAVAILABLE': return 'internal'
+  }
+}
+
+/** Carry the structured insufficient-balance detail to the wire. */
+function walletErrorDetails(err: WalletError): { details: { userId: string; balanceMicros: number; attemptedMicros: number } | {} } {
+  if (err.detail !== undefined) {
+    return { details: err.detail as unknown as { userId: string; balanceMicros: number; attemptedMicros: number } }
+  }
+  return { details: {} }
+}
+
+/** Map model-key-seam error codes to the closed wire-code union. */
+function modelKeyErrorCodeToWire(code: ModelKeyError['code']): RpcErrorCode {
+  switch (code) {
+    case 'KEY_NOT_FOUND': return 'model-key-not-found'
+    case 'KEY_REVOKED': return 'model-key-revoked'
+    case 'BAD_REQUEST': return 'bad-request'
+    case 'MASTER_KEY_NOT_CONFIGURED':
+    case 'MASTER_KEY_INVALID':
+    case 'MODEL_KEYS_UNAVAILABLE': return 'internal'
+  }
+}
+
+/** Carry the named keyId to the wire for KEY_NOT_FOUND / KEY_REVOKED cases. */
+type ModelKeyErrorDetails =
+  | { details: { keyId: string } }
+  | { details: { userId: string; existingKeyId: string } }
+  | { details: Record<string, never> }
+
+function modelKeyErrorDetails(
+  err: ModelKeyError, keyId: string | undefined,
+): ModelKeyErrorDetails {
+  if (err.code === 'KEY_NOT_FOUND' && keyId !== undefined) return { details: { keyId } }
+  if (err.code === 'KEY_REVOKED') {
+    // The seam's message includes the existing keyId; for a structured
+    // `model-key-revoked` details map we surface the caller-supplied target
+    // plus the existing row id when the caller carried it. Otherwise leave
+    // empty so the renderer can show the message.
+    return { details: { userId: '', existingKeyId: '' } }
+  }
+  return { details: {} }
+}
+
+/** Map artifact-seam error codes to the closed wire-code union. */
+function artifactErrorCodeToWire(code: ArtifactError['code']): RpcErrorCode {
+  switch (code) {
+    case 'ARTIFACT_NOT_FOUND': return 'artifact-not-found'
+    case 'ARTIFACT_CORRUPT': return 'artifact-corrupt'
+    case 'ARTIFACT_TOO_LARGE':
+    case 'UNSUPPORTED_ARTIFACT_KIND':
+    case 'UNSUPPORTED_ARTIFACT_SOURCE':
+    case 'UNSUPPORTED_ARTIFACT_MEDIA_TYPE':
+    case 'ARTIFACT_TOO_MANY_PER_SESSION':
+    case 'INVALID_ARTIFACT_BYTES':
+    case 'INVALID_ARTIFACT_REF': return 'artifact-corrupt'
+    case 'ARTIFACT_READ_FAILED':
+    case 'ARTIFACT_WRITE_FAILED':
+    case 'ARTIFACT_REMOVE_FAILED': return 'internal'
+  }
+}
+
+/** Carry the artifact id to the wire for the not-found case. */
+function artifactErrorDetails(err: ArtifactError): { details: { artifactId: string; reason: string } | { artifactId: string } | {} } {
+  const reason = err.message
+  const causeRecord = (err.cause !== undefined && typeof err.cause === 'object' && err.cause !== null)
+    ? err.cause as { artifactId?: string }
+    : undefined
+  if (err.code === 'ARTIFACT_NOT_FOUND') return { details: { artifactId: causeRecord?.artifactId ?? '' } }
+  if (err.code === 'ARTIFACT_CORRUPT') {
+    return { details: { artifactId: causeRecord?.artifactId ?? '', reason } }
+  }
+  return { details: {} }
+}
+
+/** Compact user-id projection for human-readable key labels: first 8 chars. */
+function shortUserId(userId: string): string {
+  return userId.replace(/^u_/, '').slice(0, 8)
 }

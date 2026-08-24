@@ -225,6 +225,93 @@ export class FakeApiClient implements IApiClient {
     discoverModels: payload => this.record('llm.discoverModels', payload, Promise.resolve(ok({ models: [] }))),
   }
 
+  readonly account: IApiClient['account'] = {
+    signup: (payload: unknown) => this.record('account.signup', payload, Promise.resolve(ok({
+      userId: 'fk-user' as never,
+      displayName: null,
+      sessionToken: 'fk-token' as never,
+      expiresAt: Date.now() + 86_400_000,
+    }))),
+    emailCode: (payload: unknown) => this.record('account.emailCode', payload, Promise.resolve(ok({
+      expiresInSeconds: 600,
+      retryAfterSeconds: 0,
+    }))),
+    signin: (payload: unknown) => this.record('account.signin', payload, Promise.resolve(ok({
+      userId: 'fk-user' as never,
+      displayName: null,
+      sessionToken: 'fk-token' as never,
+      expiresAt: Date.now() + 86_400_000,
+    }))),
+    signout: (payload: unknown) => this.record('account.signout', payload, Promise.resolve(ok({ revoked: true as const }))),
+    state: (payload: unknown) => this.record('account.state', payload, Promise.resolve(ok({
+      userId: 'fk-user' as never,
+      displayName: null,
+      expiresAt: Date.now() + 86_400_000,
+    }))),
+  }
+
+  readonly wallet: IApiClient['wallet'] = {
+    get: (payload: unknown) => this.record('account.wallet.get', payload, Promise.resolve(ok({
+      userId: 'fk-user' as never,
+      balanceMicros: 0,
+      updatedAt: Date.now(),
+    }))),
+    credit: (payload: unknown) => this.record('account.wallet.credit', payload, Promise.resolve(ok({
+      userId: 'fk-user' as never,
+      balanceMicros: 0,
+      updatedAt: Date.now(),
+    }))),
+    debit: (payload: unknown) => this.record('account.wallet.debit', payload, Promise.resolve(ok({
+      userId: 'fk-user' as never,
+      balanceMicros: 0,
+      updatedAt: Date.now(),
+    }))),
+    setQuota: (payload: unknown) => this.record('account.wallet.setQuota', payload, Promise.resolve(ok({
+      userId: 'fk-user' as never,
+      balanceMicros: 0,
+      updatedAt: Date.now(),
+    }))),
+    refreshDaily: (payload: unknown) => this.record('account.wallet.refreshDaily', payload, Promise.resolve(ok({
+      userId: 'fk-user' as never,
+      balanceMicros: 0,
+      updatedAt: Date.now(),
+    }))),
+    grantWelcomeBonus: (payload: unknown) => this.record('account.wallet.grantWelcomeBonus', payload, Promise.resolve(ok({
+      userId: 'fk-user' as never,
+      balanceMicros: 0,
+      updatedAt: Date.now(),
+    }))),
+    listLedger: (payload: unknown) => this.record('account.wallet.listLedger', payload, Promise.resolve(ok({ items: [] }))),
+  }
+
+  readonly modelKeys: IApiClient['modelKeys'] = {
+    provision: (payload: unknown) => this.record('account.modelKeys.provision', payload, Promise.resolve(ok({
+      keyId: 'mk_fakefakefakefake' as never,
+      userId: 'fk-user' as never,
+      label: 'fake',
+      createdAt: Date.now(),
+      keyValue: 'sk_fakefakefakefakefakefakefakefake' as never,
+    }))),
+    list: (payload: unknown) => this.record('account.modelKeys.list', payload, Promise.resolve(ok({ items: [] }))),
+    revoke: (payload: unknown) => this.record('account.modelKeys.revoke', payload, Promise.resolve(ok({ revoked: true }))),
+  }
+
+  readonly artifactRegistry: IApiClient['artifactRegistry'] = {
+    list: (payload: unknown) => this.record('artifact.list', payload, Promise.resolve(ok({ items: [] }))),
+    read: (payload: unknown) => this.record('artifact.read', payload, Promise.resolve(ok({
+      view: {
+        artifactId: 'fake-artifact' as never,
+        kind: 'html',
+        source: 'tool-html',
+        mediaType: 'text/html',
+        bytes: 0,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+      bytesBase64: '',
+    }))),
+    remove: (payload: unknown) => this.record('artifact.remove', payload, Promise.resolve(ok({ removed: true as const }))),
+  }
+
   /** When true, streams never fire onOpen (misbehaving-carrier material for the handshake timeout guard). */
   suppressStreamOpen = false
 

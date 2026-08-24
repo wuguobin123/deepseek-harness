@@ -65,6 +65,21 @@ import {
 } from '../api/credentials.schema.ts'
 import { llmDiscoverModelsRequestSchema, llmModelsRequestSchema, llmProvidersRequestSchema } from '../api/llm.schema.ts'
 import {
+  accountEmailCodeRequestSchema, accountSigninRequestSchema, accountSignoutRequestSchema,
+  accountSignupRequestSchema, accountStateRequestSchema,
+} from '../api/account.schema.ts'
+import {
+  accountWalletCreditRequestSchema, accountWalletDebitRequestSchema, accountWalletGetRequestSchema,
+  accountWalletGrantWelcomeBonusRequestSchema, accountWalletListLedgerRequestSchema,
+  accountWalletRefreshDailyRequestSchema, accountWalletSetQuotaRequestSchema,
+} from '../api/wallet.schema.ts'
+import {
+  accountModelKeysListRequestSchema, accountModelKeysProvisionRequestSchema, accountModelKeysRevokeRequestSchema,
+} from '../api/model-keys.schema.ts'
+import {
+  artifactListRequestSchema, artifactReadRequestSchema, artifactRemoveRequestSchema,
+} from '../api/artifacts.schema.ts'
+import {
   subagentHistoryRequestSchema,
   subagentInterruptRequestSchema,
   subagentListRequestSchema,
@@ -140,6 +155,25 @@ const UNARY_ROUTES: UnaryRoutes = {
   'llm.providers': { schema: llmProvidersRequestSchema, invoke: (api, r) => api.llm.providers(r) },
   'llm.models': { schema: llmModelsRequestSchema, invoke: (api, r) => api.llm.models(r) },
   'llm.discoverModels': { schema: llmDiscoverModelsRequestSchema, invoke: (api, r, signal) => api.llm.discoverModels(r, signal) },
+  // ---- workbuddy multi-user account seam ----
+  'account.signup': { schema: accountSignupRequestSchema, invoke: (api, r) => api.account.signup(r) },
+  'account.emailCode': { schema: accountEmailCodeRequestSchema, invoke: (api, r) => api.account.emailCode(r) },
+  'account.signin': { schema: accountSigninRequestSchema, invoke: (api, r) => api.account.signin(r) },
+  'account.signout': { schema: accountSignoutRequestSchema, invoke: (api, r) => api.account.signout(r) },
+  'account.state': { schema: accountStateRequestSchema, invoke: (api, r) => api.account.state(r) },
+  'account.wallet.get': { schema: accountWalletGetRequestSchema, invoke: (api, r) => api.wallet.get(r) },
+  'account.wallet.credit': { schema: accountWalletCreditRequestSchema, invoke: (api, r) => api.wallet.credit(r) },
+  'account.wallet.debit': { schema: accountWalletDebitRequestSchema, invoke: (api, r) => api.wallet.debit(r) },
+  'account.wallet.setQuota': { schema: accountWalletSetQuotaRequestSchema, invoke: (api, r) => api.wallet.setQuota(r) },
+  'account.wallet.refreshDaily': { schema: accountWalletRefreshDailyRequestSchema, invoke: (api, r) => api.wallet.refreshDaily(r) },
+  'account.wallet.grantWelcomeBonus': { schema: accountWalletGrantWelcomeBonusRequestSchema, invoke: (api, r) => api.wallet.grantWelcomeBonus(r) },
+  'account.wallet.listLedger': { schema: accountWalletListLedgerRequestSchema, invoke: (api, r) => api.wallet.listLedger(r) },
+  'account.modelKeys.provision': { schema: accountModelKeysProvisionRequestSchema, invoke: (api, r) => api.modelKeys.provision(r) },
+  'account.modelKeys.list': { schema: accountModelKeysListRequestSchema, invoke: (api, r) => api.modelKeys.list(r) },
+  'account.modelKeys.revoke': { schema: accountModelKeysRevokeRequestSchema, invoke: (api, r) => api.modelKeys.revoke(r) },
+  'artifact.list': { schema: artifactListRequestSchema, invoke: (api, r) => api.artifactRegistry.list(r) },
+  'artifact.read': { schema: artifactReadRequestSchema, invoke: (api, r) => api.artifactRegistry.read(r) },
+  'artifact.remove': { schema: artifactRemoveRequestSchema, invoke: (api, r) => api.artifactRegistry.remove(r) },
 }
 
 /** Route lookup that narrows an arbitrary path segment to a map key (single cast point for the string→key refinement). */
@@ -174,7 +208,6 @@ function fullResponse(narrow: RpcResponse<unknown>): Response {
  */
 // K appears once in the signature but ties the UNARY_ROUTES[K] row lookup to its own
 // schema/invoke pairing; a union parameter degrades the row to an uninvokable intersection.
-// oxlint-disable-next-line typescript/no-unnecessary-type-parameters
 async function handleUnary<K extends keyof RpcMethodMap>(
   api: ApiProxy, method: K, message: ClientRequest, signal: AbortSignal,
 ): Promise<Response> {

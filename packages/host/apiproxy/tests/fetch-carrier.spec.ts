@@ -286,6 +286,77 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
       mux: (_request, signal) => stream(muxFrames, signal),
       host: (_request, signal) => stream(hostFrames, signal),
     },
+    account: {
+      async signup(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { userId: 'u-test', displayName: null, sessionToken: 'tok-test', expiresAt: 0 } } }
+      },
+      async emailCode(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { expiresInSeconds: 600, retryAfterSeconds: 60 } } }
+      },
+      async signin(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { userId: 'u-test', displayName: null, sessionToken: 'tok-test', expiresAt: 0 } } }
+      },
+      async signout(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { revoked: true as const } } }
+      },
+      async state(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: null } }
+      },
+    },
+    wallet: {
+      async get(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { userId: 'u-test', balanceMicros: 0, updatedAt: 0 } } }
+      },
+      async credit(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { userId: 'u-test', balanceMicros: 0, updatedAt: 0 } } }
+      },
+      async debit(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { userId: 'u-test', balanceMicros: 0, updatedAt: 0 } } }
+      },
+      async setQuota(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { userId: 'u-test', balanceMicros: 0, updatedAt: 0 } } }
+      },
+      async refreshDaily(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { userId: 'u-test', balanceMicros: 0, updatedAt: 0 } } }
+      },
+      async grantWelcomeBonus(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { userId: 'u-test', balanceMicros: 0, updatedAt: 0 } } }
+      },
+      async listLedger(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { items: [] } } }
+      },
+    },
+    modelKeys: {
+      async provision(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { keyId: 'mk_test', userId: 'u-test', label: 'workbuddy', createdAt: 0, keyValue: 'sk_test' } } }
+      },
+      async list(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { items: [] } } }
+      },
+      async revoke(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { revoked: true } } }
+      },
+    },
+    artifactRegistry: {
+      async list(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { items: [] } } }
+      },
+      async read(request) {
+        return {
+          rpcId: request.rpcId,
+          result: {
+            ok: true,
+            value: {
+              view: { artifactId: 'sha256:0000000000000000000000000000000000000000000000000000000000000000' as never, kind: 'html', source: 'tool-html', mediaType: 'text/html', bytes: 0, createdAt: '2026-01-01T00:00:00.000Z' },
+              bytesBase64: '',
+            },
+          },
+        }
+      },
+      async remove(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { removed: true as const } } }
+      },
+    },
     async respond(message: ClientResponse): Promise<RpcReceipt> {
       return message.rpcId === 'known' ? { accepted: true } : { accepted: false, reason: 'not-pending' }
     },

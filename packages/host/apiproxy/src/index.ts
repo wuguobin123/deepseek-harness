@@ -70,6 +70,8 @@ export class ApiProxyService extends Service implements ApiProxy {
   static inject = [
     'agentDefaultModel', 'agents', 'attachments', 'directoryPicker', 'llm', 'sessions', 'subagents', 'sessionQuery',
     'tools', 'userQuestions', 'workspaceRegistry',
+    // ---- workbuddy multi-user account seam (read through ctx.get; these are
+    // optional, so they are NOT declared on the inject list) ----
   ]
 
   static Config: z<Config> = z.object({
@@ -91,6 +93,14 @@ export class ApiProxyService extends Service implements ApiProxy {
   readonly llm: ApiProxy['llm']
   readonly events: ApiProxy['events']
   readonly downloads: ApiProxy['downloads']
+  /** workbuddy multi-user account seam (signup / signin / signout / state / emailCode). */
+  readonly account: ApiProxy['account']
+  /** workbuddy wallet: balance, ledger, debit/credit/setQuota/refresh-daily / welcome bonus. */
+  readonly wallet: ApiProxy['wallet']
+  /** workbuddy per-user model keys: provision/list/revoke. */
+  readonly modelKeys: ApiProxy['modelKeys']
+  /** workbuddy durable artifact registry: list/read/remove. */
+  readonly artifactRegistry: ApiProxy['artifactRegistry']
   readonly respond: ApiProxy['respond']
 
   constructor(ctx: Context, config: Config) {
@@ -119,6 +129,10 @@ export class ApiProxyService extends Service implements ApiProxy {
     this.llm = api.llm
     this.events = api.events
     this.downloads = api.downloads
+    this.account = api.account
+    this.wallet = api.wallet
+    this.modelKeys = api.modelKeys
+    this.artifactRegistry = api.artifactRegistry
     // createApiProxy returns closures (no `this` capture), so the bind is
     // behavior-neutral.
     this.respond = api.respond.bind(api)

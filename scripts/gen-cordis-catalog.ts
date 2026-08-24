@@ -625,6 +625,18 @@ export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
   WorkflowAgentEndInfo: 'event-local snapshot is owned by packages/workflow/workflow/src/index.ts',
   WorkflowAgentInfo: 'event-local snapshot is owned by packages/workflow/workflow/src/index.ts',
   WorkflowResultInfo: 'event-local snapshot is owned by packages/workflow/workflow/src/index.ts',
+  // ---- workbuddy multi-user account types (PR 2 step 10.1b) ----
+  SignedIn: 'auth response payload is owned by packages/account/identity/src/index.ts',
+  SessionToken: 'bearer session identity is owned by packages/account/identity/src/types.ts',
+  AuthenticatedView: 'bearer-auth validate view is owned by packages/account/identity/src/types.ts',
+  UserId: 'cross-package identity brand is owned by packages/account/identity/src/types.ts',
+  EmailCodeRequestResult: 'verification code TTL payload is owned by packages/account/email-verification/src/types.ts',
+  WalletView: 'wallet balance view is owned by packages/account/wallet/src/types.ts',
+  LedgerEntry: 'wallet audit row is owned by packages/account/wallet/src/types.ts',
+  LedgerReason: 'wallet audit row reason is owned by packages/account/wallet/src/types.ts',
+  ProvisionedKey: 'one-shot key material is owned by packages/account/model-keys/src/types.ts',
+  ModelKeyView: 'key metadata view is owned by packages/account/model-keys/src/types.ts',
+  KeyId: 'opaque row PK is owned by packages/account/model-keys/src/types.ts',
 }
 
 /** Repository data policy consumed by the Cordis catalog projector. */

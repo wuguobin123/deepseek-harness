@@ -94,6 +94,12 @@ const testIncludes = [
   'scripts/**/*.spec.ts',
 ]
 
+// scripts/ is a workspace member for `pnpm exec tsx` script entrypoints;
+// its nested node_modules/ holds duplicate packages via workspace symlinks,
+// and any spec inside scripts/node_modules/** is a duplicate of an upstream
+// suite, so the test discovery rule must ignore the whole tree.
+const scriptsNodeModulesExclude = ['scripts/node_modules/**']
+
 // The instrumented coverage gate sets this env; the exempt heavy suites then
 // run beside it uninstrumented (membership contract in scripts/coverage-exempt.ts).
 // A set-but-not-'1' value is a misconfiguration, not a silent no-op.
@@ -131,7 +137,10 @@ export default defineConfig({
     setupFiles: ['./scripts/test-invariants.ts'],
     // .tsx: client component specs (jsdom via per-file @vitest-environment pragma).
     include: testIncludes,
-    exclude: windowsUnsupportedTests,
+    exclude: [
+      ...windowsUnsupportedTests,
+      ...scriptsNodeModulesExclude,
+    ],
     // One coverage invocation aggregates both projects. Every suite forks for
     // Node stability; process-bound suites stay separate for inventory control.
     projects: [
@@ -150,6 +159,7 @@ export default defineConfig({
             ...windowsUnsupportedTests,
             ...processBoundTests,
             ...coverageExemptExcludes,
+            ...scriptsNodeModulesExclude,
           ],
         },
       },
@@ -164,6 +174,7 @@ export default defineConfig({
           exclude: [
             ...windowsUnsupportedTests,
             ...coverageExemptExcludes,
+            ...scriptsNodeModulesExclude,
           ],
         },
       },

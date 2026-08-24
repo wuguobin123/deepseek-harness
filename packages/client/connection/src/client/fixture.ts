@@ -3056,6 +3056,64 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         models: fixtureModelGroups().flatMap(group => group.models.map(model => ({ id: model.id, name: model.name }))),
       }),
     },
+    // workbuddy multi-user account seam — fixture surfaces a synthetic
+    // signed-in view so auth-aware UI can exercise flows without a backend.
+    account: {
+      signup: request => ok(request, {
+        userId: 'fx-user',
+        displayName: null,
+        sessionToken: 'fx-token',
+        expiresAt: Date.now() + 86_400_000,
+      }),
+      emailCode: request => ok(request, { expiresInSeconds: 600, retryAfterSeconds: 0 }),
+      signin: request => ok(request, {
+        userId: 'fx-user',
+        displayName: null,
+        sessionToken: 'fx-token',
+        expiresAt: Date.now() + 86_400_000,
+      }),
+      signout: request => ok(request, { revoked: true }),
+      state: request => ok(request, {
+        userId: 'fx-user',
+        displayName: null,
+        expiresAt: Date.now() + 86_400_000,
+      }),
+    },
+    wallet: {
+      get: request => ok(request, { userId: 'fx-user', balanceMicros: 0, updatedAt: Date.now() }),
+      credit: request => ok(request, { userId: 'fx-user', balanceMicros: 0, updatedAt: Date.now() }),
+      debit: request => ok(request, { userId: 'fx-user', balanceMicros: 0, updatedAt: Date.now() }),
+      setQuota: request => ok(request, { userId: 'fx-user', balanceMicros: 0, updatedAt: Date.now() }),
+      refreshDaily: request => ok(request, { userId: 'fx-user', balanceMicros: 0, updatedAt: Date.now() }),
+      grantWelcomeBonus: request => ok(request, { userId: 'fx-user', balanceMicros: 0, updatedAt: Date.now() }),
+      listLedger: request => ok(request, { items: [] }),
+    },
+    modelKeys: {
+      provision: request => ok(request, {
+        keyId: 'mk_fakefakefakefake',
+        userId: 'fx-user',
+        label: 'fixture',
+        createdAt: Date.now(),
+        keyValue: 'sk_fakefakefakefakefakefakefakefake',
+      }),
+      list: request => ok(request, { items: [] }),
+      revoke: request => ok(request, { revoked: true }),
+    },
+    artifactRegistry: {
+      list: request => ok(request, { items: [] }),
+      read: request => ok(request, {
+        view: {
+          artifactId: 'fx-artifact' as never,
+          kind: 'html',
+          source: 'tool-html',
+          mediaType: 'text/html',
+          bytes: 0,
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+        bytesBase64: '',
+      }),
+      remove: request => ok(request, { removed: true }),
+    },
     respond(message: ClientResponse): Promise<RpcReceipt> {
       // Same routing discipline as the host: rpcId first, then the payload's
       // audit correlation; a settled or unknown id is not-pending.
@@ -3227,6 +3285,24 @@ export class FixtureApiClient extends AbstractApiClient {
       case 'llm.providers': return this.api.llm.providers(request)
       case 'llm.models': return this.api.llm.models(request)
       case 'llm.discoverModels': return this.api.llm.discoverModels(request, signal)
+      case 'account.signup': return this.api.account.signup(request)
+      case 'account.emailCode': return this.api.account.emailCode(request)
+      case 'account.signin': return this.api.account.signin(request)
+      case 'account.signout': return this.api.account.signout(request)
+      case 'account.state': return this.api.account.state(request)
+      case 'account.wallet.get': return this.api.wallet.get(request)
+      case 'account.wallet.credit': return this.api.wallet.credit(request)
+      case 'account.wallet.debit': return this.api.wallet.debit(request)
+      case 'account.wallet.setQuota': return this.api.wallet.setQuota(request)
+      case 'account.wallet.refreshDaily': return this.api.wallet.refreshDaily(request)
+      case 'account.wallet.grantWelcomeBonus': return this.api.wallet.grantWelcomeBonus(request)
+      case 'account.wallet.listLedger': return this.api.wallet.listLedger(request)
+      case 'account.modelKeys.provision': return this.api.modelKeys.provision(request)
+      case 'account.modelKeys.list': return this.api.modelKeys.list(request)
+      case 'account.modelKeys.revoke': return this.api.modelKeys.revoke(request)
+      case 'artifact.list': return this.api.artifactRegistry.list(request)
+      case 'artifact.read': return this.api.artifactRegistry.read(request)
+      case 'artifact.remove': return this.api.artifactRegistry.remove(request)
     }
   }
 

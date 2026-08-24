@@ -14,6 +14,10 @@ import type { SettingsApi } from './settings.ts'
 import type { CredentialsApi } from './credentials.ts'
 import type { LlmApi } from './llm.ts'
 import type { SubagentsApi } from './subagents.ts'
+import type { AccountApi } from './account.ts'
+import type { WalletApi } from './wallet.ts'
+import type { ModelKeysApi } from './model-keys.ts'
+import type { ArtifactsApi } from './artifacts.ts'
 import type { RpcResponse } from './rpc.ts'
 
 /**
@@ -74,6 +78,25 @@ export interface RpcMethodMap {
   'llm.providers': LlmApi['providers']
   'llm.models': LlmApi['models']
   'llm.discoverModels': LlmApi['discoverModels']
+  // ---- workbuddy multi-user account seam ----
+  'account.signup': AccountApi['signup']
+  'account.emailCode': AccountApi['emailCode']
+  'account.signin': AccountApi['signin']
+  'account.signout': AccountApi['signout']
+  'account.state': AccountApi['state']
+  'account.wallet.get': WalletApi['get']
+  'account.wallet.credit': WalletApi['credit']
+  'account.wallet.debit': WalletApi['debit']
+  'account.wallet.setQuota': WalletApi['setQuota']
+  'account.wallet.refreshDaily': WalletApi['refreshDaily']
+  'account.wallet.grantWelcomeBonus': WalletApi['grantWelcomeBonus']
+  'account.wallet.listLedger': WalletApi['listLedger']
+  'account.modelKeys.provision': ModelKeysApi['provision']
+  'account.modelKeys.list': ModelKeysApi['list']
+  'account.modelKeys.revoke': ModelKeysApi['revoke']
+  'artifact.list': ArtifactsApi['list']
+  'artifact.read': ArtifactsApi['read']
+  'artifact.remove': ArtifactsApi['remove']
 }
 
 /** Business request payload of method K (reaches through the RpcRequest narrow form to payload). */

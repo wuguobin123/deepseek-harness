@@ -8,6 +8,7 @@ import { toFetchHandler } from '@deepseek-ai/dsh-host-apiproxy'
 import { API_PATH, HOST_EVENTS_PATH, MUX_EVENTS_PATH } from './api-path.ts'
 import { bridge, DEFAULT_MAX_REQUEST_BODY_BYTES } from './http-bridge.ts'
 import { assertTrustedAuthority, isTrustedApiRequest } from './api-request-trust.ts'
+import { isAuthenticatedApiRequest } from './api-request-auth.ts'
 import { HostConnectionService } from './rpc-host.ts'
 import { rejectWebSocketUpgrade, WebSocketDownlinks } from './websocket-downlink.ts'
 
@@ -142,10 +143,12 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
       const method = pathname.startsWith(`${API_PATH}/`)
         ? pathname.slice(API_PATH.length + 1)
         : undefined
-      if (method !== undefined
-        && PRIVILEGED_METHODS.has(method)
-        && !isTrustedApiRequest(request, [])) {
-        return new Response('forbidden', { status: 403 })
+      if (method !== undefined && PRIVILEGED_METHODS.has(method)) {
+        const trusted = isTrustedApiRequest(request, [])
+        const authenticated = trusted ? true : await isAuthenticatedApiRequest(request, ctx)
+        if (!trusted && !authenticated) {
+          return new Response('forbidden', { status: 403 })
+        }
       }
       if (request.method === 'GET' && (pathname === MUX_EVENTS_PATH || pathname === HOST_EVENTS_PATH)) {
         return new Response('upgrade required', {
@@ -162,7 +165,9 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
     kind: 'prefix',
     path: API_PATH,
     handler: async (req, res) => {
-      if (!isTrustedApiRequest(req, trustedHosts)) {
+      const trusted = isTrustedApiRequest(req, trustedHosts)
+      const authenticated = trusted ? true : await isAuthenticatedApiRequest(req, ctx)
+      if (!trusted && !authenticated) {
         res.writeHead(403)
         res.end('forbidden')
         return
@@ -180,8 +185,10 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
     ): void => {
       apiCtx.effect(() => apiCtx.webServer.registerUpgrade({
         path,
-        handler: (req, socket, head) => {
-          if (!isTrustedApiRequest(req, trustedHosts)) {
+        handler: async (req, socket, head) => {
+          const trusted = isTrustedApiRequest(req, trustedHosts)
+          const authenticated = trusted ? true : await isAuthenticatedApiRequest(req, apiCtx)
+          if (!trusted && !authenticated) {
             rejectWebSocketUpgrade(socket)
             return
           }

@@ -16,6 +16,10 @@ import type { SettingsApi } from './settings.ts'
 import type { CredentialsApi } from './credentials.ts'
 import type { LlmApi } from './llm.ts'
 import type { DownloadsApi } from './downloads.ts'
+import type { AccountApi } from './account.ts'
+import type { WalletApi } from './wallet.ts'
+import type { ModelKeysApi } from './model-keys.ts'
+import type { ArtifactsApi } from './artifacts.ts'
 import type { ClientResponse, RpcReceipt } from './rpc.ts'
 
 /** Root interface of the unified API. New client-request domain = one new file pair + one field here + one map row. */
@@ -33,6 +37,20 @@ export interface ApiProxy {
   llm: LlmApi
   /** Host-only download surfaces (GET, no wire envelope); absent from IApiClient. */
   downloads: DownloadsApi
+  /**
+   * workbuddy multi-user account seam: signup / signin / signout / state, plus
+   * email-verification code minting. Non-privileged — anonymous LAN callers
+   * may hit signup, signin, and emailCode to grow the user base.
+   */
+  account: AccountApi
+  /** workbuddy wallet: balance, ledger, debit/credit/setQuota/refresh-daily.
+   *  The fence restricts credit/debit/setQuota/refreshDaily/grantWelcomeBonus
+   *  to loopback; get and listLedger are loopback OR bearer. */
+  wallet: WalletApi
+  /** workbuddy per-user model keys: provision/list/revoke. */
+  modelKeys: ModelKeysApi
+  /** workbuddy durable artifact registry: list/read/remove. */
+  artifactRegistry: ArtifactsApi
   /**
    * Response entry for server requests; not a domain method.
    * @param message - Client response carrying the server request's rpcId.
@@ -62,6 +80,16 @@ export type { SettingsApi, SettingsNamespaceView, SettingsPathOpView, SettingsSe
 export type { CredentialsApi, CredentialView } from './credentials.ts'
 export type { ConfigurableProviderView, DiscoveredModelView, LlmApi } from './llm.ts'
 export type { DownloadsApi } from './downloads.ts'
+export type {
+  AccountApi, SignedIn, AuthenticatedView,
+} from './account.ts'
+export type {
+  WalletApi, WalletView, LedgerEntry, WalletLedgerReason, AmountMicros, InsufficientBalanceReason,
+} from './wallet.ts'
+export type { ModelKeysApi, ModelKeyView, ProvisionedKey } from './model-keys.ts'
+export type {
+  ArtifactsApi, ArtifactView, ArtifactKind, ArtifactSource, ArtifactMediaType,
+} from './artifacts.ts'
 export type { ApprovalResponsePayload } from './approvals.ts'
 
 export type { QuestionResponsePayload } from './questions.ts'

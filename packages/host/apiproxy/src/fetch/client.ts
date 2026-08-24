@@ -67,6 +67,21 @@ import {
   subagentListValueSchema,
   subagentPromptValueSchema,
 } from '../api/subagents.schema.ts'
+import {
+  accountEmailCodeValueSchema, accountSigninValueSchema, accountSignoutValueSchema,
+  accountSignupValueSchema, accountStateValueSchema,
+} from '../api/account.schema.ts'
+import {
+  accountWalletCreditValueSchema, accountWalletDebitValueSchema, accountWalletGetValueSchema,
+  accountWalletGrantWelcomeBonusValueSchema, accountWalletListLedgerValueSchema,
+  accountWalletRefreshDailyValueSchema, accountWalletSetQuotaValueSchema,
+} from '../api/wallet.schema.ts'
+import {
+  accountModelKeysListValueSchema, accountModelKeysProvisionValueSchema, accountModelKeysRevokeValueSchema,
+} from '../api/model-keys.schema.ts'
+import {
+  artifactListValueSchema, artifactReadValueSchema, artifactRemoveValueSchema,
+} from '../api/artifacts.schema.ts'
 
 /**
  * Client consumption face of the contract (shape a): same domain tree as ApiProxy, but unary
@@ -161,6 +176,36 @@ export interface IApiClient {
     models(payload: RequestPayload<'llm.models'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'llm.models'>>>
     discoverModels(payload: RequestPayload<'llm.discoverModels'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'llm.discoverModels'>>>
   }
+  /** workbuddy multi-user account seam: signup / signin / signout / state / emailCode. */
+  account: {
+    signup(payload: RequestPayload<'account.signup'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.signup'>>>
+    emailCode(payload: RequestPayload<'account.emailCode'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.emailCode'>>>
+    signin(payload: RequestPayload<'account.signin'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.signin'>>>
+    signout(payload: RequestPayload<'account.signout'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.signout'>>>
+    state(payload: RequestPayload<'account.state'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.state'>>>
+  }
+  /** workbuddy wallet: get / credit / debit / setQuota / refreshDaily / grantWelcomeBonus / listLedger. */
+  wallet: {
+    get(payload: RequestPayload<'account.wallet.get'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.wallet.get'>>>
+    credit(payload: RequestPayload<'account.wallet.credit'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.wallet.credit'>>>
+    debit(payload: RequestPayload<'account.wallet.debit'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.wallet.debit'>>>
+    setQuota(payload: RequestPayload<'account.wallet.setQuota'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.wallet.setQuota'>>>
+    refreshDaily(payload: RequestPayload<'account.wallet.refreshDaily'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.wallet.refreshDaily'>>>
+    grantWelcomeBonus(payload: RequestPayload<'account.wallet.grantWelcomeBonus'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.wallet.grantWelcomeBonus'>>>
+    listLedger(payload: RequestPayload<'account.wallet.listLedger'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.wallet.listLedger'>>>
+  }
+  /** workbuddy per-user model keys: provision / list / revoke. */
+  modelKeys: {
+    provision(payload: RequestPayload<'account.modelKeys.provision'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.modelKeys.provision'>>>
+    list(payload: RequestPayload<'account.modelKeys.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.modelKeys.list'>>>
+    revoke(payload: RequestPayload<'account.modelKeys.revoke'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.modelKeys.revoke'>>>
+  }
+  /** workbuddy durable artifact registry: list / read / remove. */
+  artifactRegistry: {
+    list(payload: RequestPayload<'artifact.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'artifact.list'>>>
+    read(payload: RequestPayload<'artifact.read'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'artifact.read'>>>
+    remove(payload: RequestPayload<'artifact.remove'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'artifact.remove'>>>
+  }
   /** client-response passthrough (rpcId is a backfill of the server-request's id — never minted here). */
   respond(message: ClientResponse, signal?: AbortSignal): Promise<RpcReceipt>
 }
@@ -222,6 +267,25 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
   'llm.providers': llmProvidersValueSchema,
   'llm.models': llmModelsValueSchema,
   'llm.discoverModels': llmDiscoverModelsValueSchema,
+  // ---- workbuddy multi-user account seam ----
+  'account.signup': accountSignupValueSchema,
+  'account.emailCode': accountEmailCodeValueSchema,
+  'account.signin': accountSigninValueSchema,
+  'account.signout': accountSignoutValueSchema,
+  'account.state': accountStateValueSchema,
+  'account.wallet.get': accountWalletGetValueSchema,
+  'account.wallet.credit': accountWalletCreditValueSchema,
+  'account.wallet.debit': accountWalletDebitValueSchema,
+  'account.wallet.setQuota': accountWalletSetQuotaValueSchema,
+  'account.wallet.refreshDaily': accountWalletRefreshDailyValueSchema,
+  'account.wallet.grantWelcomeBonus': accountWalletGrantWelcomeBonusValueSchema,
+  'account.wallet.listLedger': accountWalletListLedgerValueSchema,
+  'account.modelKeys.provision': accountModelKeysProvisionValueSchema,
+  'account.modelKeys.list': accountModelKeysListValueSchema,
+  'account.modelKeys.revoke': accountModelKeysRevokeValueSchema,
+  'artifact.list': artifactListValueSchema,
+  'artifact.read': artifactReadValueSchema,
+  'artifact.remove': artifactRemoveValueSchema,
 }
 
 /** Default timeout for bounded unary calls (rpc-compare 2026-07-19: a hung host must not leave callers pending forever). */
@@ -498,6 +562,36 @@ export abstract class AbstractApiClient implements IApiClient {
     providers: (payload, signal) => this.callUnary('llm.providers', payload, signal),
     models: (payload, signal) => this.callUnary('llm.models', payload, signal),
     discoverModels: (payload, signal) => this.callUnary('llm.discoverModels', payload, signal),
+  }
+
+  readonly account: IApiClient['account'] = {
+    signup: (payload, signal) => this.callUnary('account.signup', payload, signal),
+    emailCode: (payload, signal) => this.callUnary('account.emailCode', payload, signal, 'caller-signal-only'),
+    signin: (payload, signal) => this.callUnary('account.signin', payload, signal),
+    signout: (payload, signal) => this.callUnary('account.signout', payload, signal),
+    state: (payload, signal) => this.callUnary('account.state', payload, signal),
+  }
+
+  readonly wallet: IApiClient['wallet'] = {
+    get: (payload, signal) => this.callUnary('account.wallet.get', payload, signal),
+    credit: (payload, signal) => this.callUnary('account.wallet.credit', payload, signal),
+    debit: (payload, signal) => this.callUnary('account.wallet.debit', payload, signal),
+    setQuota: (payload, signal) => this.callUnary('account.wallet.setQuota', payload, signal),
+    refreshDaily: (payload, signal) => this.callUnary('account.wallet.refreshDaily', payload, signal),
+    grantWelcomeBonus: (payload, signal) => this.callUnary('account.wallet.grantWelcomeBonus', payload, signal),
+    listLedger: (payload, signal) => this.callUnary('account.wallet.listLedger', payload, signal),
+  }
+
+  readonly modelKeys: IApiClient['modelKeys'] = {
+    provision: (payload, signal) => this.callUnary('account.modelKeys.provision', payload, signal),
+    list: (payload, signal) => this.callUnary('account.modelKeys.list', payload, signal),
+    revoke: (payload, signal) => this.callUnary('account.modelKeys.revoke', payload, signal),
+  }
+
+  readonly artifactRegistry: IApiClient['artifactRegistry'] = {
+    list: (payload, signal) => this.callUnary('artifact.list', payload, signal),
+    read: (payload, signal) => this.callUnary('artifact.read', payload, signal),
+    remove: (payload, signal) => this.callUnary('artifact.remove', payload, signal),
   }
 
   readonly events: IApiClient['events'] = {

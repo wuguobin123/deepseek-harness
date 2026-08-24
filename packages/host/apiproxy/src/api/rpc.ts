@@ -92,6 +92,36 @@ export interface RpcErrorDetailsMap {
   'subagent-not-resumable': { childSessionId: SessionId }
   'subagent-unauthorized': { childSessionId: SessionId }
   'subagent-delivery-unavailable': { childSessionId: SessionId }
+  // ---- workbuddy multi-user account seam ----
+  /** An account.signin failed because the email is unknown OR the password is wrong.
+   *  The seam collapses both to one code so a wire-side observer cannot tell
+   *  which it was. The message is the seam's own text. */
+  'unauthenticated': {}
+  /** An account.emailCode request hit the per-email cooldown window. */
+  'email-code-resend-cooldown': { retryAfterSeconds: number }
+  /** An account.emailCode request exceeded the per-email hourly cap. */
+  'email-code-rate-limit': { retryAfterSeconds: number }
+  /** The verification code supplied to account.signup did not match. */
+  'email-code-wrong': {}
+  /** The verification code supplied to account.signup is past its TTL. */
+  'email-code-expired': {}
+  /** The verification code slot is locked after too many wrong attempts. */
+  'email-code-locked': { retryAfterSeconds: number }
+  /** account.signup was called with no verification code and the seam is on. */
+  'verification-code-required': {}
+  /** account.signup hit an email that is already registered. */
+  'email-taken': {}
+  /** account.wallet.debit would drive the balance below zero. */
+  'insufficient-balance': { userId: string; balanceMicros: number; attemptedMicros: number }
+  /** An account.modelKeys call named an unknown keyId. */
+  'model-key-not-found': { keyId: string }
+  /** An account.modelKeys.provision hit the one-active-key policy and the user
+   *  already has a live key. The caller should revoke the existing key first. */
+  'model-key-revoked': { userId: string; existingKeyId: string }
+  /** An artifact.read named an unknown artifactId. */
+  'artifact-not-found': { artifactId: string }
+  /** An artifact.read's stored bytes no longer match its declared reference. */
+  'artifact-corrupt': { artifactId: string; reason: string }
   'internal': {}
 }
 

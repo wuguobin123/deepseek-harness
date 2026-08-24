@@ -7,6 +7,7 @@
   },
   "files": [
     "src/api-path.ts",
+    "src/api-request-auth.ts",
     "src/api-request-trust.ts",
     "src/http-bridge.ts",
     "src/index.ts",
@@ -17,6 +18,9 @@
     "src/websocket-downlink.ts"
   ],
   "references": [
+    {
+      "path": "../../account/identity"
+    },
     {
       "path": "../../attachment/attachment"
     },

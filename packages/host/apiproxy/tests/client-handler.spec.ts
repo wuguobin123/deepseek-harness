@@ -28,6 +28,10 @@ function scriptedApi(overrides: {
   settings?: Partial<ApiProxy['settings']>
   credentials?: Partial<ApiProxy['credentials']>
   llm?: Partial<ApiProxy['llm']>
+  account?: Partial<ApiProxy['account']>
+  wallet?: Partial<ApiProxy['wallet']>
+  modelKeys?: Partial<ApiProxy['modelKeys']>
+  artifactRegistry?: Partial<ApiProxy['artifactRegistry']>
   respond?: ApiProxy['respond']
 } = {}): ApiProxy {
   async function *empty<F>(): AsyncGenerator<RpcRequest<F>> { /* no frames */ }
@@ -127,6 +131,36 @@ function scriptedApi(overrides: {
       models: r => ok(r, { groups: [], failures: [] }),
       discoverModels: err,
       ...overrides.llm,
+    },
+    account: {
+      signup: r => ok(r, { userId: 'u-test', displayName: null, sessionToken: 'tok-test', expiresAt: 0 }),
+      emailCode: r => ok(r, { expiresInSeconds: 600, retryAfterSeconds: 60 }),
+      signin: r => ok(r, { userId: 'u-test', displayName: null, sessionToken: 'tok-test', expiresAt: 0 }),
+      signout: r => ok(r, { revoked: true }),
+      state: r => ok(r, null),
+      ...overrides.account,
+    },
+    wallet: {
+      get: r => ok(r, { userId: 'u-test', balanceMicros: 0, updatedAt: 0 }),
+      credit: r => ok(r, { userId: 'u-test', balanceMicros: 0, updatedAt: 0 }),
+      debit: r => ok(r, { userId: 'u-test', balanceMicros: 0, updatedAt: 0 }),
+      setQuota: r => ok(r, { userId: 'u-test', balanceMicros: 0, updatedAt: 0 }),
+      refreshDaily: r => ok(r, { userId: 'u-test', balanceMicros: 0, updatedAt: 0 }),
+      grantWelcomeBonus: r => ok(r, { userId: 'u-test', balanceMicros: 0, updatedAt: 0 }),
+      listLedger: r => ok(r, { items: [] }),
+      ...overrides.wallet,
+    },
+    modelKeys: {
+      provision: r => ok(r, { keyId: 'mk_test', userId: 'u-test', label: 'workbuddy', createdAt: 0, keyValue: 'sk_test' }),
+      list: r => ok(r, { items: [] }),
+      revoke: r => ok(r, { revoked: true }),
+      ...overrides.modelKeys,
+    },
+    artifactRegistry: {
+      list: r => ok(r, { items: [] }),
+      read: r => ok(r, { view: { artifactId: 'sha256:0'.repeat(63) + '0' as never, kind: 'html', source: 'tool-html', mediaType: 'text/html', bytes: 0, createdAt: '2026-01-01T00:00:00.000Z' }, bytesBase64: '' }),
+      remove: r => ok(r, { removed: true }),
+      ...overrides.artifactRegistry,
     },
     events: { mux: () => empty<MuxFrame>(), host: () => empty<HostFrame>(), ...overrides.events },
     respond: overrides.respond ?? (() => Promise.resolve({ accepted: false as const, reason: 'not-pending' as const })),
