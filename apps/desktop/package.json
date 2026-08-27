@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-harness/desktop",
-  "version": "0.3.22",
+  "version": "0.3.23",
   "private": true,
   "description": "Electron desktop client for the Xiaowei ops deployment",
   "main": "dist/main/main/index.js",
