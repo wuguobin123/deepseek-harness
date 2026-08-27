@@ -7,7 +7,7 @@ import Storage from '@deepseek-ai/dsh-storage'
 import type { StorageBackend } from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import type { DomainChanged } from '@deepseek-ai/dsh-storage-domain'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId, SessionOwnerId } from '@deepseek-ai/dsh-session'
 import type { SessionHeader } from '@deepseek-ai/dsh-session'
 import { MemoryMediaPool, MemoryStorageBackend } from '../../../storage/storage-domain/tests/helpers/memory-backend.ts'
 import WorkspaceRegistry, {
@@ -17,13 +17,14 @@ import WorkspaceRegistry, {
 } from '../src/index.ts'
 import type { WorkspaceDomainState, WorkspaceRecord } from '../src/index.ts'
 
-const DOMAIN_VERSION = 2
+const DOMAIN_VERSION = 3
 
-const header = (id: string, cwd?: string, createdAt = 0): SessionHeader => ({
-  version: 0,
+const header = (id: string, cwd?: string, createdAt = 0, ownerId?: string): SessionHeader => ({
+  version: 1,
   id: SessionId(id),
   createdAt,
   ...(cwd === undefined ? {} : { cwd }),
+  ...(ownerId === undefined ? {} : { ownerId: SessionOwnerId(ownerId) }),
 })
 
 interface HarnessOptions {
@@ -131,6 +132,7 @@ function selectiveFailureBackend(
 
 function record(path: string, sessionIds: string[], createdAt = '2026-07-24T00:00:00.000Z'): WorkspaceRecord {
   return {
+    owner: { kind: 'local' },
     path,
     title: basename(path),
     sessionIds: sessionIds.map(SessionId),
@@ -390,6 +392,40 @@ describe('WorkspaceRegistry create and lookup', () => {
     expect(first.title).toBe('Shared')
     expect(second.title).toBe('Shared')
     expect(registry.list()).toEqual([second, first])
+  })
+
+  it('isolates durable records by explicit account owner', async () => {
+    const rootA = await makeDir('owner-a')
+    const rootB = await makeDir('owner-b')
+    const pathA = await makeDir('owner-a/shared')
+    const pathB = await makeDir('owner-b/shared')
+    const { registry, pool } = await harness()
+    const ownerA = { kind: 'account' as const, userId: SessionOwnerId('a') }
+    const ownerB = { kind: 'account' as const, userId: SessionOwnerId('b') }
+    const a = await registry.create(pathA, undefined, ownerA)
+    const b = await registry.create(pathB, undefined, ownerB)
+    expect(a.owner).toEqual(ownerA)
+    expect(b.owner).toEqual(ownerB)
+    expect(registry.list(ownerA)).toEqual([a])
+    expect(registry.list(ownerB)).toEqual([b])
+    expect(registry.get(b.id, ownerA)).toBeUndefined()
+    expect(await registry.resolveByPath(pathB, ownerA)).toBeUndefined()
+    await expect(registry.delete(b.id, ownerA)).resolves.toBe(false)
+    expect(pool.media.get('workspace')!.tables.get('workspaces')!.size).toBe(2)
+    expect(rootA).not.toBe(rootB)
+  })
+
+  it('does not allow a foreign account to reorder or observe global order', async () => {
+    const firstDir = await makeDir('reorder-first')
+    const secondDir = await makeDir('reorder-second')
+    const { registry } = await harness()
+    const ownerA = { kind: 'account' as const, userId: 'a' as never }
+    const ownerB = { kind: 'account' as const, userId: 'b' as never }
+    const first = await registry.create(firstDir, undefined, ownerA)
+    const second = await registry.create(secondDir, undefined, ownerB)
+    await expect(registry.insertBefore(second.id, first.id, ownerA)).rejects.toThrow(/unknown workspace/)
+    expect(await registry.insertBefore(first.id, undefined, ownerA)).toEqual([first.id])
+    expect(registry.list(ownerB)).toEqual([second])
   })
 
   it('rejects nonexistent and non-directory paths without changing order', async () => {
@@ -691,6 +727,16 @@ describe('Workspace session ordering', () => {
     expect(result.list).toHaveBeenCalledTimes(1)
   })
 
+  it('indexes a lazy live account owner before attaching the session', async () => {
+    const dir = await makeDir('live-account')
+    const owner = { kind: 'account' as const, userId: SessionOwnerId('account-live') }
+    const live = { ...header('live-account-session', dir, 1), ownerId: owner.userId }
+    const result = await harness({ sessions: [], liveSessions: [live] })
+    const workspace = await result.registry.create(dir, undefined, owner)
+    await workspace.attachSession(live.id)
+    expect(workspace.sessionIds).toEqual([live.id])
+  })
+
   it('rejects mismatched, missing, unresolved, non-directory, and unknown cwd facts', async () => {
     const dir = await makeDir('strict')
     const elsewhere = await makeDir('elsewhere')
@@ -873,6 +919,30 @@ describe('workspace mutation and status', () => {
 })
 
 describe('registry-global session archive', () => {
+  it('keeps cold account Workspace and archive projections owner-scoped across restart', async () => {
+    const dirA = await makeDir('archive-account-a')
+    const dirB = await makeDir('archive-account-b')
+    const headers = [
+      header('account-a-cold', dirA, 200, 'account-a'),
+      header('account-b-cold', dirB, 100, 'account-b'),
+    ]
+    const ownerA = { kind: 'account' as const, userId: SessionOwnerId('account-a') }
+    const ownerB = { kind: 'account' as const, userId: SessionOwnerId('account-b') }
+    const pool = new MemoryMediaPool()
+    const first = await harness({ pool, sessions: headers })
+    expect(first.registry.list(ownerA)[0]?.sessionIds).toEqual(['account-a-cold'])
+    expect(first.registry.list(ownerB)[0]?.sessionIds).toEqual(['account-b-cold'])
+    await first.registry.archiveSession(SessionId('account-a-cold'))
+    await first.registry.archiveSession(SessionId('account-b-cold'))
+    await first.fiber.dispose()
+
+    const second = await harness({ pool, sessions: headers })
+    expect(second.registry.list(ownerA)[0]?.sessionIds).toEqual(['account-a-cold'])
+    expect(second.registry.list(ownerB)[0]?.sessionIds).toEqual(['account-b-cold'])
+    expect(second.registry.archivedSessionIdsFor(ownerA)).toEqual(['account-a-cold'])
+    expect(second.registry.archivedSessionIdsFor(ownerB)).toEqual(['account-b-cold'])
+  })
+
   it('archives durably in order, idempotently skips repeats, and leaves accounting untouched', async () => {
     const dir = await makeDir('archive-home')
     const result = await harness({ sessions: [header('kept', dir, 100), header('gone', dir, 200)] })

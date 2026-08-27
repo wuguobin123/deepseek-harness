@@ -10,81 +10,81 @@
  * no local store — every `approval/resolved` it sees is authoritative and the
  * entry just disappears from the list.
  */
-import React from 'react';
-import { useNavigate } from 'react-router-dom';
-import * as api from '../../api';
-import type { MuxFrame } from '../../../shared/contracts';
+import React from 'react'
+import { useNavigate } from 'react-router-dom'
+import * as api from '../../api'
+import type { MuxFrame } from '../../../shared/contracts'
 
 interface ApprovalRequestItem {
-  rpcId: string;
-  sessionId: string;
-  approvalId: string;
-  toolName: string;
-  callId?: string;
-  reason?: string;
-  receivedAt: number;
+  rpcId: string
+  sessionId: string
+  approvalId: string
+  toolName: string
+  callId?: string
+  reason?: string
+  receivedAt: number
 }
 
 interface PendingMap {
-  byRpc: Map<string, ApprovalRequestItem>;
+  byRpc: Map<string, ApprovalRequestItem>
   /** insertion-ordered list of unique sessionIds with at least one pending ask */
-  sessionIds: string[];
+  sessionIds: string[]
 }
 
 function emptyMap(): PendingMap {
-  return { byRpc: new Map(), sessionIds: [] };
+  return { byRpc: new Map(), sessionIds: [] }
 }
 
 function isApprovalRequested(frame: MuxFrame): frame is Extract<MuxFrame, { type: 'approval/requested' }> {
-  return frame.type === 'approval/requested';
+  return frame.type === 'approval/requested'
 }
 
 function isApprovalResolved(frame: MuxFrame): frame is Extract<MuxFrame, { type: 'approval/resolved' }> {
-  return frame.type === 'approval/resolved';
+  return frame.type === 'approval/resolved'
 }
 
 function upsert(map: PendingMap, item: ApprovalRequestItem): PendingMap {
-  if (map.byRpc.has(item.rpcId)) return map;
-  const byRpc = new Map(map.byRpc);
-  byRpc.set(item.rpcId, item);
+  if (map.byRpc.has(item.rpcId)) return map
+  const byRpc = new Map(map.byRpc)
+  byRpc.set(item.rpcId, item)
   if (!map.sessionIds.includes(item.sessionId)) {
-    return { byRpc, sessionIds: [...map.sessionIds, item.sessionId] };
+    return { byRpc, sessionIds: [...map.sessionIds, item.sessionId] }
   }
-  return { byRpc, sessionIds: map.sessionIds };
+  return { byRpc, sessionIds: map.sessionIds }
 }
 
 function removeByApprovalId(map: PendingMap, approvalId: string): PendingMap {
-  let changed = false;
-  const byRpc = new Map<string, ApprovalRequestItem>();
+  let changed = false
+  const byRpc = new Map<string, ApprovalRequestItem>()
   for (const [rpcId, item] of map.byRpc) {
     if (item.approvalId === approvalId) {
-      changed = true;
-      continue;
+      changed = true
+      continue
     }
-    byRpc.set(rpcId, item);
+    byRpc.set(rpcId, item)
   }
-  if (!changed) return map;
-  const sessionIds = map.sessionIds.filter((sid) =>
-    [...byRpc.values()].some((item) => item.sessionId === sid)
-  );
-  return { byRpc, sessionIds };
+  if (!changed) return map
+  const sessionIds = map.sessionIds.filter(sid =>
+    [...byRpc.values()].some(item => item.sessionId === sid),
+  )
+  return { byRpc, sessionIds }
 }
 
-export function ApprovalsPage(): JSX.Element {
-  const navigate = useNavigate();
-  const [pending, setPending] = React.useState<PendingMap>(emptyMap);
-  const [error, setError] = React.useState<string | null>(null);
-  const [actingRpc, setActingRpc] = React.useState<string | null>(null);
+export function ApprovalsPage(): React.JSX.Element {
+  const navigate = useNavigate()
+  const [pending, setPending] = React.useState<PendingMap>(emptyMap)
+  const [error, setError] = React.useState<string | null>(null)
+  const [actingRpc, setActingRpc] = React.useState<string | null>(null)
 
   React.useEffect(() => {
-    let active = true;
-    let unsubscribe: (() => Promise<void>) | null = null;
+    let active = true
+    let unsubscribe: (() => Promise<void>) | null = null
     void api
       .subscribeMux((envelope) => {
-        if (!active) return;
-        const frame = envelope.payload as MuxFrame;
+        if (!active) return
+        const frame = envelope.payload
         if (isApprovalRequested(frame)) {
-          setPending((prev) =>
+          setPending(prev =>
             upsert(prev, {
               rpcId: envelope.rpcId,
               sessionId: frame.sessionId,
@@ -92,50 +92,50 @@ export function ApprovalsPage(): JSX.Element {
               toolName: frame.toolName,
               callId: frame.callId,
               reason: frame.reason,
-              receivedAt: Date.now()
-            })
-          );
-          return;
+              receivedAt: Date.now(),
+            }),
+          )
+          return
         }
         if (isApprovalResolved(frame)) {
-          setPending((prev) => removeByApprovalId(prev, frame.approvalId));
+          setPending(prev => removeByApprovalId(prev, frame.approvalId))
         }
       })
       .then((u) => {
         if (!active) {
-          void u();
-          return;
+          void u()
+          return
         }
-        unsubscribe = u;
+        unsubscribe = u
       })
       .catch((err: unknown) => {
-        if (active) setError((err as Error).message);
-      });
+        if (active) setError((err as Error).message)
+      })
     return () => {
-      active = false;
-      if (unsubscribe) void unsubscribe();
-    };
-  }, []);
+      active = false
+      if (unsubscribe) void unsubscribe()
+    }
+  }, [])
 
   const decide = React.useCallback(
     async (item: ApprovalRequestItem, outcome: 'allowed-once' | 'rejected'): Promise<void> => {
-      setActingRpc(item.rpcId);
-      setError(null);
+      setActingRpc(item.rpcId)
+      setError(null)
       try {
-        await api.respond(item.rpcId, { outcome });
+        await api.respond(item.rpcId, { outcome })
         // The host will broadcast approval/resolved next; remove locally too so the
         // UI is snappy even if the SSE roundtrip is slow.
-        setPending((prev) => removeByApprovalId(prev, item.approvalId));
+        setPending(prev => removeByApprovalId(prev, item.approvalId))
       } catch (err) {
-        setError((err as Error).message);
+        setError((err as Error).message)
       } finally {
-        setActingRpc(null);
+        setActingRpc(null)
       }
     },
-    []
-  );
+    [],
+  )
 
-  const total = pending.byRpc.size;
+  const total = pending.byRpc.size
 
   return (
     <section className="page page-approvals" data-testid="page-approvals">
@@ -157,14 +157,14 @@ export function ApprovalsPage(): JSX.Element {
         </p>
       ) : (
         pending.sessionIds.map((sessionId) => {
-          const items = [...pending.byRpc.values()].filter((item) => item.sessionId === sessionId);
+          const items = [...pending.byRpc.values()].filter(item => item.sessionId === sessionId)
           return (
             <article key={sessionId} className="approval-card" data-testid={`approval-card-${sessionId}`}>
               <header className="approval-card__header">
                 <button
                   type="button"
                   className="approval-card__title"
-                  onClick={() => navigate(`/assistant/${sessionId}`)}
+                  onClick={() =>{  navigate(`/assistant/${sessionId}`) }}
                   data-testid={`approval-card-open-${sessionId}`}
                 >
                   会话 {sessionId.slice(0, 8)}
@@ -172,7 +172,7 @@ export function ApprovalsPage(): JSX.Element {
                 <span className="approval-card__count">{items.length} 项</span>
               </header>
               <ul className="approval-card__list">
-                {items.map((item) => (
+                {items.map(item => (
                   <li key={item.rpcId} className="approval-card__item" data-testid={`approval-row-${item.approvalId}`}>
                     <div className="approval-card__main">
                       <strong>{item.toolName}</strong>
@@ -205,9 +205,9 @@ export function ApprovalsPage(): JSX.Element {
                 ))}
               </ul>
             </article>
-          );
+          )
         })
       )}
     </section>
-  );
+  )
 }

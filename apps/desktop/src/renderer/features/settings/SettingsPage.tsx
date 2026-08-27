@@ -11,9 +11,10 @@ import React from 'react'
 import { useSessionStore } from '../../stores/session'
 import * as api from '../../api'
 
-export function SettingsPage(): JSX.Element {
+export function SettingsPage(): React.JSX.Element {
   const session = useSessionStore(state => state.session)
   const updateBaseUrl = useSessionStore(state => state.updateBaseUrl)
+  const environment = session.environment
   const refresh = useSessionStore(state => state.refresh)
 
   const [draft, setDraft] = React.useState<string>(session.baseUrl)
@@ -29,7 +30,7 @@ export function SettingsPage(): JSX.Element {
     setBusy(true)
     setError(null)
     try {
-      const result = await updateBaseUrl(draft.trim())
+      const result = await updateBaseUrl(draft.trim(), session.environment)
       if (!result.ok) {
         setError(result.error ?? '保存失败')
         return
@@ -62,23 +63,29 @@ export function SettingsPage(): JSX.Element {
         <h1>设置</h1>
       </header>
       <div className="settings-card" data-testid="settings-baseurl">
+        <h2>执行环境</h2>
+        <p className="settings-card__hint">本机环境直接读写你选择的目录；云端环境使用账号私有副本。</p>
+        <select aria-label="执行环境" value={environment} onChange={(event) => { void updateBaseUrl(session.baseUrl, event.target.value as 'local' | 'cloud') }}>
+          <option value="local">本机（默认）</option>
+          <option value="cloud">云端</option>
+        </select>
         <h2>后端地址</h2>
         <p className="settings-card__hint">
           指向 dsh-ops 的入口（loopback 或经 nginx 暴露的公网入口）。
         </p>
-        <label htmlFor="settings-baseurl-input">dsh-ops baseUrl</label>
+        <label htmlFor="settings-baseurl-input">服务端地址</label>
         <input
           id="settings-baseurl-input"
           type="text"
           value={draft}
-          onChange={e => setDraft(e.target.value)}
+          onChange={(e) =>{  setDraft(e.target.value) }}
           placeholder="http://127.0.0.1:18000"
           data-testid="settings-baseurl-input"
         />
         <div className="settings-card__actions">
           <button
             type="button"
-            onClick={onSave}
+            onClick={() => { void onSave() }}
             disabled={busy || draft.trim() === session.baseUrl}
             data-testid="settings-baseurl-save"
           >
@@ -87,7 +94,7 @@ export function SettingsPage(): JSX.Element {
           <button
             type="button"
             className="primary"
-            onClick={onProbe}
+            onClick={() => { void onProbe() }}
             disabled={busy}
             data-testid="settings-probe"
           >

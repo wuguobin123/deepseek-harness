@@ -81,7 +81,7 @@ export interface PiAiAdapterOptions {
    * credential at all, because a named reference that misses throws `LlmError`
    * `MISSING_CREDENTIAL` rather than falling back.
    */
-  resolveApiKey: (provider: string, profile: ResolvedPiAiProviderProfile) => Promise<string | undefined>
+  resolveApiKey: (provider: string, profile: ResolvedPiAiProviderProfile, options: GenerateOptions) => Promise<string | undefined>
   /**
    * How every collection this adapter builds resolves auth the request-level
    * `apiKey` override does not cover. Required rather than optional: a
@@ -337,7 +337,7 @@ export class PiAiAdapter extends LlmAdapter {
       model,
       options.reasoningEffort ?? profile.reasoning,
     )
-    const apiKey = await this.config.resolveApiKey(options.provider, profile)
+    const apiKey = await this.config.resolveApiKey(options.provider, profile, options)
 
     const consumer = new AbortController()
     const upstream = options.signal === undefined

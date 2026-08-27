@@ -26,6 +26,7 @@ import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
 import { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import type { ImageAttachmentLimits, ImageAttachmentRef, SaveImageAttachment, StoredImageAttachment } from '@deepseek-ai/dsh-attachment'
+import LocalArtifactRegistry from '@deepseek-ai/dsh-artifact-store-fs'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
 import PlanModeController from '@deepseek-ai/dsh-plan-mode'
 import WebRuntime from '@deepseek-ai/dsh-web'
@@ -56,6 +57,9 @@ import * as ToolSchedule from '@deepseek-ai/dsh-schedule'
 import Lsp from '@deepseek-ai/dsh-lsp'
 import * as ToolLsp from '@deepseek-ai/dsh-tool-lsp'
 import * as ToolSkill from '@deepseek-ai/dsh-tool-skill'
+import LocalAccountSkillStore from '@deepseek-ai/dsh-account-skill-store'
+import * as ToolSkillInstall from '@deepseek-ai/dsh-tool-skill-install'
+import * as ToolSkillInstallLocal from '@deepseek-ai/dsh-tool-skill-install-local'
 import * as ToolSessionQuery from '@deepseek-ai/dsh-tool-session-query'
 import * as ToolTasks from '@deepseek-ai/dsh-tool-jobs'
 import type TeamService from '@deepseek-ai/dsh-experimental-agent-team'
@@ -63,6 +67,14 @@ import * as ToolTeam from '@deepseek-ai/dsh-experimental-tool-agent-team'
 import * as ToolTodo from '@deepseek-ai/dsh-tool-todo'
 import * as ToolSubagent from '@deepseek-ai/dsh-tool-subagent'
 import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
+import * as ToolChart from '@deepseek-ai/dsh-tool-chart'
+import * as ToolDoc from '@deepseek-ai/dsh-tool-doc'
+import * as ToolDocument from '@deepseek-ai/dsh-tool-document'
+import * as ToolHtml from '@deepseek-ai/dsh-tool-html'
+import * as ToolSheet from '@deepseek-ai/dsh-tool-sheet'
+import * as ToolSlides from '@deepseek-ai/dsh-tool-slides'
+import KnowledgeRuntime from '@deepseek-ai/dsh-knowledge'
+import * as ToolKnowledge from '@deepseek-ai/dsh-tool-knowledge'
 import VmWorkflowEngine from '@deepseek-ai/dsh-workflow-worker-thread'
 import * as ToolRalph from '@deepseek-ai/dsh-tool-ralph'
 import * as ToolWorkflow from '@deepseek-ai/dsh-tool-workflow'
@@ -439,6 +451,33 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
   },
   {
+    pkg: '@deepseek-ai/dsh-tool-skill-install',
+    dir: 'tool-skill-install',
+    source: 'packages/account/tool-skill-install/src/index.ts',
+    requires: ['ctx.tools', 'ctx.skills', 'ctx.accountSkillStore', 'an account-owned calling Agent'],
+    writes: ['tool/call', 'account-private SKILL.md', 'skills/change', 'tool/result'],
+    async mount(ctx) {
+      await ctx.plugin(SkillRegistry)
+      await ctx.plugin(LocalAccountSkillStore, { dshHome: resolve(root, '.tmp/tool-catalog/.dsh') })
+      await ctx.plugin(ToolSkillInstall)
+    },
+    note:
+      'The installer derives account ownership from the calling Session header and never accepts or returns an account id or server path.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-skill-install-local',
+    dir: 'tool-skill-install-local',
+    source: 'packages/skill/tool-skill-install-local/src/index.ts',
+    requires: ['ctx.tools', 'ctx.skills', 'an approval-capable local calling Agent'],
+    writes: ['tool/call', 'device-private SKILL.md', 'skills/change', 'tool/result'],
+    async mount(ctx) {
+      await ctx.plugin(SkillRegistry)
+      await ctx.plugin(ToolSkillInstallLocal, { dshHome: resolve(root, '.tmp/tool-catalog/.dsh-local') })
+    },
+    note:
+      'The installer publishes atomically below the configured local Harness home and rejects subagent callers, symbolic-link targets, and conflicting content.',
+  },
+  {
     pkg: '@deepseek-ai/dsh-tool-session-query',
     dir: 'tool-session-query',
     source: 'packages/session-query/tool-session-query/src/index.ts',
@@ -590,6 +629,86 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
   },
   {
+    pkg: '@deepseek-ai/dsh-tool-knowledge',
+    dir: 'tool-knowledge',
+    source: 'packages/knowledge/tool-knowledge/src/index.ts',
+    requires: ['ctx.tools', 'ctx.knowledge', 'ctx.systemPrompt', 'owning Agent session at execution time'],
+    writes: ['tool/call', 'tool/result'],
+    async mount(ctx) {
+      await ctx.plugin(KnowledgeRuntime)
+      await ctx.plugin(ToolKnowledge)
+    },
+    note:
+      'knowledge_search derives tenant and subject scope from the trusted session owner; neither identifier appears in the model-facing schema.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-chart',
+    dir: 'tool-chart',
+    source: 'packages/web/tool-chart/src/index.ts',
+    requires: ['ctx.tools', 'ctx.artifactRegistry', 'ctx.systemPrompt'],
+    writes: ['tool/call', 'session-owned chart artifact', 'tool/result'],
+    async mount(ctx) {
+      await ctx.plugin(LocalArtifactRegistry, { dshHome: resolve(root, '.tmp/tool-catalog/.dsh') })
+      await ctx.plugin(ToolChart)
+    },
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-doc',
+    dir: 'tool-doc',
+    source: 'packages/web/tool-doc/src/index.ts',
+    requires: ['ctx.tools', 'ctx.artifactRegistry', 'ctx.systemPrompt'],
+    writes: ['tool/call', 'session-owned document artifact', 'tool/result'],
+    async mount(ctx) {
+      await ctx.plugin(LocalArtifactRegistry, { dshHome: resolve(root, '.tmp/tool-catalog/.dsh') })
+      await ctx.plugin(ToolDoc)
+    },
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-document',
+    dir: 'tool-document',
+    source: 'packages/web/tool-document/src/index.ts',
+    requires: ['ctx.tools', 'ctx.attachments', 'ctx.systemPrompt', 'a calling Agent with a current-Session file reference'],
+    writes: ['tool/call', 'tool/result'],
+    async mount(ctx) {
+      await ctx.plugin(CatalogAttachmentStore)
+      await ctx.plugin(ToolDocument)
+    },
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-html',
+    dir: 'tool-html',
+    source: 'packages/web/tool-html/src/index.ts',
+    requires: ['ctx.tools', 'ctx.artifactRegistry', 'ctx.systemPrompt'],
+    writes: ['tool/call', 'session-owned HTML artifact', 'tool/result'],
+    async mount(ctx) {
+      await ctx.plugin(LocalArtifactRegistry, { dshHome: resolve(root, '.tmp/tool-catalog/.dsh') })
+      await ctx.plugin(ToolHtml)
+    },
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-sheet',
+    dir: 'tool-sheet',
+    source: 'packages/web/tool-sheet/src/index.ts',
+    requires: ['ctx.tools', 'ctx.artifactRegistry', 'ctx.attachments', 'ctx.systemPrompt'],
+    writes: ['tool/call', 'session-owned sheet artifact', 'tool/result'],
+    async mount(ctx) {
+      await ctx.plugin(CatalogAttachmentStore)
+      await ctx.plugin(LocalArtifactRegistry, { dshHome: resolve(root, '.tmp/tool-catalog/.dsh') })
+      await ctx.plugin(ToolSheet)
+    },
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-slides',
+    dir: 'tool-slides',
+    source: 'packages/web/tool-slides/src/index.ts',
+    requires: ['ctx.tools', 'ctx.artifactRegistry', 'ctx.systemPrompt'],
+    writes: ['tool/call', 'session-owned slides artifact', 'tool/result'],
+    async mount(ctx) {
+      await ctx.plugin(LocalArtifactRegistry, { dshHome: resolve(root, '.tmp/tool-catalog/.dsh') })
+      await ctx.plugin(ToolSlides)
+    },
+  },
+  {
     pkg: '@deepseek-ai/dsh-tool-web',
     dir: 'tool-web',
     source: 'packages/web/tool-web/src/index.ts',
@@ -719,10 +838,15 @@ function toolSource(entry: ToolPackage, toolName: string): string {
   return source
 }
 
+/** Escape model-authored angle brackets so VitePress never parses placeholders as HTML. */
+function escapeMarkdownHtml(value: string): string {
+  return value.replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+}
+
 /** Render one tool's entry: name, description, JSON-Schema parameters, source. */
 function renderTool(schema: ToolSchema, source: string): string[] {
   const out = [`### \`${schema.name}\``, '']
-  if (schema.description) out.push(schema.description, '')
+  if (schema.description) out.push(escapeMarkdownHtml(schema.description), '')
   out.push('```json', JSON.stringify(schema.parameters, null, 2), '```', '')
   out.push(`Source: [\`${source}\`](../${source})`, '')
   return out

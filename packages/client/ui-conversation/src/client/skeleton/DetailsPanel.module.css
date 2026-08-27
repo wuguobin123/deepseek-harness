@@ -56,6 +56,11 @@
   overflow-y: auto;
 }
 
+.body[data-surface='artifact'] {
+  padding: 0;
+  overflow: hidden;
+}
+
 .empty {
   padding: 8px 0;
   font-size: 13px;

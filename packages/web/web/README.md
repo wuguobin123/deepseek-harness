@@ -22,13 +22,13 @@ Search and fetch share no request schema and no business logic, but they are del
 |---|---|
 | `registerSearchProvider(provider)` / `registerFetchProvider(provider)` | Register a backend. Throws `WebError` `WEB_DUPLICATE_PROVIDER` on a duplicate id within that capability kind. Returns a disposer. Disposed with the calling fiber. |
 | `search(request, signal?)` | Resolve the search provider and run one search. Enforces `request.maxResults` on the result (truncates `sources[]`, sets `truncated`). Throws `WebError` when the capability cannot run. |
-| `fetch(request, signal?)` | Resolve the fetch provider and retrieve one URL. A non-2xx response is a result, not a throw. Throws `WebError` for failures to safely retrieve or represent the resource. |
+| `fetch(request, signal?)` | Resolve the fetch provider and retrieve one URL. A non-2xx response is a result, not a throw. With an explicit `fetchFallbackProvider`, a primary 403 or 429 invokes that provider; a fallback credential error preserves the primary result. Throws `WebError` for failures to safely retrieve or represent the resource. |
 
 Providers register **capabilities**, not tools. `dsh-tool-web` is the only owner of model-facing names, descriptions, prompt guidance, JSON schemas, and presentation.
 
 ## Selection
 
-Selection never depends on registration, config, or HMR order. A capability has an explicit provider id (config `searchProvider`/`fetchProvider`, or env `$DSH_WEB_SEARCH_PROVIDER`/`$DSH_WEB_FETCH_PROVIDER` feeding the same fields), or auto-selects when exactly one usable provider is registered. `search()`/`fetch()` resolve the provider at execution time:
+Selection never depends on registration, config, or HMR order. A capability has an explicit provider id (config `searchProvider`/`fetchProvider`, or env `$DSH_WEB_SEARCH_PROVIDER`/`$DSH_WEB_FETCH_PROVIDER` feeding the same fields), or auto-selects when exactly one usable provider is registered. `search()`/`fetch()` resolve the provider at execution time. Search may additionally set `searchCredentialFallbackProvider` (or `$DSH_WEB_SEARCH_CREDENTIAL_FALLBACK_PROVIDER`); it requires a distinct explicit `searchProvider` and is attempted only when the primary throws `WebError` with code `WEB_PROVIDER_CREDENTIAL_MISSING`. Fetch may additionally set `fetchFallbackProvider` (or `$DSH_WEB_FETCH_FALLBACK_PROVIDER`); it requires a distinct explicit `fetchProvider` and is attempted only when the primary safely returns status 403 or 429. A primary throw or any other status never invokes the fetch fallback. A fetch fallback credential error returns the primary result; other fallback errors propagate unchanged.
 
 | Situation | Execution |
 |---|---|

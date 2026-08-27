@@ -958,6 +958,26 @@ describe('built-in conversation node Definitions', () => {
     expect(notice?.anchorSeq).toBeLessThan(tail?.anchorSeq ?? Number.NEGATIVE_INFINITY)
     expect(notice?.anchorSeq).toBeGreaterThan(3)
 
+    const continued = assembler([
+      at(1, 'turn/start', { turn: 1 }),
+      at(2, 'step/start', { turn: 1, step: 1 }),
+      at(3, 'assistant/message', {
+        turn: 1, step: 1, message: assistantMessage('a1', 'truncated answer'),
+      }, { surfaceOp: 'append' }),
+      at(4, 'turn/end', { turn: 1, reason: { kind: 'max-tokens' } }),
+      at(5, 'user/message', {
+        id: 'auto-1', content: [{ type: 'text', text: 'continue' }],
+        source: {
+          kind: 'plugin', plugin: 'max-token-continuation', cause: 'max-tokens',
+          fromTurn: 1, ordinal: 1, limit: 3,
+        },
+      }, { surfaceOp: 'append' }),
+    ])
+    expect(node(snapshot(continued), 'input-message')).toBeUndefined()
+    expect(node(snapshot(continued), 'turn-max-tokens')?.data).toMatchObject({
+      continuation: { ordinal: 1, limit: 3 },
+    })
+
     const completed = assembler([
       at(1, 'turn/start', { turn: 1 }),
       at(2, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),

@@ -42,11 +42,13 @@ export const accountSignupRequestSchema = z.object({
    * `verification-code-required` when omitted.
    */
   verificationCode: z.string().regex(/^\d{6}$/).optional(),
+  invitationCode: z.string().min(1).max(256),
 }) satisfies z.ZodType<Wire<RequestPayload<'account.signup'>>>
 
 /** account.emailCode request payload. */
 export const accountEmailCodeRequestSchema = z.object({
   email: z.string().min(1).max(254),
+  invitationCode: z.string().min(1).max(256),
 }) satisfies z.ZodType<Wire<RequestPayload<'account.emailCode'>>>
 
 /** account.emailCode response value. */
@@ -54,6 +56,28 @@ export const accountEmailCodeValueSchema = z.object({
   expiresInSeconds: z.number().int().positive(),
   retryAfterSeconds: z.number().int().nonnegative(),
 }) satisfies z.ZodType<Wire<ResponseValue<'account.emailCode'>>>
+
+const invitationViewSchema = z.object({
+  invitationId: opaqueIdSchema,
+  codeMask: z.string().min(1),
+  code: z.string().min(1).nullable(),
+  createdAt: z.number().int().positive(),
+  expiresAt: z.number().int().positive(),
+  consumedAt: z.number().int().positive().nullable(),
+  redeemedBy: opaqueIdSchema.nullable(),
+})
+/** Empty authenticated request schema for creating an owned invitation. */
+export const accountInvitesCreateRequestSchema = z.object({}) satisfies z.ZodType<Wire<RequestPayload<'account.invites.create'>>>
+/** Response schema for creating an invitation; `code` contains the new plaintext value. */
+export const accountInvitesCreateValueSchema = invitationViewSchema.extend({ code: z.string().min(1) }) satisfies z.ZodType<Wire<ResponseValue<'account.invites.create'>>>
+/** Empty authenticated request schema for listing owned invitations. */
+export const accountInvitesListRequestSchema = z.object({}) satisfies z.ZodType<Wire<RequestPayload<'account.invites.list'>>>
+/** Owned invitation list; active decryptable rows include `code`. */
+export const accountInvitesListValueSchema = z.object({ items: z.array(invitationViewSchema) }) satisfies z.ZodType<Wire<ResponseValue<'account.invites.list'>>>
+/** Request schema for explicitly regenerating one owned invitation. */
+export const accountInvitesRotateRequestSchema = z.object({ invitationId: opaqueIdSchema }) satisfies z.ZodType<Wire<RequestPayload<'account.invites.rotate'>>>
+/** Response schema containing the replacement plaintext code. */
+export const accountInvitesRotateValueSchema = invitationViewSchema.extend({ code: z.string().min(1) }) satisfies z.ZodType<Wire<ResponseValue<'account.invites.rotate'>>>
 
 /** account.signup response value. */
 export const accountSignupValueSchema = signedInSchema satisfies z.ZodType<Wire<ResponseValue<'account.signup'>>>

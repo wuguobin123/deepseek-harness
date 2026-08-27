@@ -1,0 +1,6 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "lib/types" },
+  "include": ["src"],
+  "references": [{ "path": "../../../vendor/cordis" }, { "path": "../../../vendor/schemastery" }, { "path": "../../core/scope" }, { "path": "../../core/system-prompt" }, { "path": "../../core/tools" }, { "path": "../../fs/fs-local" }, { "path": "../../fs/tool-str-replace-editor" }, { "path": "../../runtime-diagnostics/invariants" }]
+}

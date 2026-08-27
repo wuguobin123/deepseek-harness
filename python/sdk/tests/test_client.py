@@ -64,6 +64,17 @@ for line in sys.stdin:
             "params": {
                 "sessionId": params["sessionId"],
                 "event": {
+                    "type": "account-plugins/selected",
+                    "data": {"pluginIds": ["precise-editor"]},
+                },
+            },
+        }), flush=True)
+        print(json.dumps({
+            "jsonrpc": "2.0",
+            "method": "session.event",
+            "params": {
+                "sessionId": params["sessionId"],
+                "event": {
                     "type": "turn/end",
                     "data": {"turn": 1, "reason": {"kind": "completed"}},
                 },
@@ -109,6 +120,13 @@ for line in sys.stdin:
 
     assert result.final_response == "hello from runtime"
     assert result.finish_reason == "max-tokens"
+    assert any(
+        event == {
+            "type": "account-plugins/selected",
+            "data": {"pluginIds": ["precise-editor"]},
+        }
+        for event in result.events
+    )
     assert result.events[-1]["type"] == "turn/end"
     dumped_env = json.loads(env_dump.read_text())
     assert dumped_env["DEEPSEEK_API_KEY"] == "env-key"

@@ -7,6 +7,7 @@
  */
 
 import { WebError } from '@deepseek-ai/dsh-web'
+import ipaddr from 'ipaddr.js'
 
 /** The body kinds this provider decodes. */
 export type FetchableKind = 'html' | 'text'
@@ -15,7 +16,6 @@ export type FetchableKind = 'html' | 'text'
  * Validate a request URL against the basic transport hygiene the provider
  * enforces before any network access: http(s) only, no embedded credentials,
  * bounded length. Returns the parsed `URL`. Throws {@link WebError} otherwise.
- * (SSRF / private-network blocking is deferred — see the package Agent Note.)
  *
  * @param input - the raw URL string from the fetch request.
  * @param maxUrlLength - inclusive upper bound on `input`'s length.
@@ -38,6 +38,14 @@ export function validateFetchUrl(input: string, maxUrlLength: number): URL {
     throw new WebError('credentials in URLs are not allowed', 'WEB_BLOCKED_URL')
   }
   return url
+}
+
+/** Return whether an address is publicly routable for outbound web retrieval. */
+export function isPublicAddress(address: string): boolean {
+  const normalized = address.trim().toLowerCase()
+  if (!ipaddr.isValid(normalized)) return false
+  const parsed = ipaddr.process(normalized)
+  return parsed.range() === 'unicast'
 }
 
 /**

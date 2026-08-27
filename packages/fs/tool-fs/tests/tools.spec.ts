@@ -5,13 +5,14 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { type ToolResult } from '@deepseek-ai/dsh-tools'
 import { FileSystem, FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
+import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
 import type {
   FsDirEntry,
   FsEditOutcome,
@@ -145,6 +146,40 @@ describe('session cwd resolution', () => {
       expect(sessionCwd(execution(link) as never, 'child.txt')).toBe(link)
       expect(sessionCwd(execution(link) as never, `..${sep}parent.txt`)).toBe(realpathSync.native(link))
     } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('workspace-only paths', () => {
+  it('allows workspace files and rejects absolute and symlink escapes', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-tool-fs-confined-'))
+    const workspace = join(root, 'workspace')
+    const outside = join(root, 'outside')
+    mkdirSync(workspace)
+    mkdirSync(outside)
+    writeFileSync(join(workspace, 'inside.txt'), 'inside')
+    writeFileSync(join(outside, 'secret.txt'), 'secret')
+    symlinkSync(outside, join(workspace, 'escape'), process.platform === 'win32' ? 'junction' : 'dir')
+    const ctx = new Context()
+    try {
+      await ctx.plugin(SystemPrompt)
+      await ctx.plugin(ToolRuntime)
+      await ctx.plugin(LocalFileSystem, { cwd: workspace })
+      await ctx.plugin(FsPolicy)
+      await ctx.plugin(ToolFs, { workspaceOnly: true })
+      const agent = { session: { header: { cwd: workspace } } }
+
+      const inside = await call(ctx, 'read', { file_path: 'inside.txt' }, agent)
+      expect(inside.isError).toBe(false)
+      const absolute = await call(ctx, 'read', { file_path: join(outside, 'secret.txt') }, agent)
+      expect(absolute).toMatchObject({ isError: true })
+      expect(text(absolute)).toContain('outside the session workspace')
+      const linked = await call(ctx, 'read', { file_path: join(workspace, 'escape', 'secret.txt') }, agent)
+      expect(linked).toMatchObject({ isError: true })
+      expect(text(linked)).toContain('outside the session workspace')
+    } finally {
+      await ctx.fiber.dispose()
       rmSync(root, { recursive: true, force: true })
     }
   })
@@ -805,7 +840,7 @@ describe('sandbox escalation API (write/edit)', () => {
     return {
       id: 'agent-fs-esc',
       session: {
-        header: { version: 0, id: 'sess-fs-esc', createdAt: 0, cwd: '/session-project' },
+        header: { version: 1, id: 'sess-fs-esc', createdAt: 0, cwd: '/session-project' },
         events: [{ type: 'turn/start' }, ...events],
         append: (type: string, data: Record<string, unknown>) => { events.push({ type, data }) },
       },

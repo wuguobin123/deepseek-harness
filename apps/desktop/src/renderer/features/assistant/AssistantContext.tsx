@@ -14,7 +14,6 @@
  */
 import React from 'react'
 import * as api from '../../api'
-import type { MuxFrame } from '../../../shared/contracts'
 import type { AssistantTurnState, Message } from './types'
 
 const AssistantContext = React.createContext<{
@@ -42,8 +41,8 @@ function reducer(state: AssistantTurnState, action: { type: 'reset'; sessionId: 
     case 'user':
       return { ...state, messages: [...state.messages, action.message] }
     case 'delta': {
-      const last = state.messages[state.messages.length - 1]
-      if (last && last.role === 'assistant' && !last.final) {
+      const last = state.messages.at(-1)
+      if (last !== undefined && last.role === 'assistant' && !last.final) {
         const updated: Message = { ...last, text: last.text + action.delta }
         return { ...state, messages: [...state.messages.slice(0, -1), updated] }
       }
@@ -61,8 +60,8 @@ function reducer(state: AssistantTurnState, action: { type: 'reset'; sessionId: 
       return { ...state, running: false, messages }
     }
     case 'error': {
-      const last = state.messages[state.messages.length - 1]
-      if (last && last.role === 'assistant' && !last.final) {
+      const last = state.messages.at(-1)
+      if (last !== undefined && last.role === 'assistant' && !last.final) {
         const updated: Message = { ...last, final: true, error: action.error }
         return { ...state, running: false, messages: [...state.messages.slice(0, -1), updated] }
       }
@@ -82,7 +81,7 @@ function reducer(state: AssistantTurnState, action: { type: 'reset'; sessionId: 
   }
 }
 
-export function AssistantProvider({ children }: { children: React.ReactNode }): JSX.Element {
+export function AssistantProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
   const [state, dispatch] = React.useReducer(reducer, { sessionId: '', running: false, messages: [] })
   const sessionIdRef = React.useRef<string>('')
   const unsubscribeRef = React.useRef<(() => Promise<void>) | null>(null)
@@ -95,7 +94,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }): 
     sessionIdRef.current = sessionId
     dispatch({ type: 'reset', sessionId })
     const unsub = await api.subscribeMux((envelope) => {
-      const frame = envelope.payload as MuxFrame
+      const frame = envelope.payload
       switch (frame.type) {
         case 'session/event': {
           if (frame.sessionId !== sessionIdRef.current) return
@@ -203,6 +202,6 @@ export function useAssistant(): {
     state: ctx.state,
     prompt: ctx.prompt,
     cancel: ctx.cancel,
-    attachSession: attach ?? (async () => undefined),
+    attachSession: attach ?? (() => Promise.resolve()),
   }
 }

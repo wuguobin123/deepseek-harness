@@ -13,7 +13,7 @@ import type {} from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import { computeHunkDiffs, diffsFromMeta } from './diff.ts'
 import { remediateFsError } from './error.ts'
-import { sessionResolveOptions } from './session-cwd.ts'
+import { resolveSessionTarget } from './session-cwd.ts'
 import type { FsSandboxController } from './sandbox.ts'
 
 /**
@@ -58,8 +58,9 @@ interface WriteToolArgs {
  * Register the `write` tool and its system-prompt guidance.
  * @param ctx - the plugin context; registrations are effects scoped to it, and execution uses its `fs` service.
  * @param sandbox - the shared sandbox-escalation API (advertisement, mode stamping, denial mapping).
+ * @param workspaceOnly - whether model paths must stay within the session cwd.
  */
-export function applyWriteTool(ctx: Context, sandbox: FsSandboxController): void {
+export function applyWriteTool(ctx: Context, sandbox: FsSandboxController, workspaceOnly = false): void {
   ctx.systemPrompt.section({
     name: 'tool:write',
     order: 101,
@@ -105,7 +106,7 @@ export function applyWriteTool(ctx: Context, sandbox: FsSandboxController): void
       // > backend default, plus the session cwd root) BEFORE anything executes;
       // an escalating call throws its distinct text on any non-grant.
       const sandboxPolicy = await sandbox.resolvePolicy('write', args, exec)
-      const target = await ctx.fs.resolve(input.filePath, sessionResolveOptions(exec, input.filePath, sandboxPolicy?.workspaceRoot))
+      const target = await resolveSessionTarget(ctx, exec, input.filePath, workspaceOnly, sandboxPolicy?.workspaceRoot)
       // Single-slot decision: the policy plugin produces createIfAbsent/
       // replaceIfVersion; the bare default is undefined (unconditional). No stat.
       const intent = await ctx.waterfall('fs/write-intent', target, exec, () => undefined)

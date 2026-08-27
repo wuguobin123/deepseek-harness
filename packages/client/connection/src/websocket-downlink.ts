@@ -8,6 +8,7 @@ import type {
   ApiProxy, HostFrame, MuxFrame, RpcRequest, ServerRequest,
 } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { RpcId } from '@deepseek-ai/dsh-host-apiproxy/api'
+import type { RpcPrincipal } from '@deepseek-ai/dsh-host-apiproxy/api'
 
 type Frame = MuxFrame | HostFrame
 
@@ -60,11 +61,13 @@ export class WebSocketDownlinks {
    * @param req - HTTP upgrade request.
    * @param socket - Raw socket transferred by the HTTP server.
    * @param head - Bytes already read after the upgrade headers.
+   * @param principal - identity established before the upgrade is accepted.
    */
-  handleMux(req: IncomingMessage, socket: Duplex, head: Buffer): void {
-    this.upgrade(req, socket, head, signal => this.api.events.mux({
+  handleMux(req: IncomingMessage, socket: Duplex, head: Buffer, principal: RpcPrincipal = { kind: 'local' }): void {
+    this.upgrade(req, socket, head, principal, signal => this.api.events.mux({
       rpcId: RpcId(randomUUID()),
       payload: {},
+      principal,
     }, signal))
   }
 
@@ -73,11 +76,13 @@ export class WebSocketDownlinks {
    * @param req - HTTP upgrade request.
    * @param socket - Raw socket transferred by the HTTP server.
    * @param head - Bytes already read after the upgrade headers.
+   * @param principal - identity established before the upgrade is accepted.
    */
-  handleHost(req: IncomingMessage, socket: Duplex, head: Buffer): void {
-    this.upgrade(req, socket, head, signal => this.api.events.host({
+  handleHost(req: IncomingMessage, socket: Duplex, head: Buffer, principal: RpcPrincipal = { kind: 'local' }): void {
+    this.upgrade(req, socket, head, principal, signal => this.api.events.host({
       rpcId: RpcId(randomUUID()),
       payload: {},
+      principal,
     }, signal))
   }
 
@@ -100,7 +105,8 @@ export class WebSocketDownlinks {
     req: IncomingMessage,
     socket: Duplex,
     head: Buffer,
-    open: (signal: AbortSignal) => AsyncIterable<RpcRequest<F>>,
+    principal: RpcPrincipal,
+    open: (signal: AbortSignal, principal: RpcPrincipal) => AsyncIterable<RpcRequest<F>>,
   ): void {
     this.server.handleUpgrade(req, socket, head, (websocket) => {
       const abort = new AbortController()
@@ -109,7 +115,7 @@ export class WebSocketDownlinks {
       websocket.once('message', () => {
         websocket.close(1008, 'downlink only')
       })
-      const pump = this.pump(websocket, open(abort.signal), abort)
+      const pump = this.pump(websocket, open(abort.signal, principal), abort)
       this.pumps.add(pump)
       void pump.then(() => { this.pumps.delete(pump) })
     })

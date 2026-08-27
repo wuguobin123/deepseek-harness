@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-25-xiaowei-keyless-search-fallback.md
+2026-08-25-xiaowei-keyless-search-fallback.md: 89d07c5d7b8bd27a7cf3aa1cede8de78710489d3
+2026-08-25-xiaowei-keyless-search-fallback.zh.md: 461eb42937e27f9cdbc7ccbc69ab5202419dc2d2

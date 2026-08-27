@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
-import SessionStore from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionOwnerId } from '@deepseek-ai/dsh-session'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
 import type { ApiProxy, MuxFrame, RpcRequest } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { RpcId } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
@@ -18,8 +18,8 @@ async function harness(): Promise<{ ctx: Context; api: ApiProxy }> {
   }
 }
 
-function agent(ctx: Context): Agent {
-  const session = ctx.sessions.create()
+function agent(ctx: Context, ownerId?: string): Agent {
+  const session = ctx.sessions.create(undefined, ownerId === undefined ? undefined : { meta: { ownerId: SessionOwnerId(ownerId) } })
   const value = { id: session.id, session, status: 'idle', ctx } as Agent
   ctx.agents.register(value)
   return value
@@ -70,6 +70,24 @@ function answer(
 }
 
 describe('question response validation', () => {
+  it('does not let another account answer a pending question', async () => {
+    const { ctx, api } = await harness()
+    const abort = new AbortController()
+    const mux = openMux(api, abort)
+    const asked = ctx.userQuestions.ask({
+      agent: agent(ctx, 'user-a'),
+      questions: [{ id: 'target', question: 'Choose one target', options: [{ label: 'Code' }] }],
+    })
+    const envelope = await mux.waitForQuestion()
+
+    expect(await api.respond(answer(envelope, ['Code']), { kind: 'account', userId: 'user-b' }))
+      .toEqual({ accepted: false, reason: 'not-pending' })
+    expect(await api.respond(answer(envelope, ['Code']), { kind: 'account', userId: 'user-a' }))
+      .toEqual({ accepted: true })
+    await expect(asked).resolves.toEqual({ answers: [{ id: 'target', selected: ['Code'] }] })
+    abort.abort()
+  })
+
   it('accepts selected options with custom text for multi-select questions', async () => {
     const { ctx, api } = await harness()
     const abort = new AbortController()

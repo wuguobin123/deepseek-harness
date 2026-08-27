@@ -4,10 +4,13 @@
  * empty-root composition, and the installation module-fallback healing.
  */
 
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
+import Loader from '@deepseek-ai/cordis-plugin-loader'
 import {
   composeEntries,
   healProfilesModuleFallback,
@@ -246,6 +249,30 @@ describe('healProfilesModuleFallback', () => {
     expect(() => { healProfilesModuleFallback(anchor, home) }).toThrow('is not a symlink')
   })
 
+  it('follows a linked package into its isolated dependency directory', () => {
+    const root = tmp()
+    const appDir = join(root, 'app')
+    const realBundle = join(root, 'store', 'bundle-a')
+    const nestedDep = join(realBundle, 'node_modules', 'dep-of-a')
+    mkdirSync(join(appDir, 'node_modules'), { recursive: true })
+    mkdirSync(nestedDep, { recursive: true })
+    writeFileSync(join(appDir, 'package.json'), JSON.stringify({
+      name: 'dsh-app',
+      dependencies: { 'bundle-a': '0.0.0' },
+    }))
+    writeFileSync(join(realBundle, 'package.json'), JSON.stringify({
+      name: 'bundle-a',
+      version: '0.0.0',
+      dependencies: { 'dep-of-a': '0.0.0' },
+    }))
+    writeFileSync(join(nestedDep, 'package.json'), JSON.stringify({ name: 'dep-of-a', version: '0.0.0' }))
+    symlinkSync(realBundle, join(appDir, 'node_modules', 'bundle-a'), 'junction')
+
+    const home = tmp()
+    healProfilesModuleFallback(join(appDir, 'package.json'), home)
+    expect(realpathSync(readlinkSync(join(home, 'profiles', 'node_modules', 'dep-of-a')))).toBe(realpathSync(nestedDep))
+  })
+
   it('replaces a wrong symlink', () => {
     const anchor = stageInstallation({})
     const home = tmp()
@@ -268,5 +295,31 @@ describe('healProfilesModuleFallback', () => {
     healProfilesModuleFallback(anchor, home) // second healer sees the correct link
     const fallback = join(home, 'profiles', 'node_modules')
     expect(lstatSync(join(fallback, 'dsh-app')).isSymbolicLink()).toBe(true)
+  })
+})
+
+describe('profile-anchored Loader imports', () => {
+  it('resolves a bare plugin from baseUrl without Node internal loader APIs', async () => {
+    const profile = tmp()
+    const pluginDir = join(profile, 'node_modules', 'profile-fixture')
+    mkdirSync(pluginDir, { recursive: true })
+    writeFileSync(join(pluginDir, 'package.json'), JSON.stringify({
+      name: 'profile-fixture',
+      version: '0.0.0',
+      type: 'module',
+      exports: './index.js',
+    }))
+    writeFileSync(join(pluginDir, 'index.js'), 'export default (ctx) => { ctx.provide("profileFixture", "mounted") }\n')
+    const ctx = new Context()
+    ctx.baseUrl = pathToFileURL(join(profile, 'cordis.yml')).href
+    try {
+      await ctx.plugin(Loader)
+      ctx.loader.internal = undefined
+      await ctx.loader.create({ name: 'profile-fixture' })
+      await ctx.loader.await()
+      expect(ctx.get('profileFixture')).toBe('mounted')
+    } finally {
+      await ctx.fiber.dispose()
+    }
   })
 })

@@ -32,6 +32,7 @@ Same-process event payloads are borrowed immutable values. Every listener is ind
 
 `WorkflowError` carries a code and a `fatal` flag. Fatal errors always escape `parallel()` and `pipeline()` instead of becoming an ordinary per-item `null`:
 
+- `ACCOUNT_HOST_EXECUTION_DENIED` — an account-owned parent cannot start this host worker engine until an account-confined provider is composed.
 - `SCRIPT_PARSE` / `META_INVALID` — the workflow cannot start.
 - `INVALID_ARGUMENT` / `UNSUPPORTED_OPTION` / `UNSUPPORTED_SCHEMA` — a hook call violates the engine contract.
 - `AGENT_CAP` / `ITEM_CAP` — configured safety limits were exceeded.

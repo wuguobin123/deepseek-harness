@@ -1,7 +1,8 @@
 appId: com.deepseek-harness.desktop
-productName: DeepSeek Harness
-copyright: Copyright (c) 2026 DeepSeek Harness
+productName: 小薇
+copyright: Copyright (c) 2026 小薇
 artifactName: ${productName}-${version}-${arch}.${ext}
+icon: src/renderer/features/brand/xiaowei-logo.png
 
 directories:
   output: release
@@ -16,8 +17,15 @@ files:
   - "!**/tests/**"
 
 asar: true
+# node-pty publishes the reviewed Electron-compatible prebuilds but omits the
+# TypeScript sources that electron-builder's npm rebuild path expects.
+npmRebuild: false
 asarUnpack:
-  - "**/*.node"
+  # Only native loaders need real files. JavaScript remains inside asar;
+  # the device runtime is published separately as an extra resource.
+  - "node_modules/node-pty/**/*"
+  - "node_modules/@koromix/koffi-*/**/*"
+  - "node_modules/node-addon-require-builtin-*/**/*"
 
 extraMetadata:
   main: dist/main/main/index.js
@@ -25,6 +33,8 @@ extraMetadata:
 extraResources:
   - from: dist/product-config.json
     to: product-config.json
+  - from: dist/local-runtime
+    to: local-runtime
 
 mac:
   category: public.app-category.developer-tools

@@ -27,8 +27,10 @@ export { RpcId } from './api/rpc.ts'
 export { toFetchHandler } from './fetch/handler.ts'
 export { AbstractApiClient, InProcessApiClient } from './fetch/client.ts'
 export type { IApiClient } from './fetch/client.ts'
+export { apiProxyRpcMethods, assertApiProxyRoutePartition } from './fetch/handler.ts'
 export { createApiProxy } from './api-proxy.ts'
 export type { ApiProxyDefaults } from './api-proxy.ts'
+export { assertCloudRoutePartition } from './route-partition.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -39,6 +41,10 @@ declare module '@deepseek-ai/cordis' {
 
 /** Gateway plugin configuration. */
 export interface Config {
+  /** Preset permitted for authenticated account sessions. */
+  accountAgentPreset?: string
+  /** Base directory for authenticated account workspace roots. */
+  accountWorkspaceRoot?: string
   /**
    * Whether this deployment can hand paths to a native desktop opener —
    * the `hasDocument` capability the agent-preset roster reports. Absent,
@@ -70,11 +76,13 @@ export class ApiProxyService extends Service implements ApiProxy {
   static inject = [
     'agentDefaultModel', 'agents', 'attachments', 'directoryPicker', 'llm', 'sessions', 'subagents', 'sessionQuery',
     'tools', 'userQuestions', 'workspaceRegistry',
-    // ---- workbuddy multi-user account seam (read through ctx.get; these are
+    // ---- xiaowei multi-user account seam (read through ctx.get; these are
     // optional, so they are NOT declared on the inject list) ----
   ]
 
   static Config: z<Config> = z.object({
+    accountAgentPreset: z.string(),
+    accountWorkspaceRoot: z.string(),
     nativeOpen: z.boolean(),
     sessionExportCompressionLevel: z.number().step(1).min(0).max(9)
       .default(DEFAULT_SESSION_LOG_COMPRESSION_LEVEL) as z<SessionLogCompressionLevel>,
@@ -93,14 +101,18 @@ export class ApiProxyService extends Service implements ApiProxy {
   readonly llm: ApiProxy['llm']
   readonly events: ApiProxy['events']
   readonly downloads: ApiProxy['downloads']
-  /** workbuddy multi-user account seam (signup / signin / signout / state / emailCode). */
+  /** xiaowei multi-user account seam (signup / signin / signout / state / emailCode). */
   readonly account: ApiProxy['account']
-  /** workbuddy wallet: balance, ledger, debit/credit/setQuota/refresh-daily / welcome bonus. */
+  /** xiaowei wallet: balance, ledger, debit/credit/setQuota/refresh-daily / welcome bonus. */
   readonly wallet: ApiProxy['wallet']
-  /** workbuddy per-user model keys: provision/list/revoke. */
+  /** xiaowei per-user model keys: provision/list/revoke. */
   readonly modelKeys: ApiProxy['modelKeys']
-  /** workbuddy durable artifact registry: list/read/remove. */
+  readonly customModels: ApiProxy['customModels']
+  /** xiaowei durable artifact registry: list/read/remove. */
   readonly artifactRegistry: ApiProxy['artifactRegistry']
+  readonly userContext: ApiProxy['userContext']
+  readonly accountPlugins: ApiProxy['accountPlugins']
+  readonly accountInference: ApiProxy['accountInference']
   readonly respond: ApiProxy['respond']
 
   constructor(ctx: Context, config: Config) {
@@ -109,6 +121,8 @@ export class ApiProxyService extends Service implements ApiProxy {
       defaultModelSelection: () => ctx.agentDefaultModel.currentSelection(),
       saveDefaultModelSelection: selection => ctx.agentDefaultModel.saveSelection(selection),
       cwd: process.cwd(),
+      ...(config.accountAgentPreset === undefined ? {} : { accountAgentPreset: config.accountAgentPreset }),
+      ...(config.accountWorkspaceRoot === undefined ? {} : { accountWorkspaceRoot: config.accountWorkspaceRoot }),
       ...config.nativeOpen === undefined ? {} : { canOpenPath: () => config.nativeOpen as boolean },
       ...(config.sessionExportCompressionLevel === undefined
         ? {}
@@ -132,7 +146,11 @@ export class ApiProxyService extends Service implements ApiProxy {
     this.account = api.account
     this.wallet = api.wallet
     this.modelKeys = api.modelKeys
+    this.customModels = api.customModels
     this.artifactRegistry = api.artifactRegistry
+    this.userContext = api.userContext
+    this.accountPlugins = api.accountPlugins
+    this.accountInference = api.accountInference
     // createApiProxy returns closures (no `this` capture), so the bind is
     // behavior-neutral.
     this.respond = api.respond.bind(api)

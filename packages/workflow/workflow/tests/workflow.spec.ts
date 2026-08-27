@@ -36,6 +36,15 @@ describe('dsh-workflow (interface)', () => {
     expect(soft.fatal).toBe(false)
   })
 
+  it('includes the account host-execution denial code', () => {
+    const error = new WorkflowError(
+      'account session cannot run host worker workflow until an account-confined provider is composed',
+      'ACCOUNT_HOST_EXECUTION_DENIED',
+    )
+    expect(error.code).toBe('ACCOUNT_HOST_EXECUTION_DENIED')
+    expect(error.fatal).toBe(true)
+  })
+
   it('isFatalWorkflowError: true only for a fatal WorkflowError', () => {
     expect(isFatalWorkflowError(new WorkflowError('x', 'CANCELLED'))).toBe(true)
     expect(isFatalWorkflowError(new WorkflowError('x', 'CANCELLED', { fatal: false }))).toBe(false)

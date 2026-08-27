@@ -413,6 +413,12 @@ export class Session implements SessionFace {
     }
   }
 
+  /** Retry an initial history failure by rebuilding the session window. */
+  async retryOpen(): Promise<void> {
+    if (this.openState !== 'error') return
+    await this.resync()
+  }
+
   /** Reconnect rebuild (manager calls this on onConnected for instances that were opened):
    *  reset the window and rerun open; pending waits for the baseline replay. Invalidates any
    *  in-flight open first — its history request rode the dead connection and must not settle

@@ -8,7 +8,8 @@ import { toFetchHandler } from '@deepseek-ai/dsh-host-apiproxy'
 import { API_PATH, HOST_EVENTS_PATH, MUX_EVENTS_PATH } from './api-path.ts'
 import { bridge, DEFAULT_MAX_REQUEST_BODY_BYTES } from './http-bridge.ts'
 import { assertTrustedAuthority, isTrustedApiRequest } from './api-request-trust.ts'
-import { isAuthenticatedApiRequest } from './api-request-auth.ts'
+import { authenticateApiRequest } from './api-request-auth.ts'
+import type { RpcPrincipal } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { HostConnectionService } from './rpc-host.ts'
 import { rejectWebSocketUpgrade, WebSocketDownlinks } from './websocket-downlink.ts'
 
@@ -67,49 +68,13 @@ export const Config: z<ConnectionConfig> = z.object({
   maxRequestBodyBytes: z.natural().min(1).default(DEFAULT_MAX_REQUEST_BODY_BYTES),
 })
 
-/**
- * Methods gated to loopback even on a trusted-host deployment. Native dialogs
- * act on the host machine; the settings and credential domains mutate the
- * user's configuration and secret store, and READING them is equally
- * privileged — `settings.describe` returns every exposed namespace's
- * configuration and `credentials.describe` reports whether an arbitrary
- * environment-variable name is configured and where from, which is
- * reconnaissance no anonymous caller should have. `trustedHosts` is a
- * DNS-rebinding fence, explicitly not authentication, so the whole
- * configuration plane stays loopback-same-origin until a real authentication
- * layer exists. `llm.discoverModels` belongs to that plane on both counts: it
- * carries a draft credential, and it makes the HOST issue a GET to a URL the
- * caller chose and reports back the status or the parsed body — an anonymous
- * LAN caller would have a probe for whatever the host can reach and the
- * browser cannot.
- *
- * The model catalog (`llm.providers`, `llm.models`) is deliberately NOT here:
- * it carries provider ids, display names, and model lists — no endpoints,
- * keys, or key state — and a LAN client's model picker legitimately needs it.
- */
-const PRIVILEGED_METHODS = new Set([
-  // A preset composition names the plugins a session runs, so reading one is
-  // reconnaissance; copy and remove rearrange what the deployment offers, and
-  // openDocument drives the host desktop — all more than the roster beside
-  // them. (Authoring is copy-only, so no method here accepts composition text
-  // or a path; the pin is about who may manage the roster at all.)
-  //
-  // CHOOSING one is not pinned, and `agentPreset.list` is not either. Picking a
-  // preset looks like escalation — one of them mounts the toolset that edits the
-  // live runtime — but `session.create` already takes an `agentPreset`, so
-  // pinning only the switch would leave the same capability one method over.
-  // The deeper reason is that the capability is not the preset's to grant: the
-  // deployment's own default already carries `bash` and the filesystem tools, so
-  // any caller that may start a session at all can already run commands as this
-  // process. Pinning the switch would be a fence beside an open gate.
-  'agentPreset.read',
-  'agentPreset.copy',
-  'agentPreset.openDocument',
-  'agentPreset.remove',
+/** Native operations that always act on the server host and remain loopback-only. */
+const LOOPBACK_METHODS = new Set([
   'host.pickDirectory',
   'host.openPath',
-  'settings.describe',
   'settings.openDocument',
+  'agentPreset.openDocument',
+  'settings.describe',
   'settings.update',
   'settings.replace',
   'settings.mutate',
@@ -117,14 +82,43 @@ const PRIVILEGED_METHODS = new Set([
   'credentials.set',
   'credentials.unset',
   'llm.discoverModels',
+  'llm.providers',
+  'llm.models',
+  'account.wallet.credit',
+  'account.wallet.debit',
+  'account.wallet.setQuota',
+  'account.wallet.refreshDaily',
+  'account.wallet.grantWelcomeBonus',
+  'account.modelKeys.provision',
+  'account.modelKeys.revoke',
 ])
+
+/**
+ * Agent-preset methods available remotely only to an authenticated account.
+ * Host configuration, credentials, model discovery, and account mutations are
+ * classified in `LOOPBACK_METHODS` above and never use bearer authorization.
+ */
+const AUTHENTICATED_CONFIGURATION_METHODS = new Set([
+  // Preset list/select stay ordinary authenticated methods: their ids and
+  // selection grant no capability beyond session.create's agentPreset field.
+  'agentPreset.read',
+  'agentPreset.copy',
+  'agentPreset.remove',
+])
+const PUBLIC_METHODS = new Set(['account.signup', 'account.signin', 'account.emailCode', 'account.state', 'account.signout'])
+// Invitation management is account-owned and must carry an authenticated
+// principal, including when reached through a trusted remote authority.
+const AUTHENTICATED_ACCOUNT_METHODS = new Set(['account.invites.create', 'account.invites.list', 'account.invites.rotate'])
+/** Direct inference is account-only even on loopback; never downgrade to local. */
+const ACCOUNT_INFERENCE_METHOD = 'account.inference.stream'
 
 /**
  * Mounts the API gateway under the browser transport prefix. Every request on
  * the prefix passes the browser-trust fence first (DNS-rebinding and
  * cross-site defense — [api-request-trust](./api-request-trust.ts));
- * privileged methods additionally pass it with an empty trust list, which
- * pins them to loopback.
+ * native host operations additionally require loopback. Configuration access
+ * requires loopback in single-user compositions or an authenticated account
+ * from a declared authority when the identity service is mounted.
  * @param ctx - Host plugin context.
  * @param config - resolved plugin config (schema defaults applied).
  */
@@ -143,12 +137,25 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
       const method = pathname.startsWith(`${API_PATH}/`)
         ? pathname.slice(API_PATH.length + 1)
         : undefined
-      if (method !== undefined && PRIVILEGED_METHODS.has(method)) {
-        const trusted = isTrustedApiRequest(request, [])
-        const authenticated = trusted ? true : await isAuthenticatedApiRequest(request, ctx)
-        if (!trusted && !authenticated) {
+      if (method !== undefined && LOOPBACK_METHODS.has(method)) {
+        const principal = await requestPrincipal(request, ctx, [])
+        if (principal === undefined) {
           return new Response('forbidden', { status: 403 })
         }
+      }
+      if (method !== undefined && AUTHENTICATED_CONFIGURATION_METHODS.has(method)) {
+        const principal = await configurationPrincipal(request, ctx, trustedHosts)
+        if (principal === undefined) {
+          return new Response('forbidden', { status: 403 })
+        }
+      }
+      if (method !== undefined && AUTHENTICATED_ACCOUNT_METHODS.has(method)) {
+        const principal = await requestPrincipal(request, ctx, trustedHosts)
+        if (principal?.kind !== 'account') return new Response('forbidden', { status: 403 })
+      }
+      if (method === ACCOUNT_INFERENCE_METHOD) {
+        const principal = await requestPrincipal(request, ctx, trustedHosts)
+        if (principal?.kind !== 'account') return new Response('forbidden', { status: 403 })
       }
       if (request.method === 'GET' && (pathname === MUX_EVENTS_PATH || pathname === HOST_EVENTS_PATH)) {
         return new Response('upgrade required', {
@@ -158,16 +165,31 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
       }
       const apiProxy = ctx.get('apiProxy')
       if (apiProxy === undefined) return new Response('not found', { status: 404 })
-      return toFetchHandler(apiProxy).fetch(request)
+      const principal = await requestPrincipal(
+        request, ctx, trustedHosts, PUBLIC_METHODS.has(method ?? ''), LOOPBACK_METHODS.has(method ?? ''),
+      )
+      if (principal === undefined) return new Response('forbidden', { status: 403 })
+      return toFetchHandler(apiProxy, principal).fetch(request)
     },
   })
   const route: WebRoute = {
     kind: 'prefix',
     path: API_PATH,
     handler: async (req, res) => {
-      const trusted = isTrustedApiRequest(req, trustedHosts)
-      const authenticated = trusted ? true : await isAuthenticatedApiRequest(req, ctx)
-      if (!trusted && !authenticated) {
+      const pathname = new URL(req.url ?? '/', 'http://dsh.internal').pathname
+      const method = pathname.startsWith(`${API_PATH}/`) ? pathname.slice(API_PATH.length + 1) : ''
+      if (method === ACCOUNT_INFERENCE_METHOD) {
+        const inferencePrincipal = await requestPrincipal(req, ctx, trustedHosts)
+        if (inferencePrincipal?.kind !== 'account') {
+          res.writeHead(403)
+          res.end('forbidden')
+          return
+        }
+      }
+      const principal = await requestPrincipal(
+        req, ctx, trustedHosts, PUBLIC_METHODS.has(method), LOOPBACK_METHODS.has(method),
+      )
+      if (principal === undefined) {
         res.writeHead(403)
         res.end('forbidden')
         return
@@ -186,18 +208,70 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
       apiCtx.effect(() => apiCtx.webServer.registerUpgrade({
         path,
         handler: async (req, socket, head) => {
-          const trusted = isTrustedApiRequest(req, trustedHosts)
-          const authenticated = trusted ? true : await isAuthenticatedApiRequest(req, apiCtx)
-          if (!trusted && !authenticated) {
+          const principal = await requestPrincipal(req, apiCtx, trustedHosts)
+          if (principal === undefined) {
             rejectWebSocketUpgrade(socket)
             return
           }
+          ;(req as typeof req & { dshPrincipal?: typeof principal }).dshPrincipal = principal
           return handle(req, socket, head)
         },
       }), `client-connection: ${path} WebSocket`)
     }
     apiCtx.effect(() => () => downlinks.close(), 'client-connection: WebSocket downlinks')
-    registerDownlink(MUX_EVENTS_PATH, (req, socket, head) => { downlinks.handleMux(req, socket, head) })
-    registerDownlink(HOST_EVENTS_PATH, (req, socket, head) => { downlinks.handleHost(req, socket, head) })
+    registerDownlink(MUX_EVENTS_PATH, (req, socket, head) => {
+      downlinks.handleMux(
+        req, socket, head,
+        (req as typeof req & { dshPrincipal?: RpcPrincipal }).dshPrincipal,
+      )
+    })
+    registerDownlink(HOST_EVENTS_PATH, (req, socket, head) => {
+      downlinks.handleHost(
+        req, socket, head,
+        (req as typeof req & { dshPrincipal?: RpcPrincipal }).dshPrincipal,
+      )
+    })
   })
+}
+
+async function requestPrincipal(
+  request: Request | import('node:http').IncomingMessage,
+  ctx: Context,
+  trustedHosts: readonly string[],
+  allowLocal = false,
+  preserveLocalManagement = false,
+): Promise<RpcPrincipal | undefined> {
+  // Authentication never substitutes for the browser/DNS trust fence. A
+  // valid bearer presented to an attacker-controlled Host is still rejected.
+  if (!isTrustedApiRequest(request, trustedHosts)) return undefined
+  // A signed-in desktop carries its bearer over loopback too. Preserve that
+  // account identity so new Sessions receive their durable owner; an
+  // unauthenticated loopback caller remains the local management plane.
+  // Methods that act on the host machine retain the local principal because
+  // their API handlers deliberately reject account-scoped administration.
+  const loopback = isTrustedApiRequest(request, [])
+  if (preserveLocalManagement && loopback) return { kind: 'local' as const }
+  const authenticated = await authenticateApiRequest({ headers: request.headers }, ctx)
+  if (authenticated !== undefined) return authenticated
+  if (loopback) return { kind: 'local' as const }
+  // `allowLocal` only relaxes the identity requirement for public account
+  // methods. It must never relax the Host/trustedHosts fence: an untrusted
+  // Host may not obtain a local principal merely by selecting account.*.
+  if (allowLocal) return { kind: 'local' as const }
+  return undefined
+}
+
+/**
+ * Authorize the remaining remotely readable agent-preset methods from a
+ * trusted authority carrying a live account bearer. Host configuration and
+ * credentials are rejected earlier by the loopback method fence.
+ */
+async function configurationPrincipal(
+  request: Request | import('node:http').IncomingMessage,
+  ctx: Context,
+  trustedHosts: readonly string[],
+): Promise<RpcPrincipal | undefined> {
+  if (isTrustedApiRequest(request, [])) return requestPrincipal(request, ctx, [])
+  if (ctx.get('identity') === undefined) return undefined
+  return requestPrincipal(request, ctx, trustedHosts)
 }

@@ -6,6 +6,8 @@ import {
   type TrajectoryCellProps,
 } from './trajectory-record.ts'
 import css from './TrajectoryCell.module.css'
+import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import type { NS } from './locales.ts'
 
 export { formatElapsedSeconds }
 export type {
@@ -63,8 +65,9 @@ export function TrajectoryCell({
   think,
   selected = false,
   className,
+  t,
   ...rest
-}: TrajectoryCellProps) {
+}: TrajectoryCellProps & { t?: TranslateNS<typeof NS> | undefined }) {
   const rootClass = [
     css.root,
     selected ? css.selected : undefined,
@@ -75,7 +78,7 @@ export function TrajectoryCell({
     <div className={rootClass} data-kind={kind} data-selected={selected || undefined} {...rest}>
       <span className={css.index}>#{index}</span>
       <span className={css.tagSlot}>
-        <span className={[css.tag, TAG_CLASS[kind]].filter((c): c is string => c !== undefined).join(' ')}>{KIND_LABEL[kind]}</span>
+        <span className={[css.tag, TAG_CLASS[kind]].filter((c): c is string => c !== undefined).join(' ')}>{t?.(`kind.${kind}`) ?? KIND_LABEL[kind]}</span>
       </span>
       <span className={css.text}>{text}</span>
       <span className={css.trailing}>

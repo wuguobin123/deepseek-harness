@@ -29,6 +29,7 @@ export type {
   GoalsApi, GoalRef,
   SettingsApi, SettingsNamespaceView, SettingsPathOpView, SettingsSecretView,
   CredentialsApi, CredentialView, ConfigurableProviderView, DiscoveredModelView, LlmApi,
+  CustomModelsApi, CustomModelId, CustomModelView,
 } from './api.ts'
 export {
   RpcId,
@@ -60,6 +61,8 @@ export const inject: string[] = []
  * provides both halves here instead of forking this plugin.
  */
 export interface ClientTransportHooks {
+  /** Whether the carrier targets a loopback Host rather than a remote Host. */
+  readonly isLoopback: boolean
   /** Build the API carrier: unary calls plus the two downstream event streams. */
   createApiClient(): IApiClient
   /** Transport for generic unary RPC channels (the Typert gateway). */
@@ -85,7 +88,10 @@ interface ClientTransportGlobal {
 export interface ConnectionHandle {
   /** Shared api client (fixture or real, decided at boot from the page URL). */
   readonly api: IApiClient
-  /** Whether the current page authority is loopback; non-browser contexts default to true. */
+  /**
+   * Whether the connected Host is local. Browser carriers derive this from
+   * the page authority; application shells report the authority they target.
+   */
   readonly isLoopback: boolean
   /** Generation-scoped Host facts, including the account home and native path-open capability. */
   readonly hostDescription: HostDescriptionSource
@@ -108,7 +114,11 @@ export interface ConnectionHandle {
  */
 export function apply(ctx: Context): void {
   const pageLocation = typeof location === 'undefined' ? undefined : location
-  const fixture = pageLocation !== undefined && new URLSearchParams(pageLocation.search).has('fixture')
+  const pageParams = new URLSearchParams(pageLocation?.search ?? '')
+  const fixture = pageLocation !== undefined && pageParams.has('fixture')
+  // The explicit fixtureRemote switch lets assembled browser snapshots render
+  // the authenticated-client branch without changing ordinary fixture mode.
+  const fixtureRemote = fixture && pageParams.has('fixtureRemote')
   const fixtureClient = fixture ? new FixtureApiClient() : undefined
   const transport = (globalThis as ClientTransportGlobal).__DSH_TRANSPORT__
   const api: IApiClient = fixtureClient ?? transport?.createApiClient() ?? new WebApiClient()
@@ -129,7 +139,9 @@ export function apply(ctx: Context): void {
   }
   const handle: ConnectionHandle = {
     api,
-    isLoopback: pageLocation === undefined || isLoopbackHostname(pageLocation.hostname),
+    isLoopback: transport?.isLoopback ?? (!fixtureRemote && (pageLocation === undefined
+      || pageLocation.protocol === 'file:'
+      || isLoopbackHostname(pageLocation.hostname))),
     hostDescription: {
       getSnapshot: () => description,
       subscribe: (listener) => {

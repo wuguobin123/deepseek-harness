@@ -1,6 +1,6 @@
 ---
 name: dsh-release-desktop
-description: 打包并发布 dsh Electron 桌面客户端（DeepSeek Harness.app / .exe / .AppImage）到生产环境（119.45.252.25:18080 同一 nginx 上 /releases/ 目录）的标准流程：构建 → 静态验证 → 多平台打包 → rsync 到 dsh-ops host → 生成 latest.json 与 COS 同步 → 一键安装脚本。当用户要打包、发布、上线桌面客户端，或者要给运营交付新版本安装包时使用。
+description: 打包并发布 dsh Electron 桌面客户端（小薇.app / .exe / .AppImage）到生产环境（119.45.252.25:18080 同一 nginx 上 /releases/ 目录）的标准流程：构建 → 静态验证 → 多平台打包 → rsync 到 dsh-ops host → 生成 latest.json 与 COS 同步 → 一键安装脚本。当用户要打包、发布、上线桌面客户端，或者要给运营交付新版本安装包时使用。
 ---
 
 # dsh Electron 桌面客户端发布
@@ -41,10 +41,10 @@ apps/desktop/scripts/publish-client-release.sh --dry-run
                                           ▼
               ┌────────────────────────────────────────────┐
               │ /var/lib/xiaowei-workbench/releases/        │
-              │   DeepSeek Harness-<ver>-arm64.dmg         │
-              │   DeepSeek Harness-<ver>-x64.dmg           │
-              │   DeepSeek Harness-<ver>-x64.exe           │
-              │   DeepSeek Harness-<ver>.AppImage          │
+              │   小薇-<ver>-arm64.dmg                     │
+              │   小薇-<ver>-x64.dmg                       │
+              │   小薇-<ver>-x64.exe                       │
+              │   小薇-<ver>.AppImage                      │
               │   latest.json                              │
               │   latest-mac-arm64.dmg  -> ...dmg          │
               │   latest-mac-x64.dmg    -> ...dmg          │
@@ -80,19 +80,19 @@ apps/desktop/scripts/publish-client-release.sh --dry-run
 产物落在 `apps/desktop/release/`：
 
 ```text
-DeepSeek Harness-<version>-arm64.dmg      101 MB
-DeepSeek Harness-<version>-x64.dmg        105 MB
-DeepSeek Harness-<version>-x64.exe         81 MB
-DeepSeek Harness-<version>.AppImage       112 MB
-mac-arm64/DeepSeek Harness.app/                  # 解包后的 .app
-mac/DeepSeek Harness.app/                        # x64 同上
+小薇-<version>-arm64.dmg      101 MB
+小薇-<version>-x64.dmg        105 MB
+小薇-<version>-x64.exe         81 MB
+小薇-<version>.AppImage       112 MB
+mac-arm64/小薇.app/                  # 解包后的 .app
+mac/小薇.app/                        # x64 同上
 linux-unpacked/                                 # AppImage 解包目录
 win-unpacked/                                   # NSIS 解包目录
 ```
 
 每个 `.app` / `.exe` / AppImage 都内嵌了：
 - `CFBundleIdentifier = com.deepseek-harness.desktop`（mac）
-- `ProductName = DeepSeek Harness`（win）
+- `ProductName = 小薇`（win）
 - `Resources/product-config.json = {"apiBaseUrl": "..."}`
 
 ## publish-client-release.sh 详解
@@ -115,15 +115,32 @@ ssh $DEPLOY_SSH 'cd /var/lib/dsh-ops/releases && ln -sf <real> latest-*'
 
 ### 腾讯云 COS（国内 HTTPS 主通道）
 
+首次在 macOS 打包机执行一次：
+
 ```bash
-coscli cp release/<file> cos://$COS_BUCKET/latest-* \
+apps/desktop/scripts/configure-cos-credentials.sh
+```
+
+脚本把 SecretId 与 SecretKey 分别保存到 macOS Keychain 的 `com.deepseek-harness.desktop.release.cos` 服务项。后续 `publish-client-release.sh` 会自动读取，不得再次向用户索取。发布前可做无泄漏检查：
+
+```bash
+apps/desktop/scripts/configure-cos-credentials.sh --check
+```
+
+```bash
+  coscli cp release/<file> cos://$COS_BUCKET/<versioned-file> \
+    -i $COS_SECRET_ID -k $COS_SECRET_KEY \
+    -e cos.$COS_REGION.myqcloud.com
+  coscli cp release/<file> cos://$COS_BUCKET/latest-* \
   -i $COS_SECRET_ID -k $COS_SECRET_KEY \
   -e cos.$COS_REGION.myqcloud.com
 ```
 
 - 桶默认 `wgb123-1257121815`，region 默认 `ap-beijing`，与之前 my-agents 客户端相同（可换）。
-- 密钥走环境变量，**不写 coscli 配置文件**（避免落盘到 `~/.cos.yaml`）。
-- 没有 `COS_SECRET_ID` / `COS_SECRET_KEY` / `coscli` 时，用 `--skip-cos` 只走 rsync。
+- 凭证优先读取成对提供的 `COS_SECRET_ID` / `COS_SECRET_KEY` 环境变量，用于 CI 或单次覆盖；未提供时自动读取 macOS Keychain。
+- 四个平台产物缺一即中止。版本文件先上传，稳定别名随后更新，`latest.json` 最后上传，避免清单引用尚未存在的对象。
+- 不写 coscli 配置文件，也不在日志或命令示例中展示凭证。Keychain 与环境变量都没有时，先运行一次配置脚本；不要默认向用户重复索取，也不要擅自使用 `--skip-cos`。
+- 非 macOS 环境没有 Keychain，使用 CI secret 注入成对环境变量。
 - `--dry-run` 打印所有动作不真跑——预演必备。
 
 ## 一键安装脚本
@@ -135,6 +152,7 @@ coscli cp release/<file> cos://$COS_BUCKET/latest-* \
 ## 前置条件
 
 - 部署机对 `root@119.45.252.25` 有**免密 SSH**。
+- macOS 发布机已运行一次 `apps/desktop/scripts/configure-cos-credentials.sh`；检查命令不得输出凭证值。
 - 打包机有 `pnpm >= 9`、`node >= 22.19`（与 `apps/desktop/package.json` 的 engines 一致）。
 - macOS 同时支持 arm64 与 x64 打包（同一台机）；Linux AppImage 跨平台直接打。
 - **首次运行 electron-builder 会下载** Electron runtime 与 NSIS 工具链（合计 ~150 MB），CI 缓存里要保留 `~/.electron-builder/cache/`。
@@ -151,7 +169,7 @@ ssh root@119.45.252.25 'ls -la /var/lib/dsh-ops/releases/latest-*'
 # 3. mac dmg 拉下来试挂载
 curl -fsS -o /tmp/test.dmg http://119.45.252.25:18080/releases/latest-mac-arm64.dmg
 hdiutil attach -readonly /tmp/test.dmg
-ls "/Volumes/DeepSeek Harness/"
+ls "/Volumes/小薇/"
 
 # 4. Windows exe 头 4 字节应是 'MZ'
 curl -fsS -o /tmp/test.exe http://119.45.252.25:18080/releases/latest-win-x64.exe
@@ -180,7 +198,7 @@ curl -fsS https://wgb123-1257121815.cos.ap-beijing.myqcloud.com/latest.json
 ## 注意事项（勿再踩）
 
 - **package.json 的 `name` 必须保持 `@deepseek-harness/desktop`**：macOS NSIS 的 uninstaller 路径里包含 `electron.appname`（基于 package.json name），改名字会让 install-win.bat 的 legacy path 失效。
-- **Windows 旧 uninstaller 路径**有两个：`%LOCALAPPDATA%\Programs\DeepSeek Harness\`（新）和 `%LOCALAPPDATA%\Programs\@deepseek-harnessdesktop\`（my-agents 旧）。install-win.bat 会同时清这两个。
+- **Windows uninstaller 路径**包括 `%LOCALAPPDATA%\Programs\小薇\`（当前）、`%LOCALAPPDATA%\Programs\DeepSeek Harness\`（旧产品名）和 `%LOCALAPPDATA%\Programs\@deepseek-harnessdesktop\`（my-agents 旧路径）。install-win.bat 会同时清理三个路径。
 - **macOS Gatekeeper quarantine**：DMG 是 `curl` 下载的话一定会带 `com.apple.quarantine` xattr；install-mac.sh 必跑 `xattr -dr`，**不要去掉这一步**。
 - **Code signing**：当前环境无 Apple Developer ID 与 Windows 代码签名证书，所以产物是 ad-hoc / 未签名。**正式公开分发前必须**：
   - macOS：Developer ID Application 证书 + `notarize` 步骤（electron-builder `mac.notarize: true` + keychain profile）。

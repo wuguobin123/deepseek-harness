@@ -11,6 +11,7 @@ async function setup(ids: string[]): Promise<Context> {
   await ctx.plugin(InvariantRegistry)
   ctx.provide('workspaceRegistry', {
     get: (id: WorkspaceId) => (ids.includes(id) ? { id } : undefined),
+    has: (id: WorkspaceId) => ids.includes(id),
   })
   await ctx.plugin(WorkspaceInvariant)
   return ctx
@@ -57,5 +58,10 @@ describe('workspace cache/table invariant', () => {
   it('fails a put whose record the registry cache does not hold', async () => {
     const ctx = await setup([])
     expect(() => { ctx.emit('domain/changed', put()) }).toThrow(/diverged/)
+  })
+
+  it('accepts an account-owned put through owner-independent existence', async () => {
+    const ctx = await setup(['w1'])
+    expect(() => { ctx.emit('domain/changed', put({ key: 'w1' })) }).not.toThrow()
   })
 })

@@ -1,0 +1,7 @@
+- dialog "删除 研发网关？":
+  - heading "删除 研发网关？" [level=2]
+  - button "关闭":
+    - img
+  - paragraph: 删除 研发网关 后，它会从当前账户移除，后续请求不能再使用其已保存的 API 密钥。
+  - button "取消"
+  - button "删除模型"

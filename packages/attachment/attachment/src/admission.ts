@@ -3,7 +3,7 @@
 import { Buffer } from 'node:buffer'
 import { AttachmentError } from './error.ts'
 import type { AttachmentStore } from './index.ts'
-import type { EncodedImageAttachment, ImageAttachmentRef, SaveImageAttachment } from './types.ts'
+import type { EncodedImageAttachment, ImageAttachmentRef, SaveImageAttachment, DocumentAttachmentRef, SaveDocumentAttachment, DocumentMediaType } from './types.ts'
 
 /** Decode one upload payload while rejecting non-canonical base64 forms. */
 function decodeBase64(data: string): Uint8Array {
@@ -38,4 +38,26 @@ export async function admitEncodedImages(
   images: readonly EncodedImageAttachment[],
 ): Promise<readonly ImageAttachmentRef[]> {
   return attachments.saveImages(images.map(saveInput))
+}
+
+/** Base64 wire form for one PDF/Office upload. */
+export interface EncodedDocumentAttachment { mediaType: DocumentMediaType; data: string; name?: string; kind: DocumentAttachmentRef['kind']; summary: string }
+/**
+ * Decode and durably persist document uploads in caller order.
+ * @param attachments - authoritative attachment store.
+ * @param documents - base64 PDF and Office upload values.
+ * @returns durable references in caller order.
+ */
+export async function admitEncodedDocuments(
+  attachments: AttachmentStore,
+  documents: readonly EncodedDocumentAttachment[],
+): Promise<readonly DocumentAttachmentRef[]> {
+  const inputs: SaveDocumentAttachment[] = documents.map(document => ({
+    data: decodeBase64(document.data),
+    mediaType: document.mediaType,
+    kind: document.kind,
+    summary: document.summary,
+    ...(document.name === undefined ? {} : { name: document.name }),
+  }))
+  return attachments.saveDocuments(inputs)
 }

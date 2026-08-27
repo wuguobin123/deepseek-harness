@@ -3,8 +3,8 @@
 
 /**
  * Write text to the host clipboard, preferring the async Clipboard API and
- * falling back to `execCommand('copy')` on hosts (jsdom, insecure contexts)
- * that omit it.
+ * falling back to `execCommand('copy')` when that API is missing or refuses a
+ * user-initiated write.
  * @param text - the exact text to place on the clipboard.
  * @returns true only when the host accepted the write.
  */
@@ -17,13 +17,13 @@ export async function writeClipboard(text: string): Promise<boolean> {
       await navigator.clipboard.writeText(text)
       return true
     } catch {
-      // Denied permissions / iframe policy — do not claim success.
-      return false
+      // Electron can expose this API while refusing the write for its file:
+      // renderer. The synchronous path still runs inside the click gesture.
     }
   }
-  // jsdom and older hosts: best-effort execCommand path when present.
-  // execCommand('copy') is the only clipboard fallback where the async API
-  // is missing; deprecated but deliberately retained.
+  // jsdom and older hosts: best-effort execCommand path when present. This is
+  // also the recovery path after an async Clipboard API refusal; deprecated
+  // but deliberately retained for Electron's file: renderer.
   /* oxlint-disable typescript/no-deprecated */
   const exec = typeof document.execCommand === 'function'
     ? document.execCommand.bind(document)

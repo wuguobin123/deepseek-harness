@@ -7,6 +7,22 @@ export type { AttachmentId } from './brand.ts'
 /** Raster image formats accepted by the version-one attachment path. */
 export type ImageMediaType = 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
 
+/** Modern office/PDF media types accepted by the document upload path. */
+export type DocumentMediaType = 'application/pdf' | 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' | 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' | 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+/** Durable reference to original, content-addressed document bytes. */
+export interface DocumentAttachmentRef { attachmentId: AttachmentId; mediaType: DocumentMediaType; bytes: number; name?: string; kind: 'pdf' | 'docx' | 'xlsx' | 'pptx'; summary: string }
+/** Raw document upload accepted by the host. */
+export interface SaveDocumentAttachment { data: Uint8Array; mediaType: DocumentMediaType; name?: string; kind: DocumentAttachmentRef['kind']; summary: string }
+/** Verified stored document bytes. */
+export interface StoredDocumentAttachment { ref: DocumentAttachmentRef; data: Uint8Array }
+/** Deployment-resolved document upload limits. */
+export interface DocumentAttachmentLimits {
+  maxDocumentBytes: number
+  maxDocumentsPerMessage: number
+  maxMessageDocumentBytes: number
+  mediaTypes: readonly DocumentMediaType[]
+}
+
 /** Durable, serializable reference to one immutable normalized image. */
 export interface ImageAttachmentRef {
   /** Opaque storage identifier; never a filesystem path or bearer URL. */

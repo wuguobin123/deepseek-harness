@@ -767,6 +767,14 @@ declare abstract class LlmAdapter {
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.zh.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
 
+<a id="ctxaccountplatform--accountplatformservice-abstract-seam"></a>
+
+### `ctx.accountPlatform` — `AccountPlatformService` (abstract seam)
+
+Service marker for the account-platform consumer.
+
+Source: [`packages/llm/account-platform/src/index.ts`](../../packages/llm/account-platform/src/index.ts)
+
 <a id="ctxllm--llmruntime"></a>
 
 ### `ctx.llm` — `LlmRuntime`
@@ -941,4 +949,50 @@ Waterfall around every streaming model call (retry, replay, routing). Bound to t
 ```
 
 Source: [`packages/llm/llm/src/index.ts`](../../packages/llm/llm/src/index.ts)
+
+<a id="llm-pi-ai-events"></a>
+
+### `llm-pi-ai/*` events
+
+<a id="llm-pi-airesolve-api-key--waterfall"></a>
+
+#### `llm-pi-ai/resolve-api-key` — waterfall
+
+Resolve an account model request's credential before the provider call. Listeners may supply an account credential or delegate to the next resolver.
+
+```ts cordis-catalog
+/**
+ * Resolve an account model request's credential before the provider call.
+ * Listeners may supply an account credential or delegate to the next resolver.
+ * @mode waterfall
+ * @param request Account model request and selected provider profile.
+ * @param next Continue credential resolution.
+ */
+'llm-pi-ai/resolve-api-key'( request: { provider: string; profile: ResolvedPiAiProviderProfile; options: GenerateOptions }, next: () => Promise<string | undefined>, ): Promise<string | undefined>
+```
+
+Types: [ResolvedPiAiProviderProfile](../../packages/llm/llm-pi-ai/README.zh.md)
+
+Source: [`packages/llm/account-platform/src/index.ts`](../../packages/llm/account-platform/src/index.ts)
+
+<a id="llm-pi-airesolve-api-key--waterfall"></a>
+
+#### `llm-pi-ai/resolve-api-key` — waterfall
+
+Resolve a credential for one real stream request; discovery never emits this event. Listeners must call `next()` for non-owned routes.
+
+```ts cordis-catalog
+/**
+ * Resolve a credential for one real stream request; discovery never emits this event.
+ * Listeners must call `next()` for non-owned routes.
+ * @param request - provider route, resolved profile, and complete GenerateOptions.
+ * @param next - continue to the existing credentials/environment resolver.
+ * @mode waterfall
+ */
+'llm-pi-ai/resolve-api-key'( this: Context, request: { provider: string; profile: ResolvedPiAiProviderProfile; options: GenerateOptions }, next: () => Promise<string | undefined>, ): Promise<string | undefined>
+```
+
+Types: [ResolvedPiAiProviderProfile](../../packages/llm/llm-pi-ai/README.zh.md)
+
+Source: [`packages/llm/llm-pi-ai/src/index.ts`](../../packages/llm/llm-pi-ai/src/index.ts)
 <!-- END GENERATED cordis-surface -->

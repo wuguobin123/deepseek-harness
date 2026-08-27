@@ -37,6 +37,15 @@ export interface WorkspaceView {
 
 /** Workspace-domain unary methods (the map keys workspace.* of RpcMethodMap). */
 export interface WorkspaceApi {
+  /** Imports a bounded directory copy staged under the authenticated account root. */
+  importDirectory(request: RpcRequest<{
+    importId: string
+    title: string
+    files: Array<{ path: string; content: string }>
+  }>): Promise<RpcResponse<{
+    workspace: WorkspaceView
+    created: boolean
+  }>>
   /**
    * Lists all workspaces in the registry's durable display order, plus the
    * registry-global archive set (the reconnect baseline of

@@ -42,6 +42,28 @@ const NO_MODEL_EXPERIENCE_SECTION: Readonly<Record<string, string>> = {
  * blocks. A package moves on or off this list with its context behavior.
  */
 const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
+  'packages/account/email-verification': { kind: 'none', reason: 'The account verification service operates before agent execution and registers no model context.' },
+  'packages/account/identity': { kind: 'none', reason: 'The identity provider authenticates host requests and never enters model context.' },
+  'packages/account/model-keys': { kind: 'none', reason: 'The credential store resolves secrets only for model adapters and registers no model context.' },
+  'packages/account/wallet': { kind: 'none', reason: 'The wallet accounts for provider usage outside model context.' },
+  'packages/artifact/artifact': { kind: 'indirect', reason: 'The artifact seam delegates model rendering to artifact-producing consumers.' },
+  'packages/artifact/artifact-store-fs': { kind: 'indirect', reason: 'The filesystem backend delegates model rendering to artifact-producing consumers.' },
+  'packages/bundle/ops': { kind: 'indirect', reason: 'The bundle only composes plugins that own their model-facing behavior.' },
+  'packages/llm/account-platform': { kind: 'none', reason: 'The adapter resolves account credentials and billing outside the assembled model request.' },
+  'packages/memory/user-context': { kind: 'none', reason: 'The store is explicitly model-invisible; UI and trusted host consumers own all reads and writes.' },
+  'packages/ops/ops-approval-policy': { kind: 'none', reason: 'The current skeleton registers no model-facing behavior.' },
+  'packages/ops/ops-domain': { kind: 'none', reason: 'The current skeleton registers no model-facing behavior.' },
+  'packages/ops/ops-loop-guard': { kind: 'indirect', reason: 'The package delegates the eventual advisory text to the parent repeat-tool reminder.' },
+  'packages/ops/ops-package-signing': { kind: 'none', reason: 'The current skeleton registers no model-facing behavior.' },
+  'packages/ops/ops-platform': { kind: 'none', reason: 'The current skeleton registers no model-facing behavior.' },
+  'packages/ops/ops-runtime': { kind: 'none', reason: 'The current skeleton registers no model-facing behavior.' },
+  'packages/ops/ops-skill': { kind: 'indirect', reason: 'The provider delegates catalog and instruction rendering to dsh-tool-skill.' },
+  'packages/ops/ops-subagent-python': { kind: 'indirect', reason: 'The provider passes parent-owned tool and message context into a child runtime.' },
+  'packages/ops/ops-workbench-anomaly': { kind: 'none', reason: 'The current skeleton registers no model-facing behavior.' },
+  'packages/ops/ops-workbench-conversations': { kind: 'none', reason: 'The current skeleton registers no model-facing behavior.' },
+  'packages/ops/ops-workbench-memories': { kind: 'none', reason: 'The current skeleton registers no model-facing behavior.' },
+  'packages/ops/ops-workbench-trigger': { kind: 'none', reason: 'The current skeleton registers no model-facing behavior.' },
+  'packages/web/web-provider-firecrawl': { kind: 'indirect', reason: 'The provider delegates model-facing schemas, prompts, and result rendering to dsh-tool-web.' },
   'packages/attachment/attachment': { kind: 'indirect', reason: 'The storage seam delegates model request rendering to provider adapters.' },
   'packages/attachment/attachment-local': { kind: 'indirect', reason: 'The local backend delegates model request rendering to provider adapters.' },
   'packages/shell/shell': { kind: 'indirect', reason: 'The service interface delegates all model rendering to dsh-tool-bash.' },
@@ -166,6 +188,7 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/web/web': { kind: 'indirect', reason: 'The provider registry delegates model rendering to dsh-tool-web.' },
   'packages/web/web-fetch-http': { kind: 'indirect', reason: 'The provider backend delegates model rendering to dsh-tool-web.' },
   'packages/web/web-search-exa': { kind: 'indirect', reason: 'The provider backend delegates model rendering to dsh-tool-web.' },
+  'packages/web/web-search-searxng': { kind: 'indirect', reason: 'The provider backend delegates model rendering to dsh-tool-web.' },
   'packages/workflow/workflow': { kind: 'indirect', reason: 'The service delegates parent and child model rendering to its consumer and engine.' },
 }
 

@@ -22,11 +22,10 @@ const make = (host = stubSettingsScope<ThemeSettings>()): {
 }
 
 describe('ThemeRuntime', () => {
-  it('defaults to the system preference resolved against prefers-color-scheme', () => {
+  it('defaults directly to light', () => {
     const { theme } = make()
     const snapshot = theme.getTheme()
-    expect(snapshot.preference).toBe('system')
-    // jsdom matchMedia is absent; system resolves to light.
+    expect(snapshot.preference).toBe('light')
     expect(snapshot.active.id).toBe('light')
     expect(snapshot.active.colorScheme).toBe('light')
     expect(snapshot.themes.map(t => t.id)).toEqual(['light', 'dark'])
@@ -79,7 +78,7 @@ describe('ThemeRuntime', () => {
     theme.setTheme('sepia')
     expect(theme.getTheme().active.tokens['--dsw-alias-bg-base']).toBe('red')
     dispose()
-    expect(theme.getTheme().preference).toBe('system')
+    expect(theme.getTheme().preference).toBe('light')
     expect(theme.getTheme().themes.map(t => t.id)).toEqual(['light', 'dark'])
     // Custom ids are in-process extension themes; only the built-in product
     // preferences cross the Host settings schema.
@@ -219,24 +218,25 @@ describe('ThemeRuntime', () => {
 
     afterEach(() => { vi.unstubAllGlobals() })
 
-    it('system resolves against the media query and follows OS flips', () => {
+    it('system resolves against the media query and follows OS flips when selected explicitly', () => {
       const media = stubMedia(true)
       const { theme, events } = make()
+      theme.setTheme('system')
       expect(theme.getTheme().preference).toBe('system')
       expect(theme.getTheme().active.id).toBe('dark')
       media.flip()
       expect(theme.getTheme().active.id).toBe('light')
-      expect(events).toHaveLength(1)
+      expect(events).toHaveLength(2)
     })
 
     it('OS flips do not republish while a concrete preference is set', () => {
       const media = stubMedia(false)
       const { theme, events } = make()
-      theme.setTheme('light')
+      theme.setTheme('dark')
       expect(events).toHaveLength(1)
       media.flip()
       expect(events).toHaveLength(1)
-      expect(theme.getTheme().active.id).toBe('light')
+      expect(theme.getTheme().active.id).toBe('dark')
     })
 
     it('context dispose releases the media listener', async () => {

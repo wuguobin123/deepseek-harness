@@ -1,5 +1,7 @@
 # Subagent Scenario Template
 
+English | [中文](README.zh.md)
+
 Copy this directory next to your profile's `cordis.yml`, rename `hello_subagent.py` to your scenario's snake_case name, and update `cordis.patch.yml` to match. The Python peer speaks JSON-RPC 2.0 over stdio through `@deepseek-ai/dsh-ops-subagent-python`; the patch overlay mounts both the provider row and a one-shot caller that drives an `agent.turn` to verify the wire.
 
 ## Files

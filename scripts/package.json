@@ -1,0 +1,17 @@
+{
+  "name": "@deepseek-harness/scripts",
+  "private": true,
+  "description": "Repository gate scripts; not published.",
+  "type": "module",
+  "version": "0.0.0",
+  "dependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-account-identity": "workspace:^",
+    "@deepseek-ai/dsh-account-email-verification": "workspace:^",
+    "@deepseek-ai/dsh-account-wallet": "workspace:^",
+    "@deepseek-ai/dsh-account-model-keys": "workspace:^",
+    "@deepseek-ai/dsh-artifact-store-fs": "workspace:^",
+    "@deepseek-ai/dsh-brand": "workspace:^",
+    "@deepseek-ai/schemastery": "workspace:^"
+  }
+}

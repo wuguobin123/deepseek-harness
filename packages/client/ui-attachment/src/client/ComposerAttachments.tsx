@@ -6,6 +6,7 @@ import { AttachmentRail } from '../AttachmentRail.tsx'
 import type { AttachmentRailItem } from '../AttachmentRail.tsx'
 import { DropOverlay } from '../DropOverlay.tsx'
 import { ImageLightbox } from '../ImageLightbox.tsx'
+import { IconPaperclipOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { attachmentRailLabels, dropOverlayLabels, lightboxLabels } from './labels.ts'
 import css from './ComposerAttachments.module.css'
 
@@ -21,6 +22,7 @@ export function ComposerAttachments({
   const [preview, setPreview] = useState<ComposerAttachment | null>(null)
   const [dragActive, setDragActive] = useState(false)
   const dragDepth = useRef(0)
+  const pickerRef = useRef<HTMLInputElement | null>(null)
   const closePreview = useCallback(() => { setPreview(null) }, [])
 
   useEffect(() => {
@@ -81,6 +83,7 @@ export function ComposerAttachments({
   const railItems = useMemo<ComposerRailItem[]>(() => attachments.map(attachment => ({
     id: attachment.id,
     previewUrl: attachment.previewUrl,
+    kind: attachment.kind,
     alt: attachment.file.name || t('image.pending'),
     removeLabel: t('image.remove', { name: attachment.file.name }),
     attachment,
@@ -88,6 +91,31 @@ export function ComposerAttachments({
 
   return (
     <>
+      <div className={css.pickerRow}>
+        <input
+          ref={pickerRef}
+          className={css.pickerInput}
+          type="file"
+          multiple
+          accept="image/png,image/jpeg,image/webp,image/gif,.pdf,.docx,.xlsx,.pptx"
+          onChange={(event) => {
+            const files = [...(event.currentTarget.files ?? [])]
+            if (files.length > 0) onAddImages(files)
+            event.currentTarget.value = ''
+          }}
+        />
+        <button
+          type="button"
+          className={css.pickerButton}
+          disabled={!canAcceptDrop}
+          aria-label={t('file.add')}
+          title={t('file.addHint')}
+          onClick={() => { pickerRef.current?.click() }}
+        >
+          <IconPaperclipOutline16 />
+          <span>{t('file.add')}</span>
+        </button>
+      </div>
       {dragActive && (
         <DropOverlay
           disabled={!canAcceptDrop}
@@ -105,12 +133,10 @@ export function ComposerAttachments({
         </div>
       )}
       {preview !== null && (
-        <ImageLightbox
-          src={preview.previewUrl}
-          alt={preview.file.name || t('image.original')}
-          labels={lightboxLabels(t)}
-          onClose={closePreview}
-        />
+        preview.kind === 'image' ? <ImageLightbox
+          src={preview.previewUrl} alt={preview.file.name || t('image.original')}
+          labels={lightboxLabels(t)} onClose={closePreview}
+        /> : <div role="dialog" aria-label={preview.file.name} className={css.documentChip}><span>{preview.file.name}</span><button type="button" aria-label={t('file.close')} onClick={closePreview}>×</button></div>
       )}
     </>
   )

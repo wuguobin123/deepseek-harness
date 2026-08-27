@@ -1,6 +1,9 @@
 # Patch overlay reserved for `@deepseek-ai/dsh-ops-workbench-memories`. The plugin
 # is a no-op skeleton until the first scenario that needs cross-session memory
-# is接入ed; uncomment the row below when the OpenViking adapter lands.
+# is接入ed; replace the empty sequence below with the row when the OpenViking
+# adapter lands.
 #
 # - id: ops-workbench-memories
 #   name: '@deepseek-ai/dsh-ops-workbench-memories'
+
+[]

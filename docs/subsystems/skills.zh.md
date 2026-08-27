@@ -200,6 +200,8 @@ interface SkillLookupOptions {
   readonly cwd?: string | undefined
   /** Abort discovery or loading work for the current caller. */
   readonly signal?: AbortSignal | undefined
+  /** Account owner used by account-scoped providers; never supplied by model tool arguments. */
+  readonly ownerId?: SessionOwnerId | undefined
 }
 ```
 
@@ -241,6 +243,99 @@ interface Config {
 ## Cordis API
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.zh.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+
+<a id="ctxaccountpluginfactory--accountpluginfactoryservice-abstract-seam"></a>
+
+### `ctx.accountPluginFactory` — `AccountPluginFactoryService` (abstract seam)
+
+Account-scoped plugin install state and server-side catalog.
+
+```ts cordis-catalog
+/**
+ * Read the public catalog for one account.
+ * @param input - authoritative account identity.
+ * @returns public catalog with installation state.
+ */
+abstract list(input: { userId: string }): Promise<AccountPluginView[]>
+
+/**
+ * Install one optional catalog entry.
+ * @param input - authoritative account and server catalog id.
+ * @returns installed public row.
+ */
+abstract install(input: { userId: string; pluginId: string }): Promise<AccountPluginView>
+
+/**
+ * Uninstall one optional catalog entry.
+ * @param input - authoritative account and server catalog id.
+ * @returns uninstalled public row.
+ */
+abstract uninstall(input: { userId: string; pluginId: string }): Promise<AccountPluginView>
+
+/**
+ * Resolve entries enabled for a later agent.
+ * @param input - authoritative account identity.
+ * @returns enabled server catalog entries.
+ */
+abstract composition(input: { userId: string }): Promise<PluginCatalogEntry[]>
+
+/**
+ * Resolve activators for the account's next agent scope.
+ * @param input - authoritative account identity.
+ * @returns server-owned activation functions.
+ */
+abstract activations(input: { userId: string }): Promise<PluginActivator[]>
+
+/**
+ * Resolve activators for an explicit optional selection plus system defaults.
+ * @param input - optional plugin ids recorded for one session.
+ * @returns server-owned activation functions in catalog order.
+ */
+abstract activationsFor(input: { pluginIds: readonly string[] }): PluginActivator[]
+
+/**
+ * Resolve activators from a durable session selection snapshot.
+ * @param events - authoritative session log events.
+ * @returns server-owned activation functions from the recorded selection.
+ */
+abstract activationsFromEvents(events: readonly SessionEvent[]): PluginActivator[]
+
+/**
+ * Read the account's optional selection in catalog order.
+ * @param input - authoritative account identity.
+ * @returns optional plugin ids selected for later sessions.
+ */
+abstract selected(input: { userId: string }): Promise<string[]>
+
+/**
+ * Construct the seq-zero selection snapshot for a newly created session.
+ * @param input - optional plugin ids selected for the new session.
+ * @returns durable session event recording the selection.
+ */
+abstract selectionSeed(input: { pluginIds: readonly string[] }): SessionEvent<'account-plugins/selected'>
+```
+
+Types: [SessionEvent](session.zh.md)
+
+Source: [`packages/account/plugin-factory/src/index.ts`](../../packages/account/plugin-factory/src/index.ts)
+
+<a id="ctxaccountskillstore--accountskillstore-abstract-seam"></a>
+
+### `ctx.accountSkillStore` — `AccountSkillStore` (abstract seam)
+
+Service for account-owned skill files.
+
+```ts cordis-catalog
+/**
+ * Publish one account-owned Skill.
+ * @param ownerId - durable Session owner.
+ * @param input - validated Skill content.
+ * @returns publication result.
+ */
+abstract install(ownerId: SessionOwnerId, input: SkillInstallInput): Promise<SkillInstallResult>
+```
+
+Source: [`packages/account/skill-store/src/index.ts`](../../packages/account/skill-store/src/index.ts)
 
 <a id="ctxskills--skillregistry"></a>
 
@@ -302,6 +397,13 @@ async snapshot(options: SkillViewOptions = {}): Promise<SkillCatalogSnapshot>
  * @returns the full skill, including body content, or `undefined`.
  */
 async get(name: string, options: SkillViewOptions = {}): Promise<SkillDefinition | undefined>
+
+/**
+ * Invalidate provider-backed catalogs after a trusted first-party mutation.
+ * Provider plugins normally use their registration control; this entry is
+ * for a service that owns the durable write but not the provider instance.
+ */
+refresh(): void
 ```
 
 Source: [`packages/skill/skill/src/index.ts`](../../packages/skill/skill/src/index.ts)

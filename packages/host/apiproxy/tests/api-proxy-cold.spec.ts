@@ -35,7 +35,7 @@ function request<P>(payload: P): RpcRequest<P> {
 }
 
 function header(id: string, createdAt: number, extra: Partial<SessionHeader> = {}): SessionHeader {
-  return { version: 0, id: sid(id), createdAt, cwd: '/proj', ...extra }
+  return { version: 1, id: sid(id), createdAt, cwd: '/proj', ...extra }
 }
 
 describe('sessions.list cold merge', () => {

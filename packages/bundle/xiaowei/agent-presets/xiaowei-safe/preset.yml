@@ -1,0 +1,3 @@
+name: 小薇安全模式
+description: 账户隔离的办公与联网 Agent，不提供宿主 Shell、原始文件系统、工作流或委托执行。
+order: 2

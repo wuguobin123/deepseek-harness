@@ -20,7 +20,8 @@
  */
 
 import { existsSync } from 'node:fs'
-import { isAbsolute, relative, sep } from 'node:path'
+import { realpath } from 'node:fs/promises'
+import { isAbsolute, relative, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import { ItemRetainer, TextRetainer } from '@deepseek-ai/dsh-output-retention'
@@ -104,6 +105,27 @@ export interface RipgrepRun {
   noMatches: boolean
   /** The resolved working directory the command ran in (the display-relativization base). */
   workdir: string
+}
+
+/**
+ * Require a model-selected search root to resolve inside the calling session
+ * workspace. This check is enabled by multi-user deployments before ripgrep
+ * sees the path, and canonicalization rejects symlink escapes.
+ * @param exec - tool execution carrying the session cwd.
+ * @param requestedPath - optional model-selected search root.
+ */
+export async function assertWorkspaceSearchPath(
+  exec: ToolExecution,
+  requestedPath: string | undefined,
+): Promise<void> {
+  const cwd = exec.agent?.session.header.cwd
+  if (cwd === undefined) throw new SearchError('filesystem search requires an agent workspace', 'SEARCH_FAILED')
+  const root = await realpath(cwd)
+  const target = await realpath(resolve(root, requestedPath ?? '.'))
+  const rest = relative(root, target)
+  if (rest === '..' || rest.startsWith(`..${sep}`) || isAbsolute(rest)) {
+    throw new SearchError('filesystem search path is outside the session workspace', 'SEARCH_FAILED')
+  }
 }
 
 /**

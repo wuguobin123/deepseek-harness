@@ -61,6 +61,34 @@
   config:
     sampleOverCapGlobResults: false
 
+# HTML pages are durable product artifacts when the host provides the
+# `artifactRegistry` service (as the xiaowei bundle does). A remote client must
+# render those bytes through `artifact.read`; `host.openPath` intentionally
+# remains loopback-only because it would otherwise open a server-local file.
+- id: tool-html
+  name: '@deepseek-ai/dsh-tool-html'
+  disabled: !!js "ctx.get('artifactRegistry') === undefined"
+
+- id: tool-slides
+  name: '@deepseek-ai/dsh-tool-slides'
+  disabled: !!js "ctx.get('artifactRegistry') === undefined"
+
+- id: tool-doc
+  name: '@deepseek-ai/dsh-tool-doc'
+  disabled: !!js "ctx.get('artifactRegistry') === undefined"
+
+- id: tool-sheet
+  name: '@deepseek-ai/dsh-tool-sheet'
+  disabled: !!js "ctx.get('artifactRegistry') === undefined || ctx.get('attachments') === undefined"
+
+- id: tool-document
+  name: '@deepseek-ai/dsh-tool-document'
+  disabled: !!js "ctx.get('attachments') === undefined"
+
+- id: tool-chart
+  name: '@deepseek-ai/dsh-tool-chart'
+  disabled: !!js "ctx.get('artifactRegistry') === undefined"
+
 # ── background jobs ────────────────────────────────────────────────────────
 
 # Only the model-facing controls. The task REGISTRY stays on the host plane:
@@ -85,6 +113,13 @@
 
 - id: tool-skill
   name: '@deepseek-ai/dsh-tool-skill'
+
+# Multi-user deployments mount an account Skill store on the host. The
+# installer derives its owner from the Session header and is absent from
+# single-user profiles, which continue to manage local Skills directly.
+- id: tool-skill-install
+  name: '@deepseek-ai/dsh-tool-skill-install'
+  disabled: !!js "ctx.get('accountSkillStore') === undefined"
 
 # ── goals ───────────────────────────────────────────────────────────────────
 

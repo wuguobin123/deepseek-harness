@@ -4,14 +4,14 @@
  * wrapped by WorkspacePicker for the conversation empty-state slot
  * registration. Directory picking itself lives in the composed flow package's
  * slot occupant (see the contract module doc): this core only opens the flow,
- * adopts the picked path, and owns the error surface. Adding a workspace has
- * exactly one route — pick a host directory, new or existing — because the
- * occupant's own create-folder affordance already covers creating one.
+ * adopts the picked path, and owns the error surface. The user explicitly
+ * chooses whether the directory stays live on this device or is imported as
+ * an independent cloud copy before the composed flow opens.
  */
 import type { ReactNode, RefObject } from 'react'
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Button, IconFolderClose16, IconPlusOutline16, Menu, Modal, type MenuEntry,
+  Button, IconFolderClose16, Menu, Modal, type MenuEntry,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   WorkspaceId, WorkspaceListState, WorkspaceView,
@@ -20,7 +20,8 @@ import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import type { DirectoryFlowOwnerProps, WorkspacePickerProps } from './contract/slots.ts'
 import css from './WorkspacePicker.module.css'
 
-const ADD_WORKSPACE = '::add-workspace'
+const ADD_LOCAL = '::add-local-workspace'
+const ADD_CLOUD = '::add-cloud-workspace'
 
 /** Core flow props: the owner supplies popover control and pick semantics. */
 export interface WorkspacePickFlowProps {
@@ -79,6 +80,7 @@ export function WorkspacePickFlow({
   const [modalError, setModalError] = useState<string | null>(null)
   const [flowOpen, setFlowOpen] = useState(false)
   const [pickingFolder, setPickingFolder] = useState(false)
+  const [flowLocation, setFlowLocation] = useState<'local' | 'cloud'>('local')
   // One picking interaction at a time: while the flow is open (native chooser
   // pending, browse dialog up) or its pick is being adopted, every other
   // menu action stays disabled — a late outcome must not race a concurrent
@@ -99,7 +101,10 @@ export function WorkspacePickFlow({
     if (flowOpen && !flowAvailable) setFlowOpen(false)
   }, [flowOpen, flowAvailable])
   const addEntries: MenuEntry[] = flowAvailable
-    ? [{ id: ADD_WORKSPACE, label: t('menu.addWorkspace'), icon: <IconPlusOutline16 size={16} />, disabled: flowBusy }]
+    ? [
+      { id: ADD_LOCAL, label: t('menu.openLocalWorkspace'), icon: <IconFolderClose16 size={16} />, disabled: flowBusy },
+      { id: ADD_CLOUD, label: t('menu.importCloudCopy'), icon: <IconFolderClose16 size={16} />, disabled: flowBusy },
+    ]
     : []
   // With workspaces listed, the add action pins below the scroll region
   // (divider + always visible); otherwise it IS the menu.
@@ -140,26 +145,15 @@ export function WorkspacePickFlow({
     setFlowOpen(true)
   }, [onClose])
 
-  // A menu exists to disambiguate between targets. With no workspaces listed
-  // and the add action the only entry left, the anchor gesture IS that action:
-  // a one-row popover would cost a click and offer nothing to choose between.
-  // The owner's open request is consumed the same way selecting the entry
-  // would consume it (close the popover, raise the flow). An empty list is
-  // only final once the baseline lands — until then the menu stays up with its
-  // loading status instead of jumping into a flow the arriving list would have
-  // made unnecessary; the add-only surface lists nothing and never waits.
-  const listSettled = addOnly || workspaceSnapshot.phase === 'ready'
-  const addIsTheOnlyEntry = !pinAdd && listSettled && addEntries.length === 1
-  // `flowBusy` gates this exactly as it disables the equivalent menu entry: a
-  // pick still being adopted owns the surface until it settles.
-  useEffect(() => {
-    if (open && addIsTheOnlyEntry && !flowBusy) openDirectoryFlow()
-  }, [open, addIsTheOnlyEntry, flowBusy, openDirectoryFlow])
-
   /** Owner side of the flow conversation: adopt keeps the flow open (busy) until the Host answers. */
   const flowOwner: DirectoryFlowOwnerProps = {
     open: flowOpen,
     busy: pickingFolder,
+    location: flowLocation,
+    onWorkspace: (workspace) => {
+      setFlowOpen(false)
+      onPick(workspace.workspaceId)
+    },
     onPicked: (path) => {
       setPickingFolder(true)
       void adoptDirectory(path).finally(() => { setPickingFolder(false) })
@@ -173,7 +167,8 @@ export function WorkspacePickFlow({
   }
 
   const handleSelect = (id: string): void => {
-    if (id === ADD_WORKSPACE) {
+    if (id === ADD_LOCAL || id === ADD_CLOUD) {
+      setFlowLocation(id === ADD_LOCAL ? 'local' : 'cloud')
       openDirectoryFlow()
       return
     }
@@ -183,7 +178,7 @@ export function WorkspacePickFlow({
   return (
     <>
       <Menu
-        open={open && !addIsTheOnlyEntry && !menuIsEmpty}
+        open={open && !menuIsEmpty}
         anchor={null}
         items={items}
         {...pinAdd ? { footer: addEntries } : {}}
@@ -194,7 +189,7 @@ export function WorkspacePickFlow({
         portal
         getAnchorRect={getAnchorRect}
       />
-      {open && !addIsTheOnlyEntry && !menuIsEmpty && workspaceSnapshot.phase === 'pending' && <div className={css.menuStatus} role="status">{t('picker.loading')}</div>}
+      {open && !menuIsEmpty && workspaceSnapshot.phase === 'pending' && <div className={css.menuStatus} role="status">{t('picker.loading')}</div>}
       {renderDirectoryFlow(flowOwner)}
       <Modal
         open={errorOpen}

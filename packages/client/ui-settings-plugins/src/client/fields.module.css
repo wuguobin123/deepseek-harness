@@ -56,6 +56,9 @@
   border: none;
   background: none;
   padding: 0;
+  /* The desktop shell's legacy button base imposes min-height: 32px, which
+     would stretch the badge row; the reset link keeps its text height. */
+  min-height: 0;
   font: inherit;
   font-size: 12px;
   line-height: 1.5;

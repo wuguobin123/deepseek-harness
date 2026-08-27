@@ -7,6 +7,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { makeTranslate, SlotTestRuntime } from '@deepseek-ai/dsh-client-test-runtime'
+import type { SessionBehaviorOverrides } from '@deepseek-ai/dsh-client-test-runtime'
 import type { QueuedMessage, SessionFace } from '@deepseek-ai/dsh-client-runtime/client'
 import { ComposerBlockRegistry } from '../src/client/input/blocks.ts'
 import { InputHub } from '../src/client/input/hub.ts'
@@ -19,9 +20,14 @@ async function bench(readAttachment?: SessionFace['readAttachment']) {
   const updateQueue = vi.fn(() => Promise.resolve({ ok: true as const, value: { accepted: true as const } }))
   const cancel = vi.fn(() => Promise.resolve({ ok: true as const, value: { accepted: true as const } }))
   const loadOlder = vi.fn(() => Promise.resolve())
+  const retryOpen = vi.fn(() => Promise.resolve())
+  const session = {
+    prompt, updateQueue, cancel, loadOlder, retryOpen,
+    ...(readAttachment === undefined ? {} : { readAttachment }),
+  } satisfies SessionBehaviorOverrides
   await runtime.sessions.add({
     id: 's1',
-    session: { prompt, updateQueue, cancel, loadOlder, ...(readAttachment === undefined ? {} : { readAttachment }) },
+    session,
   })
   // config.input is required (the apply shares its hub with the inject
   // factories); the bench passes its own instance explicitly.
@@ -34,7 +40,7 @@ async function bench(readAttachment?: SessionFace['readAttachment']) {
   const root = runtime.ctx.get('conversation') as ConversationController
   const scoped = runtime.sessions.scope('s1')!.get('conversation') as ConversationController
   const shell = hub.shellFor(runtime.sessions.binding('s1')!)
-  return { runtime, fiber, root, scoped, hub, shell, prompt, updateQueue, cancel, loadOlder }
+  return { runtime, fiber, root, scoped, hub, shell, session, prompt, updateQueue, cancel, loadOlder, retryOpen }
 }
 
 describe('ConversationController', () => {
@@ -44,10 +50,12 @@ describe('ConversationController', () => {
     await b.scoped.updateQueue('item-1' as never, { kind: 'remove' })
     await b.scoped.cancel()
     await b.scoped.loadOlder()
+    await b.scoped.retryHistory()
     expect(b.prompt).toHaveBeenCalledWith([{ type: 'text', text: 'hello' }], 'queue')
     expect(b.updateQueue).toHaveBeenCalledWith('item-1', { kind: 'remove' })
     expect(b.cancel).toHaveBeenCalledOnce()
     expect(b.loadOlder).toHaveBeenCalledOnce()
+    expect(b.retryOpen).toHaveBeenCalledOnce()
     await b.runtime.dispose()
   })
 
@@ -112,6 +120,25 @@ describe('ConversationController', () => {
     ])).toThrow(UnsupportedImageMediaTypeError)
     expect(created).not.toHaveBeenCalled()
     created.mockRestore()
+    await b.runtime.dispose()
+  })
+
+  it('submits image and Office drafts together in their original order', async () => {
+    const b = await bench()
+    const created = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:preview')
+    try {
+      const [image] = b.root.createDraftImages([new File([Uint8Array.of(1)], 'pixel.png', { type: 'image/png' })])
+      const [file] = b.root.createDraftFiles([new File([Uint8Array.of(2)], 'sales.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })])
+      if (image === undefined || file === undefined) throw new Error('draft attachment missing')
+      await b.root.sendSession(b.runtime.sessions.binding('s1')!.session, '分析数据', [image.id, file.id], 'queue')
+      expect(b.prompt).toHaveBeenCalledWith([
+        expect.objectContaining({ type: 'image', mediaType: 'image/png', name: 'pixel.png' }),
+        expect.objectContaining({ type: 'file', kind: 'xlsx', name: 'sales.xlsx' }),
+        { type: 'text', text: '分析数据' },
+      ], 'queue', undefined)
+    } finally {
+      created.mockRestore()
+    }
     await b.runtime.dispose()
   })
 

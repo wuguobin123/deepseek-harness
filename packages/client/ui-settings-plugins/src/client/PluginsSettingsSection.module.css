@@ -42,6 +42,7 @@
 
 .tab:hover,
 .tab[data-active='true'] {
+  background: transparent;
   color: var(--dsw-alias-label-primary);
 }
 

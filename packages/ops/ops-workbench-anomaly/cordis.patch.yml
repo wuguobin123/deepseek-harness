@@ -1,6 +1,9 @@
 # Patch overlay reserved for `@deepseek-ai/dsh-ops-workbench-anomaly`. The
 # plugin is a no-op skeleton until the first scenario that needs anomaly
-# surfacing lands; uncomment the row below when that happens.
+# surfacing lands; replace the empty sequence below with the row when that
+# happens.
 #
 # - id: ops-workbench-anomaly
 #   name: '@deepseek-ai/dsh-ops-workbench-anomaly'
+
+[]

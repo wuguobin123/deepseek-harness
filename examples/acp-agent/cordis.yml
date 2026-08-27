@@ -160,6 +160,14 @@
 - id: repeat-tool-reminder
   name: '@deepseek-ai/dsh-repeat-tool-reminder'
 
+# Output-limit truncation is recoverable work, not a user handoff. The authored
+# max-tokens snapshot exercises one automatic continuation; ordinary scenarios
+# never reach this listener.
+- id: max-token-continuation
+  name: '@deepseek-ai/dsh-max-token-continuation'
+  config:
+    maxContinuations: 2
+
 # The filesystem stack rides the SAME sandbox policy as bash: dsh-fs-sandbox
 # replaces dsh-fs-local behind ctx.fs and fences write/edit by the effective
 # mode (read-only denies, workspace-write contains to the workspace + temp

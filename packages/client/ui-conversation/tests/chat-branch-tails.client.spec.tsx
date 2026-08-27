@@ -194,6 +194,11 @@ describe('MessageItem arms', () => {
       configurable: true,
       value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
     })
+    const exec = vi.fn().mockReturnValue(false)
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: exec,
+    })
     render(
       <MessageItem t={t} node={{
         kind: 'user', seq: 1, time: 1_000,
@@ -207,8 +212,36 @@ describe('MessageItem arms', () => {
       await Promise.resolve()
       await Promise.resolve()
     })
+    expect(exec).toHaveBeenCalledWith('copy')
     expect(screen.getByRole('button', { name: '复制' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: '复制成功' })).toBeNull()
+  })
+
+  it('user copy falls back when Electron rejects clipboard.writeText', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+    })
+    const exec = vi.fn().mockReturnValue(true)
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: exec,
+    })
+    render(
+      <MessageItem t={t} node={{
+        kind: 'user', seq: 1, time: 1_000,
+        content: [{ type: 'text', text: 'copy through fallback' }] as never,
+        source: null,
+      }}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '复制' }))
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(exec).toHaveBeenCalledWith('copy')
+    expect(screen.getByRole('button', { name: '复制成功' })).toBeTruthy()
   })
 
   it('copy swaps to the check success chrome, gates re-clicks, and reverts after a second', async () => {
@@ -791,7 +824,7 @@ describe('MessageItem arms', () => {
     const unknownView = render(
       <MessageItem t={t} node={{ kind: 'unknown', seq: 4, type: 'surface/next', data: { x: 1 } } as never} />,
     )
-    expect(unknownView.getByText(/未知 surface 事件：surface\/next/)).toBeTruthy()
+    expect(unknownView.getByText(/未知界面事件：surface\/next/)).toBeTruthy()
   })
 
   it('a compaction marker discloses its summary and never shows the framed checkpoint', () => {

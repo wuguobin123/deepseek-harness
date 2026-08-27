@@ -1042,11 +1042,12 @@ describe('Session', () => {
     const cases: Array<{ header: unknown; error: RegExp }> = [
       { header: 1, error: /not a plain JSON record/ },
       { header: null, error: /not a plain JSON record/ },
-      { header: { ...base, version: 1 }, error: /header version/ },
+      { header: { ...base, version: 999 }, error: /header version/ },
       { header: { ...base, createdAt: '123' }, error: /createdAt must be a non-negative safe integer/ },
       { header: { ...base, cwd: 1 }, error: /header cwd must be a string/ },
       { header: { ...base, cwd: 'relative' }, error: /header cwd must be an absolute path/ },
       { header: { ...base, parentSession: 1 }, error: /header parentSession must be a string/ },
+      { header: { ...base, ownerId: '' }, error: /header ownerId must be a non-empty string/ },
       { header: { ...base, seedLength: '1' }, error: /seedLength must be a non-negative safe integer/ },
       { header: { ...base, seedLength: 0.5 }, error: /seedLength must be a non-negative safe integer/ },
       { header: { ...base, seedLength: -1 }, error: /seedLength must be a non-negative safe integer/ },

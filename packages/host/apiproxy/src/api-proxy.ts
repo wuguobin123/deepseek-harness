@@ -3,28 +3,29 @@
  * narrow RpcRequest<P> and echoes request.rpcId on the RpcResponse<T>.
  */
 
-import { randomUUID } from 'node:crypto'
-import { mkdir, stat } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
+import { mkdir, realpath, stat, writeFile, rename, rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname } from 'node:path'
+import { dirname, isAbsolute, join, relative } from 'node:path'
 import { z as zod } from 'zod'
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type { Agent, ModelSelection, ModelSelectionRef, AgentOptions, AgentStatus } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-presets/types'
-import { AttachmentError, admitEncodedImages } from '@deepseek-ai/dsh-attachment'
-import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import { AttachmentError, admitEncodedImages, admitEncodedDocuments } from '@deepseek-ai/dsh-attachment'
+import type { ImageAttachmentRef, DocumentAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { createUserMessage, freezeMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { errorChain } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, MessageSource } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, MessageSource, GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { isAppendSurfaceEvent, isJsonValue } from '@deepseek-ai/dsh-session'
+import { SessionOwnerId as brandSessionOwnerId } from '@deepseek-ai/dsh-session'
 import type { JsonValue, Session, SessionEvent, SessionEventMap, SessionHeader, SessionId, UserMessage } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { SessionQueryError, type SessionSearchCursor } from '@deepseek-ai/dsh-session-query'
 import { SubagentError } from '@deepseek-ai/dsh-subagent'
 import type { SubagentListEntry as CatalogSubagentListEntry } from '@deepseek-ai/dsh-subagent'
 import { isUserInvocable } from '@deepseek-ai/dsh-skill'
-import type { Workspace, WorkspaceRecord } from '@deepseek-ai/dsh-workspace'
+import type { Workspace, WorkspaceAccess, WorkspaceRecord } from '@deepseek-ai/dsh-workspace'
 import {
   workspaceDomainState, workspaceRecord, WorkspaceId as brandWorkspaceId,
   WorkspaceMoveInvalidError, WorkspaceOrderInvalidError, WorkspaceUnknownSessionError,
@@ -41,7 +42,7 @@ import type {
   ModelCatalogFailure, ModelProviderGroup,
   ModelReasoning, MuxFrame, PromptContentPart, QuestionResponsePayload, SessionListMetadata, SessionProjectionsBlock, SessionSearchItem,
   QueuedInboxItem, SessionSummary, SettingsNamespaceView, SubagentAddress, JobView, ToolEventView,
-  WorkspaceId, WorkspaceView,
+  WorkspaceId, WorkspaceView, UserContextKey, UserContextKind, UserContextView,
 } from './api/index.ts'
 import {
   DEFAULT_SESSION_LOG_COMPRESSION_LEVEL,
@@ -93,26 +94,30 @@ import type {} from '@deepseek-ai/dsh-user-approval'
 import { approvalResponsePayloadSchema } from './api/approvals.schema.ts'
 import { imageLimitsProjectionSchema, sessionListMetadataProjectionSchema } from './api/sessions.schema.ts'
 import { questionResponsePayloadSchema } from './api/questions.schema.ts'
-import type { ClientResponse, RpcError, RpcReceipt, RpcRequest, RpcResponse } from './api/rpc.ts'
+import type { ClientResponse, RpcError, RpcReceipt, RpcRequest, RpcResponse, RpcPrincipal } from './api/rpc.ts'
 import { RpcId } from './api/rpc.ts'
 import type {
   AskUserQuestionAnswer, AskUserQuestionItem, AskUserQuestionRequest,
 } from '@deepseek-ai/dsh-user-questions'
 import { UserQuestionError } from '@deepseek-ai/dsh-user-questions'
 import { DirectoryPickerError } from '@deepseek-ai/dsh-host-directory-picker'
-// ---- workbuddy multi-user account seam ----
-import type { IdentityService, SignedIn, AuthenticatedView } from '@deepseek-ai/dsh-account-identity'
-import { IdentityError } from '@deepseek-ai/dsh-account-identity'
-import type { EmailVerificationService } from '@deepseek-ai/dsh-account-email-verification'
-import { EmailVerificationError } from '@deepseek-ai/dsh-account-email-verification'
-import type { WalletService, WalletView, LedgerEntry } from '@deepseek-ai/dsh-account-wallet'
-import { WalletError } from '@deepseek-ai/dsh-account-wallet'
-import type { UserModelKeyService, ModelKeyView, ProvisionedKey } from '@deepseek-ai/dsh-account-model-keys'
-import { ModelKeyError } from '@deepseek-ai/dsh-account-model-keys'
-import type { ArtifactRegistry, ArtifactView as ArtifactRegistryView } from '@deepseek-ai/dsh-artifact'
+// ---- xiaowei multi-user account seam ----
+import type { SignedIn, AuthenticatedView, WalletView, LedgerEntry } from '@deepseek-ai/dsh-account-api-provider'
+import type { IdentityError, EmailVerificationError, WalletError } from '@deepseek-ai/dsh-account-api-provider'
+import type {
+  ProvisionedKey,
+  CustomModelId,
+  CustomModelView as StoredCustomModelView,
+} from '@deepseek-ai/dsh-account-api-provider'
+import type { ModelKeyError } from '@deepseek-ai/dsh-account-api-provider'
+import type { ArtifactView as ArtifactRegistryView } from '@deepseek-ai/dsh-artifact'
 import { ArtifactError } from '@deepseek-ai/dsh-artifact'
 import { SessionId as brandSessionId } from '@deepseek-ai/dsh-session'
 import type { RpcErrorCode } from './api/rpc.ts'
+import type { InvitationView } from './api/account.ts'
+import type { ModelKeyView } from './api/model-keys.ts'
+import type { AccountPluginView } from '@deepseek-ai/dsh-account-api-provider'
+import type { CustomModelView } from './api/custom-models.ts'
 import {
   ApiRemoteSessionNotFound as SessionNotFound,
   ApiRemoteSubagentSessionOwnership as SubagentSessionOwnership,
@@ -123,6 +128,20 @@ import {
   inspectApiRemoteSession,
 } from '@deepseek-ai/dsh-api-remotes'
 import { canOpenNativePath, openNativePath, openNativeTextFile } from './native-path-opener.ts'
+import { mountAccountPluginsIfConfigured } from './account-plugin-mount.ts'
+import { accountInferenceOptions } from './api/account-inference.ts'
+import type { AccountInferenceFrame } from '@deepseek-ai/dsh-llm-account-inference'
+
+/** Optional user-context provider consumed by the host RPC adapter. */
+interface UserContextProvider {
+  list(input: { kind?: UserContextKind; workspaceId?: string | null; limit?: number }): Promise<{ items: readonly UserContextView[] }>
+  get(input: { kind: UserContextKind; key: UserContextKey; workspaceId?: string | null }): Promise<
+    | { found: true; entry: UserContextView }
+    | { found: false; missing: true }
+  >
+  set(input: { kind: UserContextKind; key: UserContextKey; workspaceId?: string | null; value: string }): Promise<UserContextView>
+  delete(input: { kind: UserContextKind; key: UserContextKey; workspaceId?: string | null }): Promise<{ removed: boolean }>
+}
 
 /** Page size when history is called without maxMessages. */
 const DEFAULT_MAX_MESSAGES = 50
@@ -134,21 +153,49 @@ const SESSION_SEARCH_PROVIDER_CALL_LIMIT = 100
 const COLD_SUMMARY_BATCH_SIZE = 16
 /** Default maximum artifact size eligible for one cold blankness read. */
 export const DEFAULT_COLD_BLANK_PROBE_MAX_BYTES = 1024
+/** Bounds for the single-request local directory import MVP. */
+export const DIRECTORY_IMPORT_MAX_FILES = 200
+/** Maximum decoded bytes accepted for one imported file. */
+export const DIRECTORY_IMPORT_MAX_FILE_BYTES = 5 * 1024 * 1024
+/** Maximum decoded bytes accepted across one directory import. */
+export const DIRECTORY_IMPORT_MAX_TOTAL_BYTES = 25 * 1024 * 1024
 
 /** Conversation message event types (the pagination counting unit). */
 const MESSAGE_TYPES = new Set(['user/message', 'assistant/message'])
+/** Stable provider id for account custom-model routing. */
+const CUSTOM_MODEL_PROVIDER_ROUTE = 'xiaowei-custom'
+
+/** Render an unknown failure for operator logs without assuming an Error instance. */
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/** Read a service error's stable discriminant without importing account runtimes. */
+function serviceErrorCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined
+  const code = (error as { code?: unknown }).code
+  return typeof code === 'string' ? code : undefined
+}
+
+/** Structural account-error guard; keeps the cloud gateway free of runtime imports. */
+function isServiceError<T extends { code: string }>(error: unknown): error is T {
+  return serviceErrorCode(error) !== undefined
+}
 
 /** Validate one prompt as a batch before publishing any durable image object. */
-async function durablePromptContent(ctx: Context, content: readonly PromptContentPart[]): Promise<ContentBlock[]> {
-  if (content.every(part => part.type === 'text')) {
-    return content.map(part => ({ type: 'text', text: part.text }))
-  }
+async function durablePromptContent(
+  ctx: Context,
+  content: readonly PromptContentPart[],
+): Promise<{ blocks: ContentBlock[]; files: readonly DocumentAttachmentRef[] }> {
   const refs = await admitEncodedImages(ctx.attachments, content.filter(part => part.type === 'image'))
+  const fileInputs = content.filter(part => part.type === 'file')
+  const files = await admitEncodedDocuments(ctx.attachments, fileInputs.map(part => ({ mediaType: part.mediaType, data: part.data, kind: part.kind, ...(part.name === undefined ? {} : { name: part.name }), summary: '' })))
   let next = 0
-  return content.map(part => part.type === 'text'
-    ? { type: 'text', text: part.text }
-    // admitEncodedImages returns one reference per image part in order.
-    : { type: 'image', attachment: refs[next++] as ImageAttachmentRef })
+  const fileHint = files.length === 0 ? [] : [{ type: 'text' as const, text: files.map(file => `[uploaded-file attachmentId=${file.attachmentId} name=${file.name ?? '(unnamed)'} kind=${file.kind}]\n${file.summary}\nUse document_read for page/slide/worksheet details.${file.kind === 'xlsx' ? ' Use sheet_analyze to create a table, bar chart, and pie chart analysis page.' : ''}`).join('\n\n') }]
+  const blocks: ContentBlock[] = [...content.filter(part => part.type !== 'file').map(part => part.type === 'text'
+    ? { type: 'text' as const, text: part.text }
+    : { type: 'image' as const, attachment: refs[next++] as ImageAttachmentRef }), ...fileHint]
+  return { files, blocks }
 }
 
 /** Search durable content for an image reference, including nested tool results. */
@@ -588,6 +635,8 @@ function directoryError(error: unknown): RpcError {
 
 /** Resolved Agent model and project-directory defaults consumed by the API implementation. */
 export interface ApiProxyDefaults {
+  /** Preset permitted for authenticated account sessions. */
+  accountAgentPreset?: string
   /**
    * The model selection a session starts from when its own log names none. Read on
    * every access rather than captured, so a default saved during this process
@@ -605,6 +654,8 @@ export interface ApiProxyDefaults {
   saveDefaultModelSelection?: (selection: ModelSelection) => Promise<void>
   /** Default project directory for new sessions whose create request carries no cwd. */
   cwd: string
+  /** Root below which authenticated account workspaces are created. */
+  accountWorkspaceRoot?: string
   /** Native open-with-default-application; injectable for carrier tests. */
   openPath?: (path: string, signal: AbortSignal) => Promise<void>
   /** Native text-editor handoff; injectable for settings-document tests. */
@@ -1085,6 +1136,38 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   const pendingApprovals = new Map<RpcId, PendingApproval>()
   const muxQueues = new Set<FrameQueue<RpcRequest<MuxFrame>>>()
   const imageAdmissionChains = new WeakMap<Agent, Promise<void>>()
+  const importedDirectories = new Map<string, Workspace>()
+
+  const accountRoot = async (owner: ReturnType<typeof brandSessionOwnerId>): Promise<string> => {
+    const base = defaults.accountWorkspaceRoot ?? join(defaults.cwd, '.dsh-accounts')
+    await mkdir(base, { recursive: true, mode: 0o700 })
+    const canonicalBase = await realpath(base)
+    const hashDir = join(canonicalBase, createHash('sha256').update(String(owner)).digest('hex'))
+    await mkdir(hashDir, { recursive: true, mode: 0o700 })
+    const canonicalHashDir = await realpath(hashDir)
+    if (!contained(canonicalBase, canonicalHashDir)) throw new Error('account workspace hash directory escapes configured root')
+    const path = join(canonicalHashDir, 'workspaces')
+    await mkdir(path, { recursive: true, mode: 0o700 })
+    const canonicalPath = await realpath(path)
+    if (!contained(canonicalBase, canonicalPath)) throw new Error('account workspace root escapes configured root')
+    return canonicalPath
+  }
+  const contained = (root: string, target: string): boolean => {
+    if (!isAbsolute(target)) return false
+    const rest = relative(root, target)
+    return rest === '' || (rest !== '..' && !rest.startsWith(`..${dirname('/')}`) && !rest.startsWith('../') && !rest.startsWith('..\\'))
+  }
+  const accountPath = async (
+    request: RpcRequest<unknown>,
+    path: string | undefined,
+  ): Promise<{ root: string; path: string } | undefined> => {
+    const owner = requestOwner(request)
+    if (owner === undefined) return undefined
+    const root = await accountRoot(owner)
+    const target = await realpath(path ?? root)
+    if (!contained(root, target)) throw new Error('path is outside the account workspace root')
+    return { root, path: target }
+  }
 
   /** Serialize image admission with model selection for one agent. */
   function serializeImageAdmission<T>(agent: Agent, operation: () => Promise<T>): Promise<T> {
@@ -1178,16 +1261,28 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
    * @returns the id to record on the header (absent without a roster) and the setup callback.
    * @throws when the roster supplies no such preset.
    */
-  async function composeAgent(presetId: string | undefined): Promise<{
+  async function composeAgent(
+    presetId: string | undefined,
+    ownerId?: string,
+    pluginIds?: readonly string[],
+    sessionEvents?: readonly SessionEvent[],
+  ): Promise<{
     agentPreset?: string
     setup: (agentCtx: Context) => Promise<void>
   }> {
     const presets = ctx.get('agentPresets')
     if (presets === undefined) {
       return {
-        setup: (agentCtx: Context) => {
+        setup: async (agentCtx: Context) => {
           installSelection(agentCtx)
-          return Promise.resolve()
+          if (ownerId !== undefined) {
+            if (ctx.get('accountPluginFactory') !== undefined) {
+              const pluginInput = sessionEvents === undefined
+                ? pluginIds === undefined ? { userId: ownerId } : { userId: ownerId, pluginIds }
+                : { userId: ownerId, events: sessionEvents }
+              await mountAccountPluginsIfConfigured(agentCtx, pluginInput, true)
+            }
+          }
         },
       }
     }
@@ -1197,6 +1292,14 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       setup: async (agentCtx: Context) => {
         installSelection(agentCtx)
         await presets.mount(agentCtx, resolvedId)
+        if (ownerId !== undefined) {
+          if (ctx.get('accountPluginFactory') !== undefined) {
+            const pluginInput = sessionEvents === undefined
+              ? pluginIds === undefined ? { userId: ownerId } : { userId: ownerId, pluginIds }
+              : { userId: ownerId, events: sessionEvents }
+            await mountAccountPluginsIfConfigured(agentCtx, pluginInput, true)
+          }
+        }
       },
     }
   }
@@ -1220,8 +1323,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   // restore that history under the old tool set.
   const agentFor = createApiRemoteAgentResolver(ctx, {
     agentOptions,
-    setup: async ({ meta, events }) =>
-      (await composeAgent(resolveSessionPreset({ header: meta, events }))).setup,
+    setup: async ({ meta, events }) => {
+      const ownerId = meta.ownerId === undefined ? undefined : String(meta.ownerId)
+      return (await composeAgent(resolveSessionPreset({ header: meta, events }), ownerId, undefined, events)).setup
+    },
   })
 
   /** Send one transient frame to every connected mux consumer. */
@@ -1462,9 +1567,56 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     return { id: inspected.meta.id, header: inspected.meta, events: inspected.events }
   }
 
+  /** Return the account owner for a request; local callers retain single-user access. */
+  function requestOwner(request: RpcRequest<unknown>): ReturnType<typeof brandSessionOwnerId> | undefined {
+    return request.principal?.kind === 'account' ? brandSessionOwnerId(request.principal.userId) : undefined
+  }
+
+  /** Hide both absent and foreign sessions behind the same wire error. */
+  function sessionNotFound(request: RpcRequest<unknown>, sessionId: SessionId): RpcResponse<never> {
+    return err(request, {
+      code: 'session-not-found',
+      message: `session "${sessionId}" not found`,
+      details: { sessionId },
+    })
+  }
+
+  function sessionVisibleTo(request: RpcRequest<unknown>, session: Pick<Session, 'header'>): boolean {
+    const owner = requestOwner(request)
+    return owner === undefined || session.header.ownerId === owner
+  }
+
+  /** Agent-preset roster operations address host-owned files and are local-only. */
+  function requireLocalPresetAccess(request: RpcRequest<unknown>): RpcError | undefined {
+    return requestOwner(request) === undefined ? undefined : {
+      code: 'unauthenticated',
+      message: 'remote accounts cannot access host agent presets',
+      details: {},
+    }
+  }
+
+  /** Authorize one session before any operation can inspect or mutate it. */
+  async function authorizeSession(request: RpcRequest<unknown>, sessionId: SessionId): Promise<RpcError | undefined> {
+    const owner = requestOwner(request)
+    if (owner === undefined) return undefined
+    try {
+      const state = await readSessionState(sessionId)
+      return state.header.ownerId === owner ? undefined : {
+        code: 'session-not-found', message: `session "${sessionId}" not found`, details: { sessionId },
+      }
+    } catch (error: unknown) {
+      if (error instanceof SessionNotFound) return { code: 'session-not-found', message: `session "${sessionId}" not found`, details: { sessionId } }
+      throw error
+    }
+  }
+
   /** Resolve the Workspace inherited by a fork without making ordinary loose lineage grouped. */
   async function forkWorkspace(source: Pick<Session, 'id' | 'header'>): Promise<Workspace | undefined> {
-    const workspaces = ctx.workspaceRegistry.list()
+    const owner = source.header.ownerId
+    const access = owner === undefined
+      ? { kind: 'local' as const }
+      : { kind: 'account' as const, userId: owner }
+    const workspaces = ctx.workspaceRegistry.list(access)
     const direct = workspaces.find(workspace => workspace.sessionIds.includes(source.id))
     if (direct !== undefined || source.header.origin !== 'subagent') return direct
 
@@ -1574,6 +1726,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     cwd: string,
     checkPersistedIdentity: boolean,
     presetId?: string,
+    ownerId?: ReturnType<typeof brandSessionOwnerId>,
   ): Promise<Agent> {
     let creation = sessionCreations.get(sessionId)
     if (creation === undefined) {
@@ -1583,6 +1736,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         if (attached !== undefined && hasSubagentOwner(attached, live)) {
           throw new SubagentSessionOwnership(sessionId)
         }
+        if (attached !== undefined && ownerId !== undefined && attached.header.ownerId !== ownerId) {
+          throw new Error(`session "${sessionId}" is owned by another account`)
+        }
         if (live !== undefined) return live
 
         const persistence = checkPersistedIdentity ? ctx.get('sessionPersistence') : undefined
@@ -1591,6 +1747,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           : (await persistence.list()).find(header => header.id === sessionId)
         if (persistence !== undefined && stored !== undefined) {
           const inspected = await persistence.inspect(sessionId)
+          if (ownerId !== undefined && inspected.meta.ownerId !== ownerId) {
+            throw new Error(`session "${sessionId}" is owned by another account`)
+          }
           // Ownership first: explicit-id adoption of a session-backed
           // subagent must answer `agent-busy` regardless of the requested
           // cwd (the api/commands.ts contract), not a cwd conflict.
@@ -1611,7 +1770,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           return (await ctx.agents.resume({
             resumeSessionId: sessionId,
             agentOptions: agentOptions(),
-            setup: (await composeAgent(storedPreset)).setup,
+            setup: (await composeAgent(
+              storedPreset, ownerId === undefined ? undefined : String(ownerId), undefined, inspected.events,
+            )).setup,
           })).agent
         }
 
@@ -1620,12 +1781,21 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         } catch (error: unknown) {
           throw new Error(`failed to ensure project directory "${cwd}": ${String(error)}`, { cause: error })
         }
-        const composition = await composeAgent(presetId)
+        const accountFactory = ctx.get('accountPluginFactory')
+        const pluginIds = ownerId === undefined || accountFactory === undefined
+          ? undefined
+          : await accountFactory.selected({ userId: String(ownerId) })
+        const composition = await composeAgent(presetId, ownerId === undefined ? undefined : String(ownerId), pluginIds)
+        const pluginSeed = ownerId === undefined || accountFactory === undefined || pluginIds === undefined
+          ? undefined
+          : accountFactory.selectionSeed({ pluginIds })
         return (await ctx.agents.create({
           sessionId,
+          ...pluginSeed === undefined ? {} : { seed: [pluginSeed] },
           agentOptions: agentOptions(),
           meta: {
             cwd,
+            ...ownerId === undefined ? {} : { ownerId },
             ...composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset },
           },
           setup: composition.setup,
@@ -1660,12 +1830,16 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     return agent
   }
 
-  /** Resolve or create one path while holding the Host's workspace-create chain. */
-  function ensureWorkspace(path: string): Promise<{ workspace: Workspace; created: boolean }> {
+  /** Serialize path adoption so concurrent requests resolve one registration. */
+  function ensureWorkspace(
+    path: string,
+    access: WorkspaceAccess,
+    title?: string,
+  ): Promise<{ workspace: Workspace; created: boolean }> {
     const operation = workspaceCreationChain.then(async () => {
-      const existing = await ctx.workspaceRegistry.resolveByPath(path)
+      const existing = await ctx.workspaceRegistry.resolveByPath(path, access)
       if (existing !== undefined) return { workspace: existing, created: false }
-      return { workspace: await ctx.workspaceRegistry.create(path), created: true }
+      return { workspace: await ctx.workspaceRegistry.create(path, title, access), created: true }
     })
     workspaceCreationChain = operation.then(() => undefined, () => undefined)
     return operation
@@ -1676,7 +1850,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
    * Attached sessions come from memory; servable cold sessions merge from
    * persistence, and the final order is newest-first.
    */
-  async function listVisibleSessionSummaries(signal?: AbortSignal): Promise<SessionSummary[]> {
+  async function listVisibleSessionSummaries(
+    signal?: AbortSignal,
+    owner?: ReturnType<typeof brandSessionOwnerId>,
+  ): Promise<SessionSummary[]> {
     signal?.throwIfAborted()
     const summarizeAttached = (session: Session): SessionSummary => {
       const agent = ctx.agents.get(session.id)
@@ -1686,13 +1863,13 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         ...projections === undefined ? {} : { projections },
       }
     }
-    const items = ctx.sessions.list().map(summarizeAttached)
+    const items = ctx.sessions.list().filter(session => owner === undefined || session.header.ownerId === owner).map(summarizeAttached)
     signal?.throwIfAborted()
     const attached = new Set(items.map(item => item.sessionId))
     const persistence = ctx.get('sessionPersistence')
     if (persistence !== undefined) {
       const cold = (await persistence.list(signal))
-        .filter(meta => !attached.has(meta.id) && meta.cwd !== undefined)
+        .filter(meta => !attached.has(meta.id) && meta.cwd !== undefined && (owner === undefined || meta.ownerId === owner))
       signal?.throwIfAborted()
       for (let offset = 0; offset < cold.length; offset += COLD_SUMMARY_BATCH_SIZE) {
         signal?.throwIfAborted()
@@ -1767,6 +1944,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     request: RpcRequest<{ sessionId: SessionId }>,
     mutation: (goals: NonNullable<ReturnType<typeof ctx.get<'goals'>>>, agent: Agent) => CoreGoalRef,
   ): Promise<RpcResponse<{ ref: GoalRef }>> {
+    const denied = await authorizeSession(request, request.payload.sessionId)
+    if (denied !== undefined) return err(request, denied)
     const found = await agentFor(request.payload.sessionId)
     if ('error' in found) return err(request, found.error)
     const goals = goalServiceFor(found.agent)
@@ -1792,6 +1971,21 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     return llm === undefined || llm.listProviders().some(entry => entry.id === provider)
   }
 
+  /** Return the active custom-model rows visible to this session owner. */
+  async function customModelsFor(agent: Agent): Promise<StoredCustomModelView[]> {
+    const ownerId = agent.session.header.ownerId
+    const service = ctx.get('userModelKeys')
+    if (ownerId === undefined || service === undefined) return []
+    const rows = await service.listCustom({ userId: ownerId as never })
+    return rows.filter(row => row.revoked === null)
+  }
+
+  /** Check one opaque custom-model id against the addressed session owner. */
+  async function customModelAvailable(agent: Agent, customModelId: string): Promise<boolean> {
+    const rows = await customModelsFor(agent)
+    return rows.some(row => row.customModelId === customModelId)
+  }
+
   /**
    * Resolve the addressed agent for a turn-starting method and refuse when no
    * adapter serves its current selection: a provider nothing serves cannot start a
@@ -1808,6 +2002,18 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     if ('error' in found) return { refused: err(request, found.error) }
     const agent = found.agent
     const selection = selectionFor(agent).current
+    if (
+      selection.provider === CUSTOM_MODEL_PROVIDER_ROUTE
+      && !await customModelAvailable(agent, selection.model)
+    ) {
+      return {
+        refused: err(request, {
+          code: 'model-unavailable',
+          message: 'the selected custom model is unavailable for this account',
+          details: { provider: selection.provider, model: selection.model },
+        }),
+      }
+    }
     if (!routeServed(selection.provider)) {
       return {
         refused: err(request, {
@@ -1955,7 +2161,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       // Logs without a cwd are not served; every session records its project
       // at create time.
       async list(request) {
-        return ok(request, { items: await listVisibleSessionSummaries() })
+        return ok(request, { items: await listVisibleSessionSummaries(undefined, requestOwner(request)) })
       },
 
       async search(request, signal) {
@@ -1974,7 +2180,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           })
         }
         try {
-          const visible = await listVisibleSessionSummaries(signal)
+          const visible = await listVisibleSessionSummaries(signal, requestOwner(request))
           if (isAborted(signal)) return cancelled()
           if (visible.length === 0) return ok(request, { items: [], hasMore: false })
           const visibleIds = new Set(visible.map(item => item.sessionId))
@@ -2091,9 +2297,31 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
       async create(request) {
         const sessionId = request.payload.sessionId ?? `session-${randomUUID()}` as SessionId
+        const owner = requestOwner(request)
+        if (owner !== undefined && request.payload.cwd !== undefined) {
+          return err(request, { code: 'bad-request', message: 'account session.create must not provide cwd', details: { issues: [] } })
+        }
+        const accountPreset = defaults.accountAgentPreset
+        if (owner !== undefined && accountPreset === undefined) {
+          return err(request, { code: 'bad-request', message: 'account agent preset is not configured', details: { issues: [] } })
+        }
+        if (owner !== undefined && request.payload.agentPreset !== undefined && request.payload.agentPreset !== accountPreset) {
+          return err(request, { code: 'bad-request', message: `account sessions may use only the ${accountPreset} preset`, details: { issues: [] } })
+        }
+        if (owner !== undefined && ctx.get('agentPresets') === undefined) {
+          return err(request, { code: 'bad-request', message: 'account agent preset roster is not configured', details: { issues: [] } })
+        }
+        if (owner !== undefined && request.payload.sessionId !== undefined) {
+          try {
+            const existing = await readSessionState(sessionId)
+            if (existing.header.ownerId !== owner) return sessionNotFound(request, sessionId)
+          } catch (error: unknown) {
+            if (!(error instanceof SessionNotFound)) throw error
+          }
+        }
         let workspace: Workspace | undefined
         if (request.payload.workspaceId !== undefined) {
-          workspace = ctx.workspaceRegistry.get(brandWorkspaceId(request.payload.workspaceId))
+          workspace = ctx.workspaceRegistry.get(brandWorkspaceId(request.payload.workspaceId), owner === undefined ? { kind: 'local' } : { kind: 'account', userId: owner })
           if (workspace === undefined) {
             return err(request, {
               code: 'workspace-not-found',
@@ -2101,11 +2329,29 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
               details: { workspaceId: request.payload.workspaceId },
             })
           }
+          if (owner !== undefined) {
+            try {
+              await accountPath(request, workspace.path)
+            } catch {
+              return err(request, {
+                code: 'workspace-not-found',
+                message: `workspace "${request.payload.workspaceId}" not found`,
+                details: { workspaceId: request.payload.workspaceId },
+              })
+            }
+          }
         }
-        const cwd = workspace?.path ?? request.payload.cwd ?? defaults.cwd
-        const requestedPreset = request.payload.agentPreset
+        if (owner !== undefined && workspace === undefined) {
+          const root = await accountRoot(owner)
+          const ensured = await ensureWorkspace(root, { kind: 'account', userId: owner })
+          workspace = ensured.workspace
+        }
+        const cwd = workspace?.path ?? (owner === undefined ? request.payload.cwd ?? defaults.cwd : await accountRoot(owner))
+        // Account creation requires a deployment-owned roster so the configured
+        // safe preset is resolved and recorded with the session.
+        const requestedPreset = owner === undefined ? request.payload.agentPreset : accountPreset
         try {
-          await ensureSession(sessionId, cwd, request.payload.sessionId !== undefined, requestedPreset)
+          await ensureSession(sessionId, cwd, request.payload.sessionId !== undefined, requestedPreset, owner)
         } catch (error: unknown) {
           if (error instanceof AgentPresetConflict) {
             return err(request, {
@@ -2133,6 +2379,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           }
           if (error instanceof SubagentSessionOwnership) {
             return err(request, subagentOwnershipError(error.sessionId))
+          }
+          if (owner !== undefined && error instanceof Error && error.message.includes('owned by another account')) {
+            return sessionNotFound(request, sessionId)
           }
           return err(request, {
             code: 'internal',
@@ -2167,6 +2416,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       async history(request) {
         const { sessionId, beforeSeq, maxMessages } = request.payload
         try {
+          const denied = await authorizeSession(request, sessionId)
+          if (denied !== undefined) return err(request, denied)
           const source = await historySourceFor(sessionId)
           // Both awaits happen BEFORE the cut. Ensuring the recorded
           // composition's standing mount is what registers its projection
@@ -2196,20 +2447,40 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
       async models(request) {
         const { sessionId } = request.payload
+        const denied = await authorizeSession(request, sessionId)
+        if (denied !== undefined) return err(request, denied)
         const found = await agentFor(sessionId)
         if ('error' in found) return err(request, found.error)
         const current = selectionFor(found.agent).current
         const { groups, failures } = await buildModelCatalog(ctx)
+        const customModels = await customModelsFor(found.agent)
+        if (customModels.length > 0) {
+          groups.push({
+            id: CUSTOM_MODEL_PROVIDER_ROUTE,
+            name: 'Custom models',
+            models: customModels.map(model => ({ id: model.customModelId, name: model.label })),
+          })
+        }
         const routable = routeServed(current.provider)
+          && (current.provider !== CUSTOM_MODEL_PROVIDER_ROUTE
+            || customModels.some(model => model.customModelId === current.model))
         return ok(request, { current: { ...current }, routable, groups, failures })
       },
 
       async selectModel(request) {
         const { sessionId, provider, model, reasoningEffort } = request.payload
+        const denied = await authorizeSession(request, sessionId)
+        if (denied !== undefined) return err(request, denied)
         const found = await agentFor(sessionId)
         if ('error' in found) return err(request, found.error)
         return serializeImageAdmission(found.agent, async () => {
           try {
+            if (
+              provider === CUSTOM_MODEL_PROVIDER_ROUTE
+              && !await customModelAvailable(found.agent, model)
+            ) {
+              throw new Error('custom model is unavailable for this account')
+            }
             const resolved = await ctx.llm.resolveCallConfig({
               provider,
               model,
@@ -2225,12 +2496,14 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
                 : { reasoningEffort: resolved.reasoningEffort },
             }
             selectionFor(found.agent).current = selected
-            try {
-              await defaults.saveDefaultModelSelection?.(selected)
-            } catch (error: unknown) {
-              ctx.logger.warn(
-                `api-proxy: the model switch applies to this session but was not saved as the default: ${String(error)}`,
-              )
+            if (selected.provider !== CUSTOM_MODEL_PROVIDER_ROUTE) {
+              try {
+                await defaults.saveDefaultModelSelection?.(selected)
+              } catch (error: unknown) {
+                ctx.logger.warn(
+                  `api-proxy: the model switch applies to this session but was not saved as the default: ${String(error)}`,
+                )
+              }
             }
             return ok(request, { selected: { ...selected } })
           } catch (error: unknown) {
@@ -2245,6 +2518,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
       async rename(request) {
         const { sessionId, title } = request.payload
+        const denied = await authorizeSession(request, sessionId)
+        if (denied !== undefined) return err(request, denied)
         const found = await agentFor(sessionId)
         if ('error' in found) return err(request, found.error)
         const titles = ctx.get('sessionTitle')
@@ -2275,6 +2550,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
       async fork(request) {
         const { sessionId, atSeq } = request.payload
+        const denied = await authorizeSession(request, sessionId)
+        if (denied !== undefined) return err(request, denied)
         let source: SessionReadState
         try {
           source = await readSessionState(sessionId)
@@ -2331,7 +2608,13 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         // those tools, and composing anything else would strand the tool calls
         // it already carries. Now that no model-facing row sits in the host
         // plane, composing nothing would leave the child with no tools at all.
-        const forkComposition = await composeAgent(resolveSessionPreset(source))
+        const forkOwner = requestOwner(request)
+        const forkComposition = await composeAgent(
+          resolveSessionPreset(source),
+          forkOwner === undefined ? undefined : String(forkOwner),
+          undefined,
+          events,
+        )
         try {
           await ctx.agents.create({
             sessionId: childId,
@@ -2340,6 +2623,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
               ...source.header.cwd === undefined ? {} : { cwd: source.header.cwd },
               parentSession: source.id,
               seedLength: cut,
+              ...requestOwner(request) === undefined ? {} : { ownerId: requestOwner(request) },
               ...forkComposition.agentPreset === undefined
                 ? {}
                 : { agentPreset: forkComposition.agentPreset },
@@ -2373,6 +2657,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
       async prompt(request) {
         const { sessionId, mode, content, clientTimeZone } = request.payload
+        const denied = await authorizeSession(request, sessionId)
+        if (denied !== undefined) return err(request, denied)
         const canonicalTimeZone = clientTimeZone === undefined
           ? undefined
           : canonicalClientTimeZone(clientTimeZone)
@@ -2387,7 +2673,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         if ('refused' in resolved) return resolved.refused
         const agent = resolved.agent
         // Request identity and optional browser zone ride the exact durable user message.
-        const source: MessageSource = {
+        let source: MessageSource = {
           kind: 'user',
           rpcId: request.rpcId,
           ...(canonicalTimeZone === undefined ? {} : { clientTimeZone: canonicalTimeZone }),
@@ -2407,7 +2693,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
               }
             }
             const durable = await durablePromptContent(ctx, content)
-            const message: UserMessage = createUserMessage({ content: durable, source })
+            if (durable.files.length > 0) source = { ...source, files: durable.files } as MessageSource
+            const message: UserMessage = createUserMessage({ content: durable.blocks, source })
             if (mode === 'steer') agent.steer(message)
             else agent.followup(message)
           } catch (error: unknown) {
@@ -2431,6 +2718,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
       async attachment(request) {
         const { sessionId, attachmentId } = request.payload
+        const denied = await authorizeSession(request, sessionId)
+        if (denied !== undefined) return err(request, denied)
         let state: SessionReadState
         try {
           state = await readSessionState(sessionId)
@@ -2478,8 +2767,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
       },
 
-      updateQueue(request) {
+      async updateQueue(request) {
         const { sessionId, itemId, action } = request.payload
+        const denied = await authorizeSession(request, sessionId)
+        if (denied !== undefined) return err(request, denied)
         if (action.kind === 'edit' && action.content.some(block => block.type !== 'text')) {
           return Promise.resolve(err(request, {
             code: 'attachment-error',
@@ -2528,8 +2819,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         return Promise.resolve(ok(request, { accepted: true as const }))
       },
 
-      cancel(request) {
+      async cancel(request) {
         const { sessionId } = request.payload
+        const denied = await authorizeSession(request, sessionId)
+        if (denied !== undefined) return err(request, denied)
         const agent = ctx.agents.get(sessionId)
         if (agent === undefined) {
           return Promise.resolve(err(request, {
@@ -2548,6 +2841,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
     subagents: {
       async list(request, signal) {
+        const denied = await authorizeSession(request, request.payload.parentSessionId)
+        if (denied !== undefined) return err(request, denied)
         try {
           const entries = await ctx.subagents.listChildren(request.payload.parentSessionId, signal)
           return ok(request, {
@@ -2582,6 +2877,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         const {
           parentSessionId, childSessionId, mode, beforeSeq, maxMessages,
         } = request.payload
+        const parentDenied = await authorizeSession(request, parentSessionId)
+        if (parentDenied !== undefined) return err(request, parentDenied)
+        const childDenied = await authorizeSession(request, childSessionId)
+        if (childDenied !== undefined) return err(request, childDenied)
         const verified = await catalogChild(ctx, {
           parentSessionId, childSessionId, mode,
         }, signal)
@@ -2649,6 +2948,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
       async prompt(request, signal) {
         const { parentSessionId, childSessionId, content, clientTimeZone } = request.payload
+        const parentDenied = await authorizeSession(request, parentSessionId)
+        if (parentDenied !== undefined) return err(request, parentDenied)
+        const childDenied = await authorizeSession(request, childSessionId)
+        if (childDenied !== undefined) return err(request, childDenied)
         const canonicalTimeZone = clientTimeZone === undefined
           ? undefined
           : canonicalClientTimeZone(clientTimeZone)
@@ -2690,8 +2993,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       // the core primitive alone authorizes the durable address against the
       // live Activation, which is what keeps a live child interruptible while
       // its parent Agent is offline. Absent targets are accepted no-ops there.
-      interrupt(request) {
+      async interrupt(request) {
         const { parentSessionId, childSessionId } = request.payload
+        const denied = await authorizeSession(request, childSessionId)
+        if (denied !== undefined) return err(request, denied)
         try {
           ctx.subagents.interrupt(childSessionId, { kind: 'user', parentSessionId })
         } catch (error: unknown) {
@@ -2714,16 +3019,25 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
     workspace: {
       list(request) {
+        const owner = requestOwner(request)
+        const access = owner === undefined ? { kind: 'local' as const } : { kind: 'account' as const, userId: owner }
+        const visible = (workspace: Workspace): WorkspaceView | undefined => {
+          const sessionIds = [...workspace.sessionIds]
+          return { ...workspaceView(workspace), sessionIds }
+        }
         return Promise.resolve(ok(request, {
-          items: ctx.workspaceRegistry.list().map(workspaceView),
-          archivedSessionIds: [...ctx.workspaceRegistry.archivedSessionIds],
+          items: ctx.workspaceRegistry.list(access).map(visible).filter((value): value is WorkspaceView => value !== undefined),
+          archivedSessionIds: [...ctx.workspaceRegistry.archivedSessionIdsFor(access)],
         }))
       },
 
       async create(request) {
         const { path } = request.payload
         try {
-          const { workspace, created } = await ensureWorkspace(path)
+          const owner = requestOwner(request)
+          const checked = owner === undefined ? path : (await accountPath(request, path))?.path as string
+          const access = owner === undefined ? { kind: 'local' as const } : { kind: 'account' as const, userId: owner }
+          const { workspace, created } = await ensureWorkspace(checked, access)
           return ok(request, { workspace: workspaceView(workspace), created })
         } catch (error: unknown) {
           // The registry rejects a path that does not resolve to an existing
@@ -2737,9 +3051,76 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
       },
 
+      async importDirectory(request) {
+        const owner = requestOwner(request)
+        if (owner === undefined) return err(request, { code: 'bad-request', message: 'directory import requires an authenticated account', details: { issues: [] } })
+        const { importId, title, files } = request.payload
+        const key = `${String(owner)}:${importId}`
+        const existing = importedDirectories.get(key)
+        if (existing !== undefined) return ok(request, { workspace: workspaceView(existing), created: false })
+        if (files.length > DIRECTORY_IMPORT_MAX_FILES) return err(request, { code: 'bad-request', message: 'directory contains too many files', details: { issues: [] } })
+        let total = 0
+        const seenPaths = new Set<string>()
+        for (const file of files) {
+          const parts = file.path.split('/')
+          if (file.path.includes('\0') || isAbsolute(file.path) || file.path.includes('\\') || parts.some(part => part === '' || part === '.' || part === '..')) return err(request, { code: 'bad-request', message: `invalid relative path: ${file.path}`, details: { issues: [] } })
+          if (file.content.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(file.content)) return err(request, { code: 'bad-request', message: 'file content is not base64', details: { issues: [] } })
+          const decoded = Buffer.from(file.content, 'base64')
+          if (decoded.toString('base64') !== file.content) return err(request, { code: 'bad-request', message: 'file content is not canonical base64', details: { issues: [] } })
+          const size = decoded.byteLength
+          if (size > DIRECTORY_IMPORT_MAX_FILE_BYTES) return err(request, { code: 'bad-request', message: `file exceeds ${DIRECTORY_IMPORT_MAX_FILE_BYTES} bytes`, details: { issues: [] } })
+          if (seenPaths.has(file.path)) return err(request, { code: 'bad-request', message: `duplicate relative path: ${file.path}`, details: { issues: [] } })
+          seenPaths.add(file.path)
+          total += size
+        }
+        if (total > DIRECTORY_IMPORT_MAX_TOTAL_BYTES) return err(request, { code: 'bad-request', message: `directory exceeds ${DIRECTORY_IMPORT_MAX_TOTAL_BYTES} bytes`, details: { issues: [] } })
+        const displayTitle = `${title.trim()}（导入副本）`
+        let staging: string | undefined
+        let published: string | undefined
+        let publishedByRequest = false
+        try {
+          const root = (await accountRoot(owner))
+          const imports = join(root, 'imports')
+          await mkdir(imports, { recursive: true, mode: 0o700 })
+          staging = join(imports, `.staging-${importId}-${randomUUID()}`)
+          published = join(imports, importId)
+          await mkdir(staging, { recursive: true, mode: 0o700 })
+          for (const file of files) {
+            const target = join(staging, file.path)
+            await mkdir(dirname(target), { recursive: true, mode: 0o700 })
+            await writeFile(target, Buffer.from(file.content, 'base64'), { mode: 0o600, flag: 'wx' })
+          }
+          try {
+            await rename(staging, published)
+            publishedByRequest = true
+            staging = undefined
+          } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code
+            if (code === 'EEXIST' || code === 'ENOTEMPTY') {
+              const found = await ensureWorkspace(published, { kind: 'account', userId: owner }, displayTitle)
+              importedDirectories.set(key, found.workspace)
+              return ok(request, { workspace: workspaceView(found.workspace), created: false })
+            }
+            throw error
+          }
+          const ensured = await ensureWorkspace(published, { kind: 'account', userId: owner }, displayTitle)
+          const workspace = ensured.workspace
+          importedDirectories.set(key, workspace)
+          return ok(request, { workspace: workspaceView(workspace), created: true })
+        } catch (error) {
+          if (publishedByRequest && published !== undefined) await rm(published, { recursive: true, force: true }).catch(() => undefined)
+          ctx.logger.error(`workspace import ${importId} failed: ${errorMessage(error)}`)
+          return err(request, { code: 'internal', message: 'directory import failed', details: {} })
+        } finally {
+          if (staging !== undefined) await rm(staging, { recursive: true, force: true }).catch(() => undefined)
+        }
+      },
+
       async rename(request) {
         const { payload } = request
-        const workspace = ctx.workspaceRegistry.get(brandWorkspaceId(payload.workspaceId))
+        const owner = requestOwner(request)
+        const access = owner === undefined ? { kind: 'local' as const } : { kind: 'account' as const, userId: owner }
+        const workspace = ctx.workspaceRegistry.get(brandWorkspaceId(payload.workspaceId), access)
         if (workspace === undefined) return workspaceNotFound(request, payload.workspaceId)
         const title = payload.title.trim()
         // Uniqueness AND the same-title no-op both ride the create chain so
@@ -2748,7 +3129,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         // still lands afterwards.
         const operation = workspaceCreationChain.then(async () => {
           if (title === workspace.title) return
-          if (ctx.workspaceRegistry.list().some(other => other.id !== workspace.id && other.title === title)) {
+          if (ctx.workspaceRegistry.list(access).some(other => other.id !== workspace.id && other.title === title)) {
             throw new WorkspaceNameConflictError(title)
           }
           await workspace.setTitle(title)
@@ -2771,8 +3152,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
       async delete(request) {
         const { workspaceId } = request.payload
+        const owner = requestOwner(request)
+        const access = owner === undefined ? { kind: 'local' as const } : { kind: 'account' as const, userId: owner }
         const operation = workspaceCreationChain.then(() =>
-          ctx.workspaceRegistry.delete(brandWorkspaceId(workspaceId)))
+          ctx.workspaceRegistry.delete(brandWorkspaceId(workspaceId), access))
         workspaceCreationChain = operation.then(() => undefined, () => undefined)
         if (!await operation) return workspaceNotFound(request, workspaceId)
         return ok(request, { deleted: true as const })
@@ -2780,10 +3163,13 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
       async insertBefore(request) {
         const { workspaceId, beforeWorkspaceId } = request.payload
+        const owner = requestOwner(request)
+        const access = owner === undefined ? { kind: 'local' as const } : { kind: 'account' as const, userId: owner }
         try {
           const workspaceIds = await ctx.workspaceRegistry.insertBefore(
             brandWorkspaceId(workspaceId),
             beforeWorkspaceId === undefined ? undefined : brandWorkspaceId(beforeWorkspaceId),
+            access,
           )
           return ok(request, { workspaceIds: [...workspaceIds] })
         } catch (error: unknown) {
@@ -2794,7 +3180,15 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
       async insertSessionBefore(request) {
         const { payload } = request
-        const workspace = ctx.workspaceRegistry.get(brandWorkspaceId(payload.workspaceId))
+        const denied = await authorizeSession(request, payload.sessionId)
+        if (denied !== undefined) return err(request, denied)
+        if (payload.beforeSessionId !== undefined) {
+          const beforeDenied = await authorizeSession(request, payload.beforeSessionId)
+          if (beforeDenied !== undefined) return err(request, beforeDenied)
+        }
+        const owner = requestOwner(request)
+        const access = owner === undefined ? { kind: 'local' as const } : { kind: 'account' as const, userId: owner }
+        const workspace = ctx.workspaceRegistry.get(brandWorkspaceId(payload.workspaceId), access)
         if (workspace === undefined) return workspaceNotFound(request, payload.workspaceId)
         try {
           await workspace.insertSessionBefore(payload.sessionId, payload.beforeSessionId)
@@ -2817,6 +3211,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
       async archiveSession(request) {
         const { sessionId } = request.payload
+        const denied = await authorizeSession(request, sessionId)
+        if (denied !== undefined) return err(request, denied)
         try {
           await ctx.workspaceRegistry.archiveSession(sessionId)
         } catch (error: unknown) {
@@ -2829,30 +3225,41 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             details: { sessionId },
           })
         }
-        return ok(request, { archivedSessionIds: [...ctx.workspaceRegistry.archivedSessionIds] })
+        const owner = requestOwner(request)
+        const access = owner === undefined ? { kind: 'local' as const } : { kind: 'account' as const, userId: owner }
+        return ok(request, { archivedSessionIds: [...ctx.workspaceRegistry.archivedSessionIdsFor(access)] })
       },
     },
 
     host: {
-      describe(request) {
+      async describe(request) {
         // TODO: version should read apps/cli's package.json; placeholder for now.
         const selection = defaults.defaultModelSelection()
+        const owner = requestOwner(request)
+        const root = owner === undefined
+          ? undefined
+          : await accountRoot(owner)
         return Promise.resolve(ok(request, {
           version: '0.0.1',
           // Same source as session.create's fallback: the UI's default project
           // must match where an unspecified-cwd session actually lands.
-          cwd: defaults.cwd,
+          cwd: root ?? defaults.cwd,
           // Read live for the same reason: this is what the NEXT session will
           // start from, so a saved default has to be what it reports.
           provider: selection.provider,
           model: selection.model,
-          attachedSessions: ctx.agents.list().length,
-          home: homedir(),
-          canOpenPath: canOpenPaths(),
+          attachedSessions: requestOwner(request) === undefined
+            ? ctx.agents.list().length
+            : ctx.agents.list().filter(agent => agent.session.header.ownerId === requestOwner(request)).length,
+          home: root ?? homedir(),
+          canOpenPath: requestOwner(request) === undefined && canOpenPaths(),
         }))
       },
 
       async pickDirectory(request, signal) {
+        if (requestOwner(request) !== undefined) {
+          return err(request, { code: 'unauthenticated', message: 'account principals cannot pick host directories', details: {} })
+        }
         const capability = ctx.directoryPicker.capability()
         if (capability.kind !== 'native') {
           return err(request, {
@@ -2892,7 +3299,19 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         try {
           // The carrier's signal follows the caller: a disconnect or timeout
           // stops the backend's directory scan instead of outliving it.
-          return ok(request, await capability.list(request.payload.path, signal))
+          const scoped = requestOwner(request) === undefined ? undefined : await accountPath(request, request.payload.path)
+          if (signal.aborted) {
+            return err(request, { code: 'cancelled', message: 'directory listing was aborted', details: {} })
+          }
+          const listing = await capability.list(scoped?.path ?? request.payload.path, signal)
+          if (scoped === undefined) return ok(request, listing)
+          return ok(request, {
+            ...listing,
+            path: scoped.path,
+            home: scoped.root,
+            crumbs: listing.crumbs.filter(crumb => contained(scoped.root, crumb.path)),
+            entries: listing.entries.filter(entry => contained(scoped.root, entry.path)),
+          })
         } catch (error: unknown) {
           // An abort is the caller's own timeout/disconnect, not a server
           // failure — same code pickDirectory and command.execute report.
@@ -2913,13 +3332,27 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           })
         }
         try {
-          return ok(request, { path: await capability.createDirectory(request.payload.path, request.payload.name) })
+          const scoped = await accountPath(request, request.payload.path)
+          const path = await capability.createDirectory(scoped?.path ?? request.payload.path, request.payload.name)
+          if (scoped !== undefined) {
+            const canonical = await realpath(path)
+            if (!contained(scoped.root, canonical)) throw new Error('created path is outside the account workspace root')
+            return ok(request, { path: canonical })
+          }
+          return ok(request, { path })
         } catch (error: unknown) {
           return err(request, directoryError(error))
         }
       },
 
       async openPath(request, signal) {
+        if (requestOwner(request) !== undefined) {
+          return err(request, {
+            code: 'unauthenticated',
+            message: 'remote accounts cannot open host paths',
+            details: {},
+          })
+        }
         return openPath(request, request.payload.path, signal)
       },
     },
@@ -2959,6 +3392,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       },
 
       async clear(request) {
+        const denied = await authorizeSession(request, request.payload.sessionId)
+        if (denied !== undefined) return err(request, denied)
         const found = await agentFor(request.payload.sessionId)
         if ('error' in found) return err(request, found.error)
         const goals = goalServiceFor(found.agent)
@@ -2973,15 +3408,22 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     },
 
     agentPresets: {
-      // A deployment with no roster answers with an empty list rather than an
-      // error: composing no presets is a valid deployment, and the browser
-      // simply offers no choice.
+      // Local deployments with no roster answer with an empty list; account
+      // callers fail loudly because an uncomposed account session is unsafe.
       async list(request) {
+        const account = requestOwner(request) !== undefined
+        const allowed = defaults.accountAgentPreset
         const presets = ctx.get('agentPresets')
+        if (account && presets === undefined) {
+          return err(request, { code: 'bad-request', message: 'account agent preset roster is not configured', details: { issues: [] } })
+        }
         if (presets === undefined) return ok(request, { presets: [], authorable: false, hasDocument: false })
         const defaultId = presets.defaultId
+        if (account && allowed === undefined) {
+          return err(request, { code: 'bad-request', message: 'account agent preset is not configured', details: { issues: [] } })
+        }
         return ok(request, {
-          presets: (await presets.list()).map(preset => ({
+          presets: (await presets.list()).filter(preset => !account || preset.id === allowed).map(preset => ({
             id: preset.id,
             trust: preset.trust,
             isDefault: preset.id === defaultId,
@@ -2989,8 +3431,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             ...preset.description === undefined ? {} : { description: preset.description },
             ...preset.broken === undefined ? {} : { broken: preset.broken },
           })),
-          authorable: presets.authorable,
-          hasDocument: canOpenPaths(),
+          authorable: account ? false : presets.authorable,
+          hasDocument: account ? false : canOpenPaths(),
         })
       },
 
@@ -2998,7 +3440,11 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       // conversation's history was produced under its preset's tools; the
       // agent and the session survive, only the composition is swapped.
       async select(request) {
+        const localOnly = requireLocalPresetAccess(request)
+        if (localOnly !== undefined) return err(request, localOnly)
         const { sessionId, agentPreset } = request.payload
+        const denied = await authorizeSession(request, sessionId)
+        if (denied !== undefined) return err(request, denied)
         const presets = ctx.get('agentPresets')
         if (presets === undefined) {
           return err(request, {
@@ -3051,6 +3497,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       // reconnaissance, and copy/remove/openDocument manage the roster and
       // drive the host desktop.
       async read(request) {
+        const localOnly = requireLocalPresetAccess(request)
+        if (localOnly !== undefined) return err(request, localOnly)
         const { agentPreset } = request.payload
         const presets = ctx.get('agentPresets')
         if (presets === undefined) return err(request, noRoster(agentPreset))
@@ -3069,6 +3517,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       },
 
       async copy(request) {
+        const localOnly = requireLocalPresetAccess(request)
+        if (localOnly !== undefined) return err(request, localOnly)
         const { from, agentPreset, name } = request.payload
         const presets = ctx.get('agentPresets')
         if (presets === undefined) return err(request, noRoster(agentPreset))
@@ -3081,6 +3531,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       },
 
       async openDocument(request, signal) {
+        const localOnly = requireLocalPresetAccess(request)
+        if (localOnly !== undefined) return err(request, localOnly)
         const { agentPreset } = request.payload
         const presets = ctx.get('agentPresets')
         if (presets === undefined) return err(request, noRoster(agentPreset))
@@ -3104,6 +3556,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       },
 
       async remove(request) {
+        const localOnly = requireLocalPresetAccess(request)
+        if (localOnly !== undefined) return err(request, localOnly)
         const { agentPreset } = request.payload
         const presets = ctx.get('agentPresets')
         if (presets === undefined) return err(request, noRoster(agentPreset))
@@ -3122,6 +3576,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       // the view scope is the live agent or the preset's standing key.
       async list(request) {
         const { sessionId } = request.payload
+        const denied = await authorizeSession(request, sessionId)
+        if (denied !== undefined) return err(request, denied)
         const session = ctx.sessions.get(sessionId)
         if (session === undefined) {
           return err(request, {
@@ -3156,7 +3612,12 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         // '/' popup lists the catalog its composition actually serves.
         const scope = await presenterScopeFor(sessionId, session)
         try {
-          const skills = (await skillRegistry.list({ cwd, scope })).filter(isUserInvocable)
+          const ownerId = session.header.ownerId
+          const skills = (await skillRegistry.list({
+            cwd,
+            scope,
+            ...ownerId === undefined ? {} : { ownerId },
+          })).filter(isUserInvocable)
           return ok(request, {
             skills: skills.map(skill => ({
               name: skill.name,
@@ -3338,13 +3799,15 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     },
 
     events: {
-      mux(_request, signal) {
+      mux(request, signal) {
         const queue = new FrameQueue<RpcRequest<MuxFrame>>()
         muxQueues.add(queue)
-        for (const session of ctx.sessions.list()) {
+        for (const session of ctx.sessions.list().filter(session => sessionVisibleTo(request, session))) {
           subscribeSession(queue, session)
         }
         for (const pending of pendingQuestions.values()) {
+          const pendingSession = ctx.sessions.get(pending.sessionId)
+          if (pendingSession === undefined ? requestOwner(request) !== undefined : !sessionVisibleTo(request, pendingSession)) continue
           queue.push({
             rpcId: pending.rpcId,
             payload: {
@@ -3355,11 +3818,15 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
         // Refresh recovery: still-pending approval questions replay with their
         // stable rpcId so a reconnecting client can still answer them.
-        for (const pending of pendingApprovals.values()) queue.push(requestedFrame(pending))
+        for (const pending of pendingApprovals.values()) {
+          const pendingSession = ctx.sessions.get(pending.sessionId)
+          if (pendingSession === undefined ? requestOwner(request) !== undefined : !sessionVisibleTo(request, pendingSession)) continue
+          queue.push(requestedFrame(pending))
+        }
         // Queue snapshot baseline (pendingQuestions precedent): frames replayed
         // in arrival order per session; a reconnecting client rebuilds its
         // queue view from these alone.
-        for (const session of ctx.sessions.list()) {
+        for (const session of ctx.sessions.list().filter(session => sessionVisibleTo(request, session))) {
           const agent = ctx.agents.get(session.id)
           if (agent?.session === session && agent.inbox.hasPending) {
             queue.push(frame({ type: 'session/queue', sessionId: session.id, items: queueItems(agent) }))
@@ -3371,7 +3838,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         // set sends nothing — absence is how the client reads "no tasks".
         const jobs = ctx.get('jobs')
         if (jobs !== undefined) {
-          for (const session of ctx.sessions.list()) {
+          for (const session of ctx.sessions.list().filter(session => sessionVisibleTo(request, session))) {
             const views = jobViews(jobs.list(ctx.agents.get(session.id)))
             if (views.length > 0) {
               queue.push(frame({ type: 'session/jobs', sessionId: session.id, jobs: views }))
@@ -3384,6 +3851,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         const openCalls = new Map<SessionId, Map<string, { name: string; args: unknown }>>()
         const disposers = [
           ctx.on('session/event', (session: Session, event: SessionEvent) => {
+            if (!sessionVisibleTo(request, session)) return
             if (event.type === 'tool/call') {
               const data = event.data as ToolCallData
               try {
@@ -3404,6 +3872,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             queue.push(frame({ type: 'session/event', sessionId: session.id, event, ...view === undefined ? {} : { view } }))
           }),
           ctx.on('session/created', (session: Session) => {
+            if (!sessionVisibleTo(request, session)) return
             subscribeSession(queue, session)
             // The subscribe frame clears the client's task mirror, and a
             // session born after the stream opened missed the baseline loop.
@@ -3419,6 +3888,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           }),
           ...jobs === undefined ? [] : [jobs.onJobsChanged((owner) => {
             if (owner !== undefined) {
+              if (!sessionVisibleTo(request, owner.session)) return
               // The exact owner instance the fence compares against, so the
               // push stays correct even while that Agent's scope is tearing
               // down and a lookup by id would already miss.
@@ -3428,6 +3898,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             // An unowned task is visible to every caller, so every subscribed
             // session's set changed with it.
             for (const session of ctx.sessions.list()) {
+              if (!sessionVisibleTo(request, session)) continue
               queue.push(frame({
                 type: 'session/jobs',
                 sessionId: session.id,
@@ -3442,9 +3913,13 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         })
       },
 
-      host(_request, signal) {
+      host(request, signal) {
         const queue = new FrameQueue<RpcRequest<HostFrame>>()
-        const committedWorkspaces = ctx.workspaceRegistry.list()
+        const requestOwnerId = requestOwner(request)
+        const workspaceAccess = requestOwnerId === undefined
+          ? { kind: 'local' as const }
+          : { kind: 'account' as const, userId: requestOwnerId }
+        const committedWorkspaces = ctx.workspaceRegistry.list(workspaceAccess)
         const committedWorkspaceIds = new Set(
           committedWorkspaces.map(workspace => String(workspace.id)),
         )
@@ -3452,9 +3927,13 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         // Frame-dedup baseline, same posture as committedWorkspaceIds: the
         // stream opens against the current set; workspace.list re-baselines
         // reconnecting clients, so only later changes need frames.
-        let archivedSessionIds = ctx.workspaceRegistry.archivedSessionIds
+        const visibleArchived = (ids: readonly SessionId[]): SessionId[] => requestOwnerId === undefined
+          ? [...ids]
+          : [...ctx.workspaceRegistry.archivedSessionIdsFor(workspaceAccess)]
+        let archivedSessionIds = visibleArchived(ctx.workspaceRegistry.archivedSessionIds)
         const disposers = [
           ctx.on('session/created', (session: Session) => {
+            if (!sessionVisibleTo(request, session)) return
             queue.push(frame({
               type: 'host/session-added',
               sessionId: session.id,
@@ -3466,12 +3945,15 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             }))
           }),
           ctx.on('session/disposed', (session: Session) => {
+            if (!sessionVisibleTo(request, session)) return
             queue.push(frame({ type: 'host/session-removed', sessionId: session.id }))
           }),
           ctx.on('agent/status', ({ agent, status }: { agent: Agent; status: AgentStatus }) => {
+            if (!sessionVisibleTo(request, agent.session)) return
             queue.push(frame({ type: 'host/session-status', sessionId: agent.id, running: status === 'running' }))
           }),
           ctx.on('agent/error', ({ agent, error }: { agent: Agent; error: unknown }) => {
+            if (!sessionVisibleTo(request, agent.session)) return
             queue.push(frame({ type: 'host/agent-error', sessionId: agent.id, message: errorChain(error) }))
           }),
           ctx.on('domain/changed', (change) => {
@@ -3479,31 +3961,34 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             if (change.table === '') {
               if (change.operation !== 'put') return
               const state = workspaceDomainState.parse(change.value)
-              const orderChanged = state.workspaceIds.length === committedWorkspaceOrder.length
-                && state.workspaceIds.every(workspaceId => committedWorkspaceIds.has(String(workspaceId)))
-                && state.workspaceIds.some((workspaceId, index) => workspaceId !== committedWorkspaceOrder[index])
-              for (const workspaceId of state.workspaceIds) {
+              const scopedOrder = state.workspaceIds.filter(workspaceId =>
+                ctx.workspaceRegistry.get(workspaceId, workspaceAccess) !== undefined)
+              const orderChanged = scopedOrder.length === committedWorkspaceOrder.length
+                && scopedOrder.every(workspaceId => committedWorkspaceIds.has(String(workspaceId)))
+                && scopedOrder.some((workspaceId, index) => workspaceId !== committedWorkspaceOrder[index])
+              for (const workspaceId of scopedOrder) {
                 if (committedWorkspaceIds.has(workspaceId)) continue
-                const workspace = ctx.workspaceRegistry.get(workspaceId)
+                const workspace = ctx.workspaceRegistry.get(workspaceId, workspaceAccess)
                 if (workspace === undefined) {
                   throw new Error(`committed workspace registry references missing workspace "${workspaceId}"`)
                 }
                 committedWorkspaceIds.add(workspaceId)
                 queue.push(frame({ type: 'host/workspace-changed', workspace: workspaceView(workspace) }))
               }
-              committedWorkspaceOrder = [...state.workspaceIds]
+              committedWorkspaceOrder = [...scopedOrder]
               if (orderChanged) {
                 queue.push(frame({
                   type: 'host/workspace-order-changed',
-                  workspaceIds: [...state.workspaceIds],
+                  workspaceIds: [...scopedOrder],
                 }))
               }
-              if (state.archivedSessionIds.length !== archivedSessionIds.length
-                || state.archivedSessionIds.some((id, index) => id !== archivedSessionIds[index])) {
-                archivedSessionIds = state.archivedSessionIds
+              const nextArchivedSessionIds = visibleArchived(state.archivedSessionIds)
+              if (nextArchivedSessionIds.length !== archivedSessionIds.length
+                || nextArchivedSessionIds.some((id, index) => id !== archivedSessionIds[index])) {
+                archivedSessionIds = nextArchivedSessionIds
                 queue.push(frame({
                   type: 'host/archived-sessions-changed',
-                  archivedSessionIds: [...state.archivedSessionIds],
+                  archivedSessionIds: nextArchivedSessionIds,
                 }))
               }
               return
@@ -3518,6 +4003,11 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
               return
             }
             if (!committedWorkspaceIds.has(change.key)) return
+            const changedRecord = workspaceRecord.parse(change.value)
+            const ownerMatches = workspaceAccess.kind === 'local'
+              ? changedRecord.owner.kind === 'local'
+              : changedRecord.owner.kind === 'account' && changedRecord.owner.userId === workspaceAccess.userId
+            if (!ownerMatches) return
             // Existing-entity table writes are complete attach/touch commits.
             // A new entity's first put waits for the global registry write above.
             queue.push(frame({
@@ -3535,6 +4025,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             // satisfies every member of the union `on` accepts here;
             // assertJsonArgs proves the payload is JSON-safe before it queues.
             ((...args: unknown[]) => {
+              if (requestOwner(request) !== undefined) return
               queue.push(frame({
                 type: 'host/remote-event',
                 event: name,
@@ -3548,7 +4039,16 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     },
 
     downloads: {
-      async sessionLog(request, signal) {
+      async sessionLog(request, signal, principal?: RpcPrincipal) {
+        if (principal?.kind === 'account') {
+          try {
+            const state = await readSessionState(request.sessionId)
+            if (state.header.ownerId !== brandSessionOwnerId(principal.userId)) return new Response('session not found', { status: 404 })
+          } catch (error: unknown) {
+            if (error instanceof SessionNotFound) return new Response('session not found', { status: 404 })
+            throw error
+          }
+        }
         // Clean error path first: missing services answer 500 and a missing
         // root artifact 404 before any zip byte is produced. The root content
         // read here is reused as the first zip entry, so nothing is read twice.
@@ -3604,11 +4104,15 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       },
     },
 
-    respond(message: ClientResponse): Promise<RpcReceipt> {
+    respond(message: ClientResponse, principal?: RpcPrincipal): Promise<RpcReceipt> {
       // Route by the echoed rpcId (the wire correlation): approvals first,
       // then questions — the two registries share one id space of UUIDs.
       const approval = pendingApprovals.get(message.rpcId)
       if (approval !== undefined) {
+        const session = ctx.sessions.get(approval.sessionId)
+        if (principal?.kind === 'account' && session?.header.ownerId !== brandSessionOwnerId(principal.userId)) {
+          return Promise.resolve({ accepted: false, reason: 'not-pending' })
+        }
         if (!message.result.ok) return Promise.resolve({ accepted: false, reason: 'bad-response' })
         const parsed = approvalResponsePayloadSchema.safeParse(message.result.value)
         // The payload's audit correlation must match the entry the rpcId routed
@@ -3621,6 +4125,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       }
       const pending = pendingQuestions.get(message.rpcId)
       if (pending === undefined) return Promise.resolve({ accepted: false, reason: 'not-pending' })
+      const session = ctx.sessions.get(pending.sessionId)
+      if (principal?.kind === 'account' && session?.header.ownerId !== brandSessionOwnerId(principal.userId)) {
+        return Promise.resolve({ accepted: false, reason: 'not-pending' })
+      }
       if (!message.result.ok) {
         if (message.result.error.code !== 'cancelled') {
           return Promise.resolve({ accepted: false, reason: 'bad-response' })
@@ -3652,9 +4160,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       return Promise.resolve({ accepted: true })
     },
 
-    // ---- workbuddy multi-user account seam ----
-    // Anonymous callers may grow the user base: signup / signin / emailCode
-    // are non-privileged. signout / state require a valid bearer in the
+    // ---- xiaowei multi-user account seam ----
+    // Anonymous callers may present an existing invitation to signup or
+    // emailCode, while signin remains public. signout / state require a valid bearer in the
     // Authorization header; the connection-plugin fence verifies the token
     // before the request reaches this block. Privileged mutation methods
     // (wallet.credit/debit/setQuota/refreshDaily/grantWelcomeBonus,
@@ -3665,11 +4173,11 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     // CNY, and mints the first API key.
     account: {
       async signup(request): Promise<RpcResponse<SignedIn>> {
-        const identity = ctx.get('identity') as IdentityService | undefined
+        const identity = ctx.get('identity')
         if (identity === undefined) return err(request, { code: 'internal', message: 'identity service is not mounted', details: {} })
-        const emailVerification = ctx.get('emailVerification') as EmailVerificationService | undefined
-        const wallet = ctx.get('wallet') as WalletService | undefined
-        const userModelKeys = ctx.get('userModelKeys') as UserModelKeyService | undefined
+        const emailVerification = ctx.get('emailVerification')
+        const wallet = ctx.get('wallet')
+        const userModelKeys = ctx.get('userModelKeys')
         try {
           // Verification gate (when the seam is on): the renderer is required
           // to round-trip account.emailCode first; the host surfaces a stable
@@ -3680,9 +4188,11 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
               return err(request, { code: 'verification-code-required', message: '请先获取邮箱验证码', details: {} })
             }
             try {
-              await emailVerification.verifyCode({ email: request.payload.email, code })
+              const invitation = await identityForInvitation(ctx, request.payload.invitationCode)
+              if (invitation === undefined) return err(request, { code: 'bad-request', message: '邀请链接无效', details: { issues: [] } })
+              await emailVerification.verifyCode({ email: request.payload.email, code, purpose: 'signup', invitationId: invitation.invitationId })
             } catch (verErr) {
-              if (verErr instanceof EmailVerificationError) {
+              if (isServiceError<EmailVerificationError>(verErr)) {
                 const wireCode = emailVerificationCodeToWire(verErr.code)
                 return err(request, { code: wireCode, message: verErr.message, ...emailVerificationErrorDetails(verErr) } as RpcError)
               }
@@ -3692,6 +4202,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           const signed = await identity.signup({
             email: request.payload.email,
             password: request.payload.password,
+            invitationCode: request.payload.invitationCode,
             ...(request.payload.displayName !== undefined ? { displayName: request.payload.displayName } : {}),
           })
           // Trigger chain: best-effort welcome bonus + first model key. A
@@ -3701,19 +4212,27 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             try {
               await wallet.grantWelcomeBonus({ userId: signed.userId })
             } catch (walletErr) {
-              ctx.logger.warn?.('workbuddy: welcome bonus failed userId=%s reason=%s', String(signed.userId), String((walletErr as Error).message))
+              ctx.logger.warn(
+                'xiaowei: welcome bonus failed userId=%s reason=%s',
+                String(signed.userId),
+                errorMessage(walletErr),
+              )
             }
           }
           if (userModelKeys !== undefined) {
             try {
-              await userModelKeys.provision({ userId: signed.userId, label: `workbuddy-${shortUserId(String(signed.userId))}` })
+              await userModelKeys.provision({ userId: signed.userId, label: `xiaowei-${shortUserId(String(signed.userId))}` })
             } catch (keyErr) {
-              ctx.logger.warn?.('workbuddy: model-key provision failed userId=%s reason=%s', String(signed.userId), String((keyErr as Error).message))
+              ctx.logger.warn(
+                'xiaowei: model-key provision failed userId=%s reason=%s',
+                String(signed.userId),
+                errorMessage(keyErr),
+              )
             }
           }
           return { rpcId: request.rpcId, result: { ok: true, value: signed } }
         } catch (signErr) {
-          if (signErr instanceof IdentityError) {
+          if (isServiceError<IdentityError>(signErr)) {
             const wireCode = identityErrorCodeToWire(signErr.code)
             return err(request, { code: wireCode, message: signErr.message, details: {} } as RpcError)
           }
@@ -3722,15 +4241,17 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       },
 
       async emailCode(request): Promise<RpcResponse<{ expiresInSeconds: number; retryAfterSeconds: number }>> {
-        const verification = ctx.get('emailVerification') as EmailVerificationService | undefined
+        const verification = ctx.get('emailVerification')
         if (verification === undefined) {
           return err(request, { code: 'internal', message: 'email-verification service is not mounted', details: {} })
         }
         try {
-          const value = await verification.requestCode({ email: request.payload.email })
+          const invitation = await identityForInvitation(ctx, request.payload.invitationCode)
+          if (invitation === undefined) return err(request, { code: 'bad-request', message: '邀请链接无效', details: { issues: [] } })
+          const value = await verification.requestCode({ email: request.payload.email, purpose: 'signup', invitationId: invitation.invitationId })
           return { rpcId: request.rpcId, result: { ok: true, value } }
         } catch (verErr) {
-          if (verErr instanceof EmailVerificationError) {
+          if (isServiceError<EmailVerificationError>(verErr)) {
             const wireCode = emailVerificationCodeToWire(verErr.code)
             return err(request, { code: wireCode, message: verErr.message, ...emailVerificationErrorDetails(verErr) } as RpcError)
           }
@@ -3738,14 +4259,101 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
       },
 
+      invites: {
+        async create(request): Promise<RpcResponse<InvitationView & { code: string }>> {
+          if (request.principal?.kind !== 'account') {
+            return err(request, { code: 'unauthenticated', message: 'account authentication required', details: {} })
+          }
+          const identity = ctx.get('identity')
+          if (identity === undefined) {
+            return err(request, { code: 'internal', message: 'identity service is not mounted', details: {} })
+          }
+          try {
+            const created = await identity.createInvitation({ ownerId: request.principal.userId as never })
+            return { rpcId: request.rpcId, result: { ok: true, value: created } }
+          } catch (error) {
+            if (isServiceError<IdentityError>(error)) {
+              return err(request, {
+                code: identityErrorCodeToWire(error.code),
+                message: error.message,
+                details: {},
+              } as RpcError)
+            }
+            throw error
+          }
+        },
+
+        async list(request): Promise<RpcResponse<{ items: InvitationView[] }>> {
+          if (request.principal?.kind !== 'account') {
+            return err(request, { code: 'unauthenticated', message: 'account authentication required', details: {} })
+          }
+          const identity = ctx.get('identity')
+          if (identity === undefined) {
+            return err(request, { code: 'internal', message: 'identity service is not mounted', details: {} })
+          }
+          const items = await identity.listInvitations({ ownerId: request.principal.userId as never })
+          return { rpcId: request.rpcId, result: { ok: true, value: { items } } }
+        },
+
+        async rotate(request): Promise<RpcResponse<InvitationView & { code: string }>> {
+          if (request.principal?.kind !== 'account') return err(request, { code: 'unauthenticated', message: 'account authentication required', details: {} })
+          const identity = ctx.get('identity')
+          if (identity === undefined) return err(request, { code: 'internal', message: 'identity service is not mounted', details: {} })
+          try {
+            const rotated = await identity.rotateInvitation({
+              ownerId: request.principal.userId as never,
+              invitationId: request.payload.invitationId as never,
+            })
+            return { rpcId: request.rpcId, result: { ok: true, value: rotated } }
+          } catch (error) {
+            if (isServiceError<IdentityError>(error)) {
+              return err(request, {
+                code: identityErrorCodeToWire(error.code),
+                message: error.message,
+                details: {},
+              } as RpcError)
+            }
+            throw error
+          }
+        },
+      },
+
       async signin(request): Promise<RpcResponse<SignedIn>> {
-        const identity = ctx.get('identity') as IdentityService | undefined
+        const identity = ctx.get('identity')
         if (identity === undefined) return err(request, { code: 'internal', message: 'identity service is not mounted', details: {} })
         try {
           const signed = await identity.signin({ email: request.payload.email, password: request.payload.password })
+          // Idempotently repair accounts created before wallet or model-key
+          // provisioning was enabled. Authentication remains independent of
+          // an upstream management-plane outage; the model route fails closed
+          // later if the credential still cannot be provisioned.
+          const wallet = ctx.get('wallet')
+          if (wallet !== undefined) {
+            try {
+              await wallet.grantWelcomeBonus({ userId: signed.userId })
+            } catch (walletErr) {
+              ctx.logger.warn(
+                'xiaowei: signin wallet repair failed userId=%s reason=%s',
+                String(signed.userId),
+                errorMessage(walletErr),
+              )
+            }
+          }
+          const userModelKeys = ctx.get('userModelKeys')
+          if (userModelKeys !== undefined) {
+            try {
+              await userModelKeys.provision({ userId: signed.userId, label: `xiaowei-${shortUserId(String(signed.userId))}` })
+            } catch (keyErr) {
+              ctx.logger.warn(
+                'xiaowei: signin model-key repair failed userId=%s reason=%s',
+                String(signed.userId),
+                errorMessage(keyErr),
+              )
+            }
+          }
           return { rpcId: request.rpcId, result: { ok: true, value: signed } }
         } catch (signErr) {
-          if (signErr instanceof IdentityError) {
+          if (isServiceError<IdentityError>(signErr)) {
             return err(request, { code: identityErrorCodeToWire(signErr.code), message: signErr.message, details: {} } as RpcError)
           }
           throw signErr
@@ -3753,7 +4361,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       },
 
       async signout(request): Promise<RpcResponse<{ revoked: true }>> {
-        const identity = ctx.get('identity') as IdentityService | undefined
+        const identity = ctx.get('identity')
         if (identity === undefined) return err(request, { code: 'internal', message: 'identity service is not mounted', details: {} })
         // Idempotent: an unknown / already-revoked token resolves with
         // { revoked: true } per the seam's own contract.
@@ -3762,22 +4370,68 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       },
 
       async state(request): Promise<RpcResponse<AuthenticatedView | null>> {
-        const identity = ctx.get('identity') as IdentityService | undefined
+        const identity = ctx.get('identity')
         if (identity === undefined) return { rpcId: request.rpcId, result: { ok: true, value: null } }
         const view = await identity.validate({ sessionToken: request.payload.sessionToken as never })
         return { rpcId: request.rpcId, result: { ok: true, value: view } }
       },
     },
 
+    customModels: {
+      async create(request): Promise<RpcResponse<CustomModelView>> {
+        const service = ctx.get('userModelKeys')
+        if (service === undefined) return err(request, { code: 'internal', message: 'user-model-keys service is not mounted', details: {} })
+        if (request.principal?.kind !== 'account') return err(request, { code: 'unauthenticated', message: 'account authentication required', details: {} })
+        try {
+          const value = await service.createCustom({ userId: request.principal.userId as never, ...request.payload })
+          const { userId: _userId, ...publicValue } = value
+          return { rpcId: request.rpcId, result: { ok: true, value: publicValue } }
+        } catch (error) {
+          if (isServiceError<ModelKeyError>(error)) {
+            return err(request, {
+              code: modelKeyErrorCodeToWire(error.code),
+              message: error.message,
+              ...modelKeyErrorDetails(error, undefined),
+            } as RpcError)
+          }
+          throw error
+        }
+      },
+      async list(request): Promise<RpcResponse<{ items: CustomModelView[] }>> {
+        const service = ctx.get('userModelKeys')
+        if (service === undefined) return err(request, { code: 'internal', message: 'user-model-keys service is not mounted', details: {} })
+        if (request.principal?.kind !== 'account') return err(request, { code: 'unauthenticated', message: 'account authentication required', details: {} })
+        const items = await service.listCustom({ userId: request.principal.userId as never })
+        return {
+          rpcId: request.rpcId,
+          result: {
+            ok: true,
+            value: { items: items.map(({ userId: _userId, ...item }) => item as CustomModelView) },
+          },
+        }
+      },
+      async remove(request): Promise<RpcResponse<{ removed: boolean }>> {
+        const service = ctx.get('userModelKeys')
+        if (service === undefined) return err(request, { code: 'internal', message: 'user-model-keys service is not mounted', details: {} })
+        if (request.principal?.kind !== 'account') return err(request, { code: 'unauthenticated', message: 'account authentication required', details: {} })
+        const value = await service.removeCustom({
+          userId: request.principal.userId as never,
+          customModelId: request.payload.customModelId as CustomModelId,
+        })
+        return { rpcId: request.rpcId, result: { ok: true, value } }
+      },
+    },
+
     wallet: {
       async get(request): Promise<RpcResponse<WalletView>> {
-        const wallet = ctx.get('wallet') as WalletService | undefined
+        const wallet = ctx.get('wallet')
         if (wallet === undefined) return err(request, { code: 'internal', message: 'wallet service is not mounted', details: {} })
         try {
-          const view = await wallet.get({ userId: request.payload.userId as never })
+          const userId = request.principal?.kind === 'account' ? request.principal.userId : request.payload.userId
+          const view = await wallet.get({ userId: userId as never })
           return { rpcId: request.rpcId, result: { ok: true, value: view } }
         } catch (walletErr) {
-          if (walletErr instanceof WalletError) {
+          if (isServiceError<WalletError>(walletErr)) {
             return err(request, {
               code: walletErrorCodeToWire(walletErr.code),
               message: walletErr.message,
@@ -3788,8 +4442,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
       },
       async credit(request): Promise<RpcResponse<WalletView>> {
-        const wallet = ctx.get('wallet') as WalletService | undefined
+        const wallet = ctx.get('wallet')
         if (wallet === undefined) return err(request, { code: 'internal', message: 'wallet service is not mounted', details: {} })
+        if (request.principal?.kind === 'account') return err(request, { code: 'unauthenticated', message: 'wallet management requires a local principal', details: {} })
         try {
           const view = await wallet.credit({
             userId: request.payload.userId as never,
@@ -3799,7 +4454,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           })
           return { rpcId: request.rpcId, result: { ok: true, value: view } }
         } catch (walletErr) {
-          if (walletErr instanceof WalletError) {
+          if (isServiceError<WalletError>(walletErr)) {
             return err(request, {
               code: walletErrorCodeToWire(walletErr.code),
               message: walletErr.message,
@@ -3810,8 +4465,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
       },
       async debit(request): Promise<RpcResponse<WalletView>> {
-        const wallet = ctx.get('wallet') as WalletService | undefined
+        const wallet = ctx.get('wallet')
         if (wallet === undefined) return err(request, { code: 'internal', message: 'wallet service is not mounted', details: {} })
+        if (request.principal?.kind === 'account') return err(request, { code: 'unauthenticated', message: 'wallet management requires a local principal', details: {} })
         try {
           const view = await wallet.debit({
             userId: request.payload.userId as never,
@@ -3821,7 +4477,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           })
           return { rpcId: request.rpcId, result: { ok: true, value: view } }
         } catch (walletErr) {
-          if (walletErr instanceof WalletError) {
+          if (isServiceError<WalletError>(walletErr)) {
             return err(request, {
               code: walletErrorCodeToWire(walletErr.code),
               message: walletErr.message,
@@ -3832,8 +4488,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
       },
       async setQuota(request): Promise<RpcResponse<WalletView>> {
-        const wallet = ctx.get('wallet') as WalletService | undefined
+        const wallet = ctx.get('wallet')
         if (wallet === undefined) return err(request, { code: 'internal', message: 'wallet service is not mounted', details: {} })
+        if (request.principal?.kind === 'account') return err(request, { code: 'unauthenticated', message: 'wallet management requires a local principal', details: {} })
         try {
           const view = await wallet.setQuota({
             userId: request.payload.userId as never,
@@ -3842,7 +4499,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           })
           return { rpcId: request.rpcId, result: { ok: true, value: view } }
         } catch (walletErr) {
-          if (walletErr instanceof WalletError) {
+          if (isServiceError<WalletError>(walletErr)) {
             return err(request, {
               code: walletErrorCodeToWire(walletErr.code),
               message: walletErr.message,
@@ -3853,8 +4510,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
       },
       async refreshDaily(request): Promise<RpcResponse<WalletView>> {
-        const wallet = ctx.get('wallet') as WalletService | undefined
+        const wallet = ctx.get('wallet')
         if (wallet === undefined) return err(request, { code: 'internal', message: 'wallet service is not mounted', details: {} })
+        if (request.principal?.kind === 'account') return err(request, { code: 'unauthenticated', message: 'wallet management requires a local principal', details: {} })
         try {
           const view = await wallet.refreshDaily({
             userId: request.payload.userId as never,
@@ -3862,7 +4520,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           })
           return { rpcId: request.rpcId, result: { ok: true, value: view } }
         } catch (walletErr) {
-          if (walletErr instanceof WalletError) {
+          if (isServiceError<WalletError>(walletErr)) {
             return err(request, {
               code: walletErrorCodeToWire(walletErr.code),
               message: walletErr.message,
@@ -3873,13 +4531,14 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
       },
       async grantWelcomeBonus(request): Promise<RpcResponse<WalletView>> {
-        const wallet = ctx.get('wallet') as WalletService | undefined
+        const wallet = ctx.get('wallet')
         if (wallet === undefined) return err(request, { code: 'internal', message: 'wallet service is not mounted', details: {} })
+        if (request.principal?.kind === 'account') return err(request, { code: 'unauthenticated', message: 'wallet management requires a local principal', details: {} })
         try {
           const view = await wallet.grantWelcomeBonus({ userId: request.payload.userId as never })
           return { rpcId: request.rpcId, result: { ok: true, value: view } }
         } catch (walletErr) {
-          if (walletErr instanceof WalletError) {
+          if (isServiceError<WalletError>(walletErr)) {
             return err(request, {
               code: walletErrorCodeToWire(walletErr.code),
               message: walletErr.message,
@@ -3890,16 +4549,17 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
       },
       async listLedger(request): Promise<RpcResponse<{ items: LedgerEntry[] }>> {
-        const wallet = ctx.get('wallet') as WalletService | undefined
+        const wallet = ctx.get('wallet')
         if (wallet === undefined) return err(request, { code: 'internal', message: 'wallet service is not mounted', details: {} })
         try {
+          const userId = request.principal?.kind === 'account' ? request.principal.userId : request.payload.userId
           const items = await wallet.listLedger({
-            userId: request.payload.userId as never,
+            userId: userId as never,
             ...(request.payload.limit !== undefined ? { limit: request.payload.limit } : {}),
           })
           return { rpcId: request.rpcId, result: { ok: true, value: { items } } }
         } catch (walletErr) {
-          if (walletErr instanceof WalletError) {
+          if (isServiceError<WalletError>(walletErr)) {
             return err(request, {
               code: walletErrorCodeToWire(walletErr.code),
               message: walletErr.message,
@@ -3913,16 +4573,19 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
     modelKeys: {
       async provision(request): Promise<RpcResponse<ProvisionedKey>> {
-        const userModelKeys = ctx.get('userModelKeys') as UserModelKeyService | undefined
+        const userModelKeys = ctx.get('userModelKeys')
         if (userModelKeys === undefined) return err(request, { code: 'internal', message: 'user-model-keys service is not mounted', details: {} })
+        if (request.principal?.kind === 'account') return err(request, { code: 'unauthenticated', message: 'model-key management requires a local principal', details: {} })
         try {
+          const userId = request.payload.userId
+          if (userId === undefined) return err(request, { code: 'unauthenticated', message: 'account authentication required', details: {} })
           const view = await userModelKeys.provision({
-            userId: request.payload.userId as never,
+            userId: userId as never,
             ...(request.payload.label !== undefined ? { label: request.payload.label } : {}),
           })
           return { rpcId: request.rpcId, result: { ok: true, value: view } }
         } catch (keyErr) {
-          if (keyErr instanceof ModelKeyError) {
+          if (isServiceError<ModelKeyError>(keyErr)) {
             return err(request, {
               code: modelKeyErrorCodeToWire(keyErr.code),
               message: keyErr.message,
@@ -3933,19 +4596,22 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
       },
       async list(request): Promise<RpcResponse<{ items: ModelKeyView[] }>> {
-        const userModelKeys = ctx.get('userModelKeys') as UserModelKeyService | undefined
+        const userModelKeys = ctx.get('userModelKeys')
         if (userModelKeys === undefined) return err(request, { code: 'internal', message: 'user-model-keys service is not mounted', details: {} })
-        const items = await userModelKeys.list({ userId: request.payload.userId as never })
-        return { rpcId: request.rpcId, result: { ok: true, value: { items } } }
+        const userId = request.principal?.kind === 'account' ? request.principal.userId : request.payload.userId
+        if (userId === undefined) return err(request, { code: 'unauthenticated', message: 'account authentication required', details: {} })
+        const items = await userModelKeys.list({ userId: userId as never })
+        return { rpcId: request.rpcId, result: { ok: true, value: { items: items } } }
       },
       async revoke(request): Promise<RpcResponse<{ revoked: boolean }>> {
-        const userModelKeys = ctx.get('userModelKeys') as UserModelKeyService | undefined
+        const userModelKeys = ctx.get('userModelKeys')
         if (userModelKeys === undefined) return err(request, { code: 'internal', message: 'user-model-keys service is not mounted', details: {} })
+        if (request.principal?.kind === 'account') return err(request, { code: 'unauthenticated', message: 'model-key management requires a local principal', details: {} })
         try {
           const out = await userModelKeys.revoke({ keyId: request.payload.keyId as never })
           return { rpcId: request.rpcId, result: { ok: true, value: out } }
         } catch (keyErr) {
-          if (keyErr instanceof ModelKeyError) {
+          if (isServiceError<ModelKeyError>(keyErr)) {
             return err(request, {
               code: modelKeyErrorCodeToWire(keyErr.code),
               message: keyErr.message,
@@ -3959,19 +4625,34 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
     artifactRegistry: {
       async list(request): Promise<RpcResponse<{ items: ArtifactRegistryView[] }>> {
-        const registry = ctx.get('artifactRegistry') as ArtifactRegistry | undefined
+        const registry = ctx.get('artifactRegistry')
         if (registry === undefined) return err(request, { code: 'internal', message: 'artifact registry is not mounted', details: {} })
+        if (request.principal?.kind === 'account') {
+          const sessionId = request.payload.sessionId
+          if (sessionId === undefined) return err(request, { code: 'unauthenticated', message: 'artifact.list requires a session filter', details: {} })
+          const denied = await authorizeSession(request, brandSessionId(sessionId))
+          if (denied !== undefined) return { rpcId: request.rpcId, result: { ok: false, error: denied } }
+        }
         const readonlyItems = await registry.list({
-          ...(request.payload.workspaceId !== undefined ? { workspaceId: brandWorkspaceId(request.payload.workspaceId) } : {}),
+          ...(request.principal?.kind !== 'account' && request.payload.workspaceId !== undefined ? { workspaceId: brandWorkspaceId(request.payload.workspaceId) } : {}),
           ...(request.payload.sessionId !== undefined ? { sessionId: brandSessionId(request.payload.sessionId) } : {}),
         })
-        return { rpcId: request.rpcId, result: { ok: true, value: { items: [...readonlyItems] } } }
+        const items = request.payload.kind === undefined
+          ? readonlyItems
+          : readonlyItems.filter(item => item.kind === request.payload.kind)
+        return { rpcId: request.rpcId, result: { ok: true, value: { items: [...items] } } }
       },
       async read(request): Promise<RpcResponse<{ view: ArtifactRegistryView; bytesBase64: string }>> {
-        const registry = ctx.get('artifactRegistry') as ArtifactRegistry | undefined
+        const registry = ctx.get('artifactRegistry')
         if (registry === undefined) return err(request, { code: 'internal', message: 'artifact registry is not mounted', details: {} })
         try {
           const stored = await registry.read({ artifactId: request.payload.artifactId }, undefined)
+          if (request.principal?.kind === 'account') {
+            const sessionId = stored.view.sessionId
+            if (sessionId === undefined || await authorizeSession(request, sessionId) !== undefined) {
+              return err(request, { code: 'artifact-not-found', message: 'artifact not found', details: { artifactId: String(request.payload.artifactId) } })
+            }
+          }
           const bytesBase64 = Buffer.from(stored.data).toString('base64')
           return { rpcId: request.rpcId, result: { ok: true, value: { view: stored.view, bytesBase64 } } }
         } catch (artErr) {
@@ -3986,17 +4667,120 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
       },
       async remove(request): Promise<RpcResponse<{ removed: true }>> {
-        const registry = ctx.get('artifactRegistry') as ArtifactRegistry | undefined
+        const registry = ctx.get('artifactRegistry')
         if (registry === undefined) return err(request, { code: 'internal', message: 'artifact registry is not mounted', details: {} })
-        // Idempotent: an unknown id resolves with { removed: true } per the contract.
+        if (request.principal?.kind === 'account') {
+          try {
+            const stored = await registry.read({ artifactId: request.payload.artifactId }, undefined)
+            if (stored.view.sessionId === undefined || await authorizeSession(request, stored.view.sessionId) !== undefined) {
+              return err(request, { code: 'artifact-not-found', message: 'artifact not found', details: { artifactId: String(request.payload.artifactId) } })
+            }
+          } catch (artErr) {
+            if (artErr instanceof ArtifactError) {
+              return err(request, { code: 'artifact-not-found', message: 'artifact not found', details: { artifactId: String(request.payload.artifactId) } })
+            }
+            throw artErr
+          }
+        }
+        // Idempotent for local callers; account callers have been ownership-checked above.
         await registry.remove({ artifactId: request.payload.artifactId })
         return { rpcId: request.rpcId, result: { ok: true, value: { removed: true as const } } }
+      },
+    },
+
+    userContext: {
+      async list(request) {
+        const provider = ctx.get('userContext') as UserContextProvider | undefined
+        if (provider === undefined) return err(request, { code: 'internal', message: 'user-context provider is not mounted', details: {} })
+        const value = await provider.list(request.payload)
+        return { rpcId: request.rpcId, result: { ok: true, value: { items: [...value.items] } } }
+      },
+      async get(request) {
+        const provider = ctx.get('userContext') as UserContextProvider | undefined
+        if (provider === undefined) return err(request, { code: 'internal', message: 'user-context provider is not mounted', details: {} })
+        const value = await provider.get(request.payload)
+        return {
+          rpcId: request.rpcId,
+          result: { ok: true, value: value.found ? { entry: value.entry } : { missing: true as const } },
+        }
+      },
+      async set(request) {
+        const provider = ctx.get('userContext') as UserContextProvider | undefined
+        if (provider === undefined) return err(request, { code: 'internal', message: 'user-context provider is not mounted', details: {} })
+        const entry = await provider.set(request.payload)
+        return { rpcId: request.rpcId, result: { ok: true, value: { entry } } }
+      },
+      async delete(request) {
+        const provider = ctx.get('userContext') as UserContextProvider | undefined
+        if (provider === undefined) return err(request, { code: 'internal', message: 'user-context provider is not mounted', details: {} })
+        const value = await provider.delete(request.payload)
+        return { rpcId: request.rpcId, result: { ok: true, value } }
+      },
+    },
+    accountPlugins: {
+      async list(request) {
+        const service = ctx.get('accountPluginFactory')
+        if (service === undefined) return err(request, { code: 'internal', message: 'account plugin factory is not mounted', details: {} })
+        if (request.principal?.kind !== 'account') return err(request, { code: 'unauthenticated', message: 'account authentication required', details: {} })
+        const items = await service.list({ userId: request.principal.userId })
+        return { rpcId: request.rpcId, result: { ok: true, value: { items } } }
+      },
+      async install(request) {
+        return accountPluginMutation(ctx, request, 'install')
+      },
+      async uninstall(request) {
+        return accountPluginMutation(ctx, request, 'uninstall')
+      },
+    },
+    accountInference: {
+      stream(request, signal): AsyncIterable<AccountInferenceFrame> {
+        return (async function* (): AsyncGenerator<AccountInferenceFrame> {
+          if (request.principal?.kind !== 'account') {
+            yield { version: 1, type: 'error', code: 'unauthenticated', message: 'account authentication required' }
+            return
+          }
+          const platform = ctx.get('accountPlatform') as {
+            streamForAccount: (
+              userId: string,
+              options: GenerateOptions,
+              signal: AbortSignal,
+            ) => AsyncIterable<StreamChunk>
+          } | undefined
+          if (platform === undefined) {
+            yield { version: 1, type: 'error', code: 'internal', message: 'account platform is not mounted' }
+            return
+          }
+          try {
+            const options = accountInferenceOptions(request.payload, signal)
+            for await (const chunk of platform.streamForAccount(request.principal.userId, options, signal)) {
+              yield { version: 1, type: 'chunk', chunk: chunk as unknown as Extract<AccountInferenceFrame, { type: 'chunk' }>['chunk'] }
+            }
+            yield { version: 1, type: 'done' }
+          } catch (error) {
+            yield { version: 1, type: 'error', code: serviceErrorCode(error) ?? 'internal', message: errorMessage(error) }
+          }
+        })()
       },
     },
   }
 }
 
-// ---- workbuddy error translation ----
+async function accountPluginMutation(
+  ctx: Context, request: RpcRequest<{ pluginId: string }>, operation: 'install' | 'uninstall',
+): Promise<RpcResponse<AccountPluginView>> {
+  const service = ctx.get('accountPluginFactory')
+  if (service === undefined) return err(request, { code: 'internal', message: 'account plugin factory is not mounted', details: {} })
+  if (request.principal?.kind !== 'account') return err(request, { code: 'unauthenticated', message: 'account authentication required', details: {} })
+  try {
+    const value = await service[operation]({ userId: request.principal.userId, pluginId: request.payload.pluginId })
+    return { rpcId: request.rpcId, result: { ok: true, value } }
+  } catch (error) {
+    if (serviceErrorCode(error) !== undefined) return err(request, { code: 'bad-request', message: errorMessage(error), details: { issues: [] } })
+    throw error
+  }
+}
+
+// ---- xiaowei error translation ----
 
 /** Map identity-seam error codes to the closed wire-code union. */
 function identityErrorCodeToWire(code: IdentityError['code']): RpcErrorCode {
@@ -4006,6 +4790,21 @@ function identityErrorCodeToWire(code: IdentityError['code']): RpcErrorCode {
     case 'SESSION_EXPIRED': return 'unauthenticated'
     case 'BAD_REQUEST': return 'bad-request'
     case 'IDENTITY_UNAVAILABLE': return 'internal'
+    case 'INVITATION_REQUIRED':
+    case 'INVITATION_INVALID': return 'invitation-invalid'
+    case 'INVITATION_LIMIT': return 'invitation-limit'
+    case 'USER_LIMIT': return 'user-limit'
+  }
+}
+
+async function identityForInvitation(ctx: Context, code: string): Promise<{ invitationId: string } | undefined> {
+  const identity = ctx.get('identity')
+  if (identity === undefined) return undefined
+  try {
+    return await identity.inspectInvitation({ code })
+  } catch (error) {
+    if (isServiceError<IdentityError>(error)) return undefined
+    throw error
   }
 }
 
@@ -4034,6 +4833,11 @@ function walletErrorCodeToWire(code: WalletError['code']): RpcErrorCode {
   switch (code) {
     case 'INSUFFICIENT_BALANCE': return 'insufficient-balance'
     case 'DUPLICATE_REFRESH':
+    case 'RESERVATION_CONFLICT':
+    case 'RESERVATION_NOT_FOUND':
+    case 'RESERVATION_ALREADY_SETTLED':
+    case 'RESERVATION_ALREADY_CANCELLED':
+    case 'RESERVATION_ACTUAL_EXCEEDS_RESERVED':
     case 'BAD_REQUEST': return 'bad-request'
     case 'WALLET_UNAVAILABLE': return 'internal'
   }
@@ -4042,7 +4846,7 @@ function walletErrorCodeToWire(code: WalletError['code']): RpcErrorCode {
 /** Carry the structured insufficient-balance detail to the wire. */
 function walletErrorDetails(err: WalletError): { details: { userId: string; balanceMicros: number; attemptedMicros: number } | {} } {
   if (err.detail !== undefined) {
-    return { details: err.detail as unknown as { userId: string; balanceMicros: number; attemptedMicros: number } }
+    return { details: err.detail }
   }
   return { details: {} }
 }
@@ -4051,7 +4855,6 @@ function walletErrorDetails(err: WalletError): { details: { userId: string; bala
 function modelKeyErrorCodeToWire(code: ModelKeyError['code']): RpcErrorCode {
   switch (code) {
     case 'KEY_NOT_FOUND': return 'model-key-not-found'
-    case 'KEY_REVOKED': return 'model-key-revoked'
     case 'BAD_REQUEST': return 'bad-request'
     case 'MASTER_KEY_NOT_CONFIGURED':
     case 'MASTER_KEY_INVALID':
@@ -4059,23 +4862,15 @@ function modelKeyErrorCodeToWire(code: ModelKeyError['code']): RpcErrorCode {
   }
 }
 
-/** Carry the named keyId to the wire for KEY_NOT_FOUND / KEY_REVOKED cases. */
+/** Carry the named keyId to the wire for KEY_NOT_FOUND cases. */
 type ModelKeyErrorDetails =
   | { details: { keyId: string } }
-  | { details: { userId: string; existingKeyId: string } }
   | { details: Record<string, never> }
 
 function modelKeyErrorDetails(
   err: ModelKeyError, keyId: string | undefined,
 ): ModelKeyErrorDetails {
   if (err.code === 'KEY_NOT_FOUND' && keyId !== undefined) return { details: { keyId } }
-  if (err.code === 'KEY_REVOKED') {
-    // The seam's message includes the existing keyId; for a structured
-    // `model-key-revoked` details map we surface the caller-supplied target
-    // plus the existing row id when the caller carried it. Otherwise leave
-    // empty so the renderer can show the message.
-    return { details: { userId: '', existingKeyId: '' } }
-  }
   return { details: {} }
 }
 

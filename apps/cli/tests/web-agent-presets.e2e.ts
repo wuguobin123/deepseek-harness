@@ -1,12 +1,17 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, stat, symlink, writeFile } from 'node:fs/promises'
+import { createServer, type Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { boot, healProfilesModuleFallback, loadOverlayPatches, loadProfile } from '@deepseek-ai/dsh-app-boot'
 import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import type { ApiProxy } from '@deepseek-ai/dsh-host-apiproxy'
+import type { RpcRequest } from '@deepseek-ai/dsh-host-apiproxy/api'
+import { RpcId } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
+import { SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -20,6 +25,7 @@ import type {} from '@deepseek-ai/dsh-tools'
 // Type-only: resolves `ctx.get('sessionProjections')` and `ctx.get('tokenMeter')`.
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-token-meter'
+import type {} from '@deepseek-ai/dsh-web'
 
 const CONFIG_DIR = fileURLToPath(new URL('../config/', import.meta.url))
 const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url))
@@ -28,6 +34,7 @@ const BASE_PATCH = join(REPO_ROOT, 'packages/bundle/base/cordis.patch.yml')
 const WEB_PATCH = join(REPO_ROOT, 'packages/bundle/web-app/cordis.patch.yml')
 const CODEX_PACKAGE_DIR = join(REPO_ROOT, 'packages/subagent/subagent-codex')
 const CLAUDE_CODE_PACKAGE_DIR = join(REPO_ROOT, 'packages/subagent/subagent-claude-code')
+const XIAOWEI_PACKAGE_DIR = join(REPO_ROOT, 'packages/bundle/xiaowei')
 /** The installation anchor whose dependency surface the preset module fallback mirrors. */
 const INSTALL_ANCHOR = join(REPO_ROOT, 'apps/cli/package.json')
 const MINIMAL_PROMPT = 'You are a helpful software engineer assistant.'
@@ -102,8 +109,15 @@ async function bootWeb(
     {
       id: 'agent-presets',
       config: {
-        default: 'standard',
-        roots: [{ path: join(CONFIG_DIR, 'agent-presets'), trust: 'system' }],
+        default: profileBundles?.includes('@deepseek-ai/dsh-xiaowei') ? 'xiaowei-safe' : 'standard',
+        roots: [{
+          path: profileBundles?.includes('@deepseek-ai/dsh-xiaowei')
+            ? join(XIAOWEI_PACKAGE_DIR, 'agent-presets')
+            : join(CONFIG_DIR, 'agent-presets'),
+          trust: 'system',
+        }, ...profileBundles?.includes('@deepseek-ai/dsh-xiaowei')
+          ? [{ path: join(CONFIG_DIR, 'agent-presets'), trust: 'system' as const }]
+          : []],
         includeUserRoot: false,
       },
     },
@@ -613,7 +627,7 @@ describe('a switch survives the session', () => {
     // The exact shape a resume reads back from disk: the header says standard,
     // the log records the switch the user made while the session was blank.
     const rebuilt = resolveSessionPreset({
-      header: { version: 0, id: SessionId('x'), createdAt: 0, agentPreset: 'standard' },
+      header: { version: SESSION_FORMAT_VERSION, id: SessionId('x'), createdAt: 0, agentPreset: 'standard' },
       events: [
         { type: 'agent-preset/selected', seq: 1, time: 0, data: { agentPreset: 'minimal' } },
         { type: 'turn/start', seq: 2, time: 0, data: { turn: 0, trigger: { kind: 'message', source: { kind: 'user' } } } },
@@ -891,5 +905,319 @@ describe('a session keeps the preset it was created with', () => {
     } finally {
       await handle.dispose()
     }
+  })
+})
+
+describe('the shipped Xiaowei composition', () => {
+  let xiaowei: Context
+  let xiaoweiApi: ApiProxy
+  let previousHome: string | undefined
+  let previousMissingSearchCredential: string | undefined
+  const xiaoweiEnvironment = {
+    XIAOWEI_MASTER_KEY: Buffer.alloc(32, 7).toString('base64url'),
+    XIAOWEI_MODEL_BASE_URL: 'https://model.example.test/v1',
+    XIAOWEI_NEW_API_ADMIN_URL: 'https://admin.example.test/api',
+    XIAOWEI_NEW_API_USERNAME: 'test-admin',
+    XIAOWEI_NEW_API_PASSWORD: 'test-password',
+  }
+  let previousXiaoweiEnvironment: Record<string, string | undefined>
+  let searchServer: Server
+  const searchQueries: string[] = []
+  let nextAccountRpc = 1
+  const accountRequest = <P>(payload: P, userId: string): RpcRequest<P> => ({
+    rpcId: RpcId(`xiaowei-account-${String(nextAccountRpc++)}`),
+    payload,
+    principal: { kind: 'account', userId },
+  })
+
+  beforeAll(async () => {
+    previousHome = process.env.DSH_HOME
+    previousMissingSearchCredential = process.env.DSH_XIAOWEI_SEARCH_FALLBACK_E2E_MISSING
+    previousXiaoweiEnvironment = Object.fromEntries(
+      Object.keys(xiaoweiEnvironment).map(key => [key, process.env[key]]),
+    )
+    Object.assign(process.env, xiaoweiEnvironment)
+    delete process.env.DSH_XIAOWEI_SEARCH_FALLBACK_E2E_MISSING
+    const home = await mkdtemp(join(tmpdir(), 'dsh-xiaowei-presets-'))
+    process.env.DSH_HOME = home
+    const settingsFile = join(home, 'settings.yaml')
+    await writeFile(settingsFile, '{}\n')
+    searchServer = createServer((request, response) => {
+      let body = ''
+      request.setEncoding('utf8')
+      request.on('data', (chunk: string) => { body += chunk })
+      request.on('end', () => {
+        const query = new URLSearchParams(body).get('q') ?? ''
+        searchQueries.push(query)
+        response.writeHead(200, { 'content-type': 'application/json' })
+        response.end(JSON.stringify({
+          results: [{
+            url: 'https://weather.example.test/jinan',
+            title: 'Jinan weather',
+            content: `Local SearXNG result for ${query}`,
+          }],
+        }))
+      })
+    })
+    await new Promise<void>((resolve, reject) => {
+      searchServer.once('error', reject)
+      searchServer.listen(0, '127.0.0.1', resolve)
+    })
+    const searchPort = (searchServer.address() as AddressInfo).port
+    xiaowei = await bootWeb(settingsFile, [
+      { id: 'webserver', disabled: true },
+      { id: 'xiaowei-webserver', disabled: true },
+      { id: 'frontend-static', disabled: true },
+      { id: 'connection', disabled: true },
+      { id: 'session-telemetry-otel', disabled: true },
+      { id: 'xiaowei-startup', disabled: true },
+      { id: 'xiaowei-runner', disabled: true },
+      { id: 'web-provider-firecrawl', config: { apiKeyEnv: 'DSH_XIAOWEI_SEARCH_FALLBACK_E2E_MISSING' } },
+      { id: 'web-search-searxng', config: { baseURL: `http://127.0.0.1:${searchPort}` } },
+    ], [XIAOWEI_PACKAGE_DIR], [
+      '@deepseek-ai/dsh-base',
+      '@deepseek-ai/dsh-headless',
+      '@deepseek-ai/dsh-xiaowei',
+    ])
+    xiaoweiApi = xiaowei.apiProxy
+  }, 120_000)
+
+  afterAll(async () => {
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+    if (previousMissingSearchCredential === undefined) delete process.env.DSH_XIAOWEI_SEARCH_FALLBACK_E2E_MISSING
+    else process.env.DSH_XIAOWEI_SEARCH_FALLBACK_E2E_MISSING = previousMissingSearchCredential
+    for (const [key, value] of Object.entries(previousXiaoweiEnvironment)) {
+      if (value === undefined) Reflect.deleteProperty(process.env, key)
+      else process.env[key] = value
+    }
+    await xiaowei?.fiber.dispose()
+    await new Promise<void>((resolve, reject) => {
+      searchServer.close((error) => {
+        if (error === undefined) resolve()
+        else reject(error)
+      })
+    })
+  })
+
+  it('ships presets while keeping the host model-visible tool layer empty', async () => {
+    expect(toolNames(xiaowei)).toEqual([])
+    expect((await xiaowei.agentPresets.list()).map(preset => preset.id).sort())
+      .toEqual(['code', 'cordis', 'minimal', 'standard', 'xiaowei-safe'])
+    expect(xiaowei.agentPresets.defaultId).toBe('xiaowei-safe')
+
+    const standard = await xiaowei.agents.create({
+      sessionId: SessionId('xiaowei-standard'),
+      setup: agentCtx => xiaowei.agentPresets.mount(agentCtx, 'standard').then(() => undefined),
+    })
+    const safeWorkspace = join(process.env.DSH_HOME as string, 'safe-workspace')
+    const outside = join(process.env.DSH_HOME as string, 'outside-workspace')
+    await mkdir(safeWorkspace, { recursive: true })
+    await mkdir(outside, { recursive: true })
+    await writeFile(join(safeWorkspace, 'inside.txt'), 'inside')
+    await writeFile(join(outside, 'secret.txt'), 'secret')
+    const safe = await xiaowei.agents.create({
+      sessionId: SessionId('xiaowei-safe'),
+      meta: { cwd: safeWorkspace },
+      setup: agentCtx => xiaowei.agentPresets.mount(agentCtx, 'xiaowei-safe').then(() => undefined),
+    })
+    try {
+      expect(toolNames(xiaowei, standard.agent)).toContain('bash')
+      expect(toolNames(xiaowei, standard.agent)).toContain('read')
+      expect(toolNames(xiaowei, safe.agent)).toEqual(expect.arrayContaining([
+        'html_build', 'document_read', 'web_fetch', 'web_search', 'skill_install', 'ask_user_question', 'todo_write',
+        'read', 'write', 'edit', 'glob', 'grep',
+      ]))
+      expect(toolNames(xiaowei, safe.agent)).not.toEqual(expect.arrayContaining([
+        'bash', 'pwsh', 'run_in_background', 'str_replace_editor', 'subagent', 'subagent_fork', 'workflow', 'ralph',
+      ]))
+      const inside = await xiaowei.tools.execute({
+        callId: CallId('xiaowei-safe-read-inside'),
+        name: 'read',
+        arguments: { file_path: 'inside.txt' },
+        signal: new AbortController().signal,
+        agent: safe.agent,
+      })
+      expect(inside.isError).toBe(false)
+      const outsideRead = await xiaowei.tools.execute({
+        callId: CallId('xiaowei-safe-read-outside'),
+        name: 'read',
+        arguments: { file_path: join(outside, 'secret.txt') },
+        signal: new AbortController().signal,
+        agent: safe.agent,
+      })
+      expect(outsideRead.isError).toBe(true)
+      expect(JSON.stringify(outsideRead.content)).toContain('outside the session workspace')
+      const outsideSearch = await xiaowei.tools.execute({
+        callId: CallId('xiaowei-safe-search-outside'),
+        name: 'glob',
+        arguments: { pattern: '*', path: outside },
+        signal: new AbortController().signal,
+        agent: safe.agent,
+      })
+      expect(outsideSearch.isError).toBe(true)
+      expect(JSON.stringify(outsideSearch.content)).toContain('outside the session workspace')
+      expect(toolNames(xiaowei)).toEqual([])
+    } finally {
+      await safe.dispose()
+      await standard.dispose()
+    }
+  })
+
+  it('gives the platform model enough output budget for artifact tool calls', async () => {
+    await expect(xiaowei.llm.resolveModelInfo('xiaowei-minimax', 'MiniMax-M3'))
+      .resolves.toMatchObject({ defaultMaxTokens: 32_768 })
+  })
+
+  it('publishes only safe defaults and rejects host-execution extensions for every account', async () => {
+    const userA = `plugin-a-${randomUUID()}`
+    const userB = `plugin-b-${randomUUID()}`
+    const listA = await xiaoweiApi.accountPlugins.list(accountRequest({}, userA))
+    const listB = await xiaoweiApi.accountPlugins.list(accountRequest({}, userB))
+    expect(listA.result.ok && listA.result.value.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ pluginId: 'core-tools', systemDefault: true, installed: true }),
+    ]))
+    expect(listB.result.ok && listB.result.value.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ pluginId: 'core-tools', systemDefault: true, installed: true }),
+    ]))
+    expect(listA.result.ok && listA.result.value.items).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ pluginId: 'precise-editor' }),
+    ]))
+
+    const installed = await xiaoweiApi.accountPlugins.install(accountRequest({ pluginId: 'precise-editor' }, userA))
+    expect(installed.result).toMatchObject({ ok: false })
+    expect((await xiaoweiApi.agentPresets.list(accountRequest({}, userA))).result).toMatchObject({
+      ok: true, value: { presets: [{ id: 'xiaowei-safe' }], authorable: false, hasDocument: false },
+    })
+    expect((await xiaoweiApi.sessions.create(accountRequest({ agentPreset: 'standard' }, userA))).result)
+      .toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    const presetDenied = await Promise.all([
+      xiaoweiApi.agentPresets.read(accountRequest({ agentPreset: 'standard' }, userA)),
+      xiaoweiApi.agentPresets.copy(accountRequest({ from: 'standard', agentPreset: 'copy' }, userA)),
+      xiaoweiApi.agentPresets.remove(accountRequest({ agentPreset: 'standard' }, userA)),
+      xiaoweiApi.agentPresets.openDocument(accountRequest({ agentPreset: 'standard' }, userA), new AbortController().signal),
+    ])
+    expect(presetDenied.every(response => !response.result.ok && response.result.error.code === 'unauthenticated')).toBe(true)
+    const userBRoot = await xiaoweiApi.host.describe(accountRequest({}, userB))
+    if (!userBRoot.result.ok) throw new Error('account B workspace root is unavailable')
+    const userBProject = join(userBRoot.result.value.cwd, 'foreign-project')
+    await mkdir(userBProject, { recursive: true })
+    const userBWorkspace = await xiaoweiApi.workspace.create(accountRequest({ path: userBProject }, userB))
+    if (!userBWorkspace.result.ok) throw new Error('account B workspace was not created')
+    expect((await xiaoweiApi.sessions.create(accountRequest({
+      workspaceId: userBWorkspace.result.value.workspace.workspaceId,
+    }, userA))).result).toMatchObject({ ok: false, error: { code: 'workspace-not-found' } })
+    expect((await xiaoweiApi.workspace.list(accountRequest({}, userA))).result)
+      .toMatchObject({ ok: true, value: { items: [] } })
+    expect((await xiaoweiApi.workspace.list(accountRequest({}, userB))).result)
+      .toMatchObject({ ok: true, value: { items: [expect.objectContaining({ path: userBProject })] } })
+    const sessionA = await xiaoweiApi.sessions.create(accountRequest({}, userA))
+    const sessionB = await xiaoweiApi.sessions.create(accountRequest({}, userB))
+    if (!sessionA.result.ok || !sessionB.result.ok) {
+      throw new Error(`account plugin fixture sessions were not created: ${JSON.stringify([sessionA.result, sessionB.result])}`)
+    }
+    const unsafePreset = await xiaoweiApi.agentPresets.select(accountRequest({ sessionId: SessionId(sessionA.result.value.sessionId), agentPreset: 'standard' }, userA))
+    expect(unsafePreset.result).toMatchObject({ ok: false, error: { code: 'unauthenticated' } })
+    const agentA = xiaowei.agents.get(SessionId(sessionA.result.value.sessionId))
+    const agentB = xiaowei.agents.get(SessionId(sessionB.result.value.sessionId))
+    if (agentA === undefined || agentB === undefined) throw new Error('account plugin fixture agents are unavailable')
+    expect(toolNames(xiaowei, agentA)).not.toContain('str_replace_editor')
+    expect(toolNames(xiaowei, agentB)).not.toContain('str_replace_editor')
+    expect(agentA.session.events.find(event => event.type === 'account-plugins/selected')).toMatchObject({
+      type: 'account-plugins/selected', data: { pluginIds: [] },
+    })
+    expect(agentB.session.events.find(event => event.type === 'account-plugins/selected')).toMatchObject({
+      type: 'account-plugins/selected', data: { pluginIds: [] },
+    })
+
+    const uninstalled = await xiaoweiApi.accountPlugins.uninstall(accountRequest({ pluginId: 'precise-editor' }, userA))
+    expect(uninstalled.result).toMatchObject({ ok: false })
+    const later = await xiaoweiApi.sessions.create(accountRequest({}, userA))
+    if (!later.result.ok) throw new Error('later account plugin fixture session was not created')
+    const laterAgent = xiaowei.agents.get(SessionId(later.result.value.sessionId))
+    if (laterAgent === undefined) throw new Error('later account plugin fixture agent is unavailable')
+    expect(toolNames(xiaowei, laterAgent)).not.toContain('str_replace_editor')
+    expect(laterAgent.session.events.find(event => event.type === 'account-plugins/selected')).toMatchObject({
+      type: 'account-plugins/selected', data: { pluginIds: [] },
+    })
+  })
+
+  it('installs an approved Skill into only the owning account root', async () => {
+    const userA = `skill-a-${randomUUID()}`
+    const userB = `skill-b-${randomUUID()}`
+    const sessionA = await xiaoweiApi.sessions.create(accountRequest({}, userA))
+    const sessionB = await xiaoweiApi.sessions.create(accountRequest({}, userB))
+    if (!sessionA.result.ok || !sessionB.result.ok) {
+      throw new Error(`account Skill fixture sessions were not created: ${JSON.stringify([sessionA.result, sessionB.result])}`)
+    }
+    const agentA = xiaowei.agents.get(SessionId(sessionA.result.value.sessionId))
+    const agentB = xiaowei.agents.get(SessionId(sessionB.result.value.sessionId))
+    if (agentA === undefined || agentB === undefined) throw new Error('account Skill fixture agents are unavailable')
+    expect(toolNames(xiaowei, agentA)).toContain('skill_install')
+    const muxAbort = new AbortController()
+    try {
+      agentA.session.append('turn/start', { turn: 1 })
+      const approvalFrame = (async () => {
+        for await (const envelope of xiaoweiApi.events.mux(accountRequest({}, userA), muxAbort.signal)) {
+          if (envelope.payload.type === 'approval/requested') return { envelope, frame: envelope.payload }
+        }
+        throw new Error('approval mux closed before publishing the request')
+      })()
+      const execution = xiaowei.tools.execute({
+        callId: CallId(`skill-install-${randomUUID()}`),
+        name: 'skill_install',
+        arguments: {
+          name: 'account-private-proof',
+          description: 'Account-private installation proof.',
+          instructions: 'Reply with the owning account proof.',
+        },
+        signal: new AbortController().signal,
+        agent: agentA,
+      })
+      const pending = await approvalFrame
+      await expect(xiaoweiApi.respond({
+        type: 'client-response',
+        rpcId: pending.envelope.rpcId,
+        result: {
+          ok: true,
+          value: {
+            sessionId: pending.frame.sessionId,
+            approvalId: pending.frame.approvalId,
+            outcome: 'allowed-once',
+          },
+        },
+      })).resolves.toEqual({ accepted: true })
+      const result = await execution
+      expect(result.isError).toBe(false)
+      await expect(xiaowei.skills.get('account-private-proof', {
+        cwd: agentA.session.header.cwd,
+        ownerId: agentA.session.header.ownerId,
+        scope: agentA,
+      })).resolves.toMatchObject({ content: 'Reply with the owning account proof.' })
+      await expect(xiaowei.skills.get('account-private-proof', {
+        cwd: agentB.session.header.cwd,
+        ownerId: agentB.session.header.ownerId,
+        scope: agentB,
+      })).resolves.toBeUndefined()
+    } finally {
+      muxAbort.abort()
+    }
+  })
+
+  it('falls back to the keyless SearXNG provider when the Firecrawl credential is absent', async () => {
+    await expect(xiaowei.web.search({ query: 'today weather in Jinan', maxResults: 3 })).resolves.toEqual({
+      sources: [{
+        url: 'https://weather.example.test/jinan',
+        title: 'Jinan weather',
+        snippet: 'Local SearXNG result for today weather in Jinan',
+      }],
+      truncated: false,
+    })
+    expect(searchQueries).toEqual(['today weather in Jinan'])
+  })
+
+  it('mounts guarded HTTP fetch and rejects a private destination without entering Firecrawl fallback', async () => {
+    await expect(xiaowei.web.fetch({ url: 'http://127.0.0.1:18081/' }))
+      .rejects.toMatchObject({ code: 'WEB_BLOCKED_URL' })
   })
 })

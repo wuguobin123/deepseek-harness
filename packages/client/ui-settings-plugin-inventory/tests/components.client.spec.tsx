@@ -2,10 +2,12 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PluginInventorySettingsTab } from '../src/client/PluginInventorySettingsTab.tsx'
+import { PluginFactorySettingsTab } from '../src/client/PluginFactorySettingsTab.tsx'
 import type {
   PluginInventorySettingsTabInjected,
   PluginInventorySettingsTabProps,
 } from '../src/client/PluginInventorySettingsTab.tsx'
+import type { PluginFactorySettingsTabProps } from '../src/client/PluginFactorySettingsTab.tsx'
 import { en, type PluginInventoryLocaleKey } from '../src/client/locales.ts'
 
 afterEach(cleanup)
@@ -123,5 +125,29 @@ describe('PluginInventorySettingsTab', () => {
     const pendingFailure = render(<PluginInventorySettingsTab {...props(() => deferredFailure.promise)} />)
     pendingFailure.unmount()
     await act(async () => { deferredFailure.reject(new Error('late failure')) })
+  })
+})
+
+describe('PluginFactorySettingsTab', () => {
+  it('installs only the selected account plugin and explains the session boundary', async () => {
+    const install = vi.fn(async () => {})
+    const uninstall = vi.fn(async () => {})
+    const list = vi.fn()
+      .mockResolvedValueOnce([
+        { pluginId: 'core-tools', title: 'Core tools', description: 'Built in', version: '1', systemDefault: true, installed: true },
+        { pluginId: 'editor', title: 'Editor', description: 'Optional editor', version: '1', systemDefault: false, installed: false },
+      ])
+      .mockResolvedValueOnce([
+        { pluginId: 'core-tools', title: 'Core tools', description: 'Built in', version: '1', systemDefault: true, installed: true },
+        { pluginId: 'editor', title: 'Editor', description: 'Optional editor', version: '1', systemDefault: false, installed: true },
+      ])
+    render(<PluginFactorySettingsTab {...({ t, list, install, uninstall } as PluginFactorySettingsTabProps)} />)
+    expect(await screen.findByText('Core tools')).toBeTruthy()
+    expect(screen.getByText(en.systemDefault)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: en.install }))
+    await waitFor(() => { expect(install).toHaveBeenCalledWith('editor') })
+    expect((await screen.findByRole('status')).textContent).toBe(en.newSessionNotice)
+    expect(await screen.findByRole('button', { name: en.uninstall })).toBeTruthy()
+    expect(uninstall).not.toHaveBeenCalled()
   })
 })

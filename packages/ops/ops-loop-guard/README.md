@@ -22,7 +22,11 @@ Empty. Config lands with the first detector.
 
 ## Model Experience
 
-None. The parent turn sees a single advisory warning identical to the parent reminder plugin; no schema change is introduced.
+Indirectly, through the parent repeat-tool reminder that owns the advisory warning and its rendering.
+
+#### KV Cache effect
+
+The current no-op detector adds nothing; a future advisory would append after the reusable request prefix.
 
 ## Known Limitations and Deferred Work
 

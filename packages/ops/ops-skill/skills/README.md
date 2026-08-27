@@ -1,5 +1,7 @@
 # ops-skill/skills
 
+English | [中文](README.zh.md)
+
 Bundled Skill directories for the ops product group. Each subdirectory is one scenario; see [`../README.md`](../README.md) and the [scenario integration contract](../../../../docs/ops/scenario-integration-contract.md) for the entry schema.
 
 ## Scenarios

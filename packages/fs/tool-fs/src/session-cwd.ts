@@ -8,6 +8,9 @@
  * @module @deepseek-ai/dsh-tool-fs/session-cwd
  */
 
+import type { Context } from '@deepseek-ai/cordis'
+import { FsError } from '@deepseek-ai/dsh-fs'
+import type { FsTarget } from '@deepseek-ai/dsh-fs'
 import type { ToolExecution } from '@deepseek-ai/dsh-tools'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 
@@ -43,4 +46,36 @@ export function sessionResolveOptions(
     ...cwd !== undefined ? { cwd } : {},
     signal: exec.signal,
   }
+}
+
+/**
+ * Resolve one model path and optionally require its canonical identity to stay
+ * under the calling session workspace. Deployments serving untrusted account
+ * sessions enable this check so absolute paths and symlink escapes cannot turn
+ * the host filesystem into an account-visible read surface.
+ * @param ctx - plugin context providing the filesystem implementation.
+ * @param exec - tool execution carrying the session workspace and signal.
+ * @param requestedPath - model-controlled path to resolve.
+ * @param workspaceOnly - whether the resolved target must stay below the session cwd.
+ * @param policyWorkspaceRoot - mutation policy root, when already resolved.
+ * @returns the resolved target after the optional containment check.
+ */
+export async function resolveSessionTarget(
+  ctx: Context,
+  exec: ToolExecution,
+  requestedPath: string,
+  workspaceOnly: boolean,
+  policyWorkspaceRoot?: string,
+): Promise<FsTarget> {
+  const cwd = policyWorkspaceRoot ?? sessionCwd(exec, requestedPath)
+  const target = await ctx.fs.resolve(requestedPath, sessionResolveOptions(exec, requestedPath, policyWorkspaceRoot))
+  if (!workspaceOnly) return target
+  if (cwd === undefined) {
+    throw new FsError('file access requires an agent workspace', 'FS_SANDBOX_DENIED')
+  }
+  const root = await ctx.fs.resolve('.', { cwd, signal: exec.signal })
+  if (!ctx.fs.contains(root, target)) {
+    throw new FsError(`cannot access "${target.displayPath}": path is outside the session workspace`, 'FS_SANDBOX_DENIED')
+  }
+  return target
 }

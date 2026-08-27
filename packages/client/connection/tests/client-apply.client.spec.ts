@@ -4,14 +4,15 @@
  */
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { apply, type ConnectionHandle } from '../src/client/index.ts'
+import { apply, type ClientTransportHooks, type ConnectionHandle } from '../src/client/index.ts'
 import type { RpcMessage } from '../src/client/api.ts'
 import { RpcId } from '../src/client/api.ts'
 import { FixtureApiClient } from '../src/client/fixture.ts'
 import { WebApiClient } from '../src/client/web-api-client.ts'
 
-type Win = { location?: { hostname: string; search: string; origin?: string } }
+type Win = { location?: { hostname: string; search: string; origin?: string; protocol?: string } }
 type WebSocketGlobal = { WebSocket?: typeof WebSocket }
+type TransportGlobal = { __DSH_TRANSPORT__?: ClientTransportHooks }
 
 const originalWebSocket = globalThis.WebSocket
 const sockets: FakeWebSocket[] = []
@@ -49,6 +50,7 @@ class FakeWebSocket extends EventTarget {
 
 afterEach(() => {
   delete (globalThis as Win).location
+  delete (globalThis as TransportGlobal).__DSH_TRANSPORT__
   sockets.length = 0
   if (originalWebSocket === undefined) delete (globalThis as WebSocketGlobal).WebSocket
   else globalThis.WebSocket = originalWebSocket
@@ -81,6 +83,28 @@ describe('connection client apply', () => {
 
   it('reports non-loopback page authority through the connection handle', async () => {
     ;(globalThis as Win).location = { hostname: '192.0.2.20', search: '' }
+    expect((await mount()).isLoopback).toBe(false)
+  })
+
+  it('renders the remote settings branch only for the explicit fixtureRemote switch', async () => {
+    ;(globalThis as Win).location = { hostname: '127.0.0.1', search: '?fixture&fixtureRemote' }
+    const handle = await mount()
+    expect(handle.api).toBeInstanceOf(FixtureApiClient)
+    expect(handle.isLoopback).toBe(false)
+  })
+
+  it('treats a file: page as a local shell (the Electron desktop renderer)', async () => {
+    ;(globalThis as Win).location = { hostname: '', search: '', protocol: 'file:' }
+    expect((await mount()).isLoopback).toBe(true)
+  })
+
+  it('uses a shell transport authority instead of the file: page authority', async () => {
+    ;(globalThis as Win).location = { hostname: '', search: '', protocol: 'file:' }
+    ;(globalThis as TransportGlobal).__DSH_TRANSPORT__ = {
+      isLoopback: false,
+      createApiClient: () => new FixtureApiClient(),
+      fetch: () => Promise.resolve(new Response('{}', { status: 200 })),
+    }
     expect((await mount()).isLoopback).toBe(false)
   })
 

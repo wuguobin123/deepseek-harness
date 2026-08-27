@@ -350,9 +350,11 @@ const SCENARIOS: Scenario[] = [
   { name: 'lsp-definition', hasModelTurn: true, recorded: false, pinsHeader: true, headerClass: 'lsp', configPath: LSP_CONFIG },
   // web_fetch markdown rendering end to end: the overlay's loopback fixture
   // server supplies deterministic HTML (entities, a GFM table, nesting), the
-  // REAL local fetch provider retrieves it, and the tool result pins the
-  // turndown conversion. The fetched URL (fixed port) is part of the recorded
-  // transcript; replay re-executes the real fetch against the same fixture.
+  // HTTP provider's request/result and decoding behavior retrieves it through
+  // a snapshot-only injected transport, and the tool result pins the turndown
+  // conversion. Focused provider tests own DNS pinning and private-address
+  // rejection; the fixture never weakens production config. The fetched URL
+  // (fixed port) is part of the recorded transcript.
   { name: 'web-fetch', hasModelTurn: true, recorded: true, pinsHeader: true, headerClass: 'web', configPath: WEB_CONFIG },
   {
     name: 'workspace-edit',
@@ -418,8 +420,9 @@ const SCENARIOS: Scenario[] = [
   // a deterministic mid-tool-call output-limit truncation. Turn 1's script ends
   // at `max-tokens` with an unfinished tool call and adapter replay metadata for
   // both blocks; the durable assistant/message pins assembly dropping the tool
-  // call AND pruning its per-block replay entry in the same decision, and turn 2
-  // proves the session continues past the truncated step.
+  // call AND pruning its per-block replay entry in the same decision. The
+  // max-token continuation guard queues turn 2 without a second client prompt,
+  // proving the assembled application recovers within one prompt lifecycle.
   { name: 'max-tokens-continue', hasModelTurn: true, recorded: false },
   // Keyless, authored (like error-finish/cancel): deterministically forcing a
   // LIVE model to repeat one call three times is not a stable recording, so

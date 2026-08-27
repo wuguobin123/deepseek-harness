@@ -102,17 +102,20 @@ if (import.meta.main) {
   const root = resolve(import.meta.dirname, '..')
   const { values } = parseArgs({
     args: process.argv.slice(2),
-    options: { manifest: { type: 'string' } },
+    options: { manifest: { type: 'string', multiple: true } },
   })
-  const result = await verifyRuntimeClosure(root, values.manifest)
-  if (result.failures.length > 0) {
-    console.error('verify-runtime-closure: preset plugins or required workspace peers are missing from python/sdk-runtime dependencies:')
-    for (const failure of result.failures) console.error(`  ${failure}`)
-    process.exitCode = 1
-  } else {
-    console.log(
-      `verify-runtime-closure: ${result.presetCount} agent presets and ${result.workspacePackageCount} workspace packages form a closed runtime dependency graph.`,
-    )
+  const manifests = values.manifest ?? ['python/sdk-runtime/package.json', 'apps/cli/package.json']
+  for (const manifest of manifests) {
+    const result = await verifyRuntimeClosure(root, manifest)
+    if (result.failures.length > 0) {
+      console.error(`verify-runtime-closure: preset plugins or required workspace peers are missing from ${manifest} dependencies:`)
+      for (const failure of result.failures) console.error(`  ${failure}`)
+      process.exitCode = 1
+    } else {
+      console.log(
+        `verify-runtime-closure: ${manifest} closes ${result.presetCount} agent presets and ${result.workspacePackageCount} workspace packages.`,
+      )
+    }
   }
 }
 

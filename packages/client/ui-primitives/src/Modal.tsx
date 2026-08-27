@@ -28,7 +28,7 @@ import css from './Modal.module.css'
  * @returns null when closed; otherwise the overlay tree.
  */
 export function Modal({
-  open, onClose, title, closeLabel = 'Close', description, children, footer, className, contentClassName, headless = false,
+  open, onClose, title, closeLabel = '关闭', description, children, footer, className, contentClassName, headless = false,
 }: {
   open: boolean
   onClose: () => void

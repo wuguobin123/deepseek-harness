@@ -279,10 +279,34 @@ export const imageMediaTypeSchema = z.union([
   z.literal('image/gif'),
 ])
 
+/** PDF and Office media types accepted by the version-one browser wire. */
+export const documentMediaTypeSchema = z.union([
+  z.literal('application/pdf'),
+  z.literal('application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+  z.literal('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+  z.literal('application/vnd.openxmlformats-officedocument.presentationml.presentation'),
+])
+
+/** Parser kind paired with one browser-submitted document. */
+export const documentKindSchema = z.union([
+  z.literal('pdf'),
+  z.literal('docx'),
+  z.literal('xlsx'),
+  z.literal('pptx'),
+])
+
 /** Prompt wire content is intentionally narrower than merge-extensible durable core content. */
 export const promptContentPartSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('text'), text: z.string() }),
   z.object({ type: z.literal('image'), mediaType: imageMediaTypeSchema, data: z.string(), name: z.string().optional() }),
+  z.object({
+    type: z.literal('file'),
+    mediaType: documentMediaTypeSchema,
+    data: z.string(),
+    name: z.string().optional(),
+    kind: documentKindSchema,
+    summary: z.string().optional(),
+  }),
 ])
 
 /** session.prompt request payload, including optional browser-local request provenance. */

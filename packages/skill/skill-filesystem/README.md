@@ -6,6 +6,8 @@ Local filesystem provider for the `ctx.skills` registry.
 
 This package implements one skill source. It scans local project, custom, and user skill roots, parses `SKILL.md` or flat Markdown skill files, and registers the provider on `ctx.skills`. The registry remains in `@deepseek-ai/dsh-skill`; the durable session catalogs and model-facing loader tool remain in `@deepseek-ai/dsh-tool-skill`.
 
+When lookup includes an authenticated `ownerId`, discovery switches to the account view: configured system roots, the bundled root, and `<dshHome>/accounts/<sha256(ownerId)>/skills`. It deliberately excludes project roots, shared `<dshHome>/skills`, and `<agentsHome>/skills`, preventing one server account from inheriting another local user's writable Skill directories.
+
 ## Plugin
 
 Requires `ctx.skills` (`inject: ['skills']`).

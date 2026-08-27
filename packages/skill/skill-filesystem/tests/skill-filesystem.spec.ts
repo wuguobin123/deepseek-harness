@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { mkdir, readdir, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { Context } from '@deepseek-ai/cordis'
+import { SessionOwnerId } from '@deepseek-ai/dsh-session'
 import SkillRegistry from '@deepseek-ai/dsh-skill'
 import { FileSystem, FsError, FsVersion, type FsDirEntry, type FsEditOutcome, type FsEditRequest, type FsInfo, type FsPathInfo, type FsTarget, type FsWriteOutcome } from '@deepseek-ai/dsh-fs'
 import * as SkillFileSystem from '../src/index.ts'
@@ -168,6 +170,36 @@ describe('dsh-skill-filesystem plugin exports', () => {
 })
 
 describe('FileSystemSkillProvider', () => {
+  it('uses only system, bundled, and the matching account root for account-aware discovery', async () => {
+    const home = await tempDir('skill-account-home')
+    const project = await tempDir('skill-account-project')
+    const custom = await tempDir('skill-account-custom')
+    const system = await tempDir('skill-account-system')
+    const bundled = await tempDir('skill-account-bundled')
+    const owner = 'account-a'
+    const ownerHash = createHash('sha256').update(owner).digest('hex')
+    const otherHash = createHash('sha256').update('account-b').digest('hex')
+
+    await writeSkill(system, 'system-only', 'System skill')
+    await writeSkill(bundled, 'bundled-only', 'Bundled skill')
+    await writeSkill(join(home, '.dsh/accounts', ownerHash, 'skills'), 'account-only', 'Account skill')
+    await writeSkill(join(home, '.dsh/accounts', otherHash, 'skills'), 'other-account', 'Other account skill')
+    await writeSkill(join(project, '.dsh/skills'), 'project-only', 'Project skill')
+    await writeSkill(join(custom, 'shared-only'), 'shared-only', 'Shared skill')
+    await writeSkill(join(home, '.dsh/skills'), 'user-only', 'User skill')
+    await writeSkill(join(home, '.agents/skills'), 'agents-only', 'Agents skill')
+
+    const ctx = await setupLocal(home, {
+      customSkillDirs: [custom], bundledSkillDir: bundled, systemSkillDirs: [system],
+    })
+    const skills = await ctx.skills.list({ cwd: join(project, 'src'), ownerId: SessionOwnerId(owner) })
+
+    expect(skills.map(skill => skill.name).sort()).toEqual(['account-only', 'bundled-only', 'system-only'])
+    expect(skills.find(skill => skill.name === 'system-only')?.source).toBe('custom')
+    expect(skills.find(skill => skill.name === 'bundled-only')?.source).toBe('bundled')
+    expect(skills.find(skill => skill.name === 'account-only')?.source).toBe('user-dsh')
+  })
+
   it('discovers project, custom, user, and agents skill roots in priority order', async () => {
     const home = await tempDir('skill-home')
     const project = await tempDir('skill-project')

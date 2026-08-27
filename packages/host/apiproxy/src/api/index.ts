@@ -19,8 +19,15 @@ import type { DownloadsApi } from './downloads.ts'
 import type { AccountApi } from './account.ts'
 import type { WalletApi } from './wallet.ts'
 import type { ModelKeysApi } from './model-keys.ts'
+import type { CustomModelsApi } from './custom-models.ts'
 import type { ArtifactsApi } from './artifacts.ts'
-import type { ClientResponse, RpcReceipt } from './rpc.ts'
+import type { UserContextApi } from './user-context.ts'
+import type { AccountPluginsApi } from './account-plugins.ts'
+import type { ClientResponse, RpcPrincipal, RpcReceipt } from './rpc.ts'
+import type { AccountInferenceApi } from './account-inference.ts'
+export type { AccountInferenceApi } from './account-inference.ts'
+export type { AccountInferenceMessage, AccountInferenceRequest, AccountInferenceFrame } from '@deepseek-ai/dsh-llm-account-inference'
+export { ACCOUNT_INFERENCE_VERSION, accountInferenceRequestSchema, parseAccountInferenceRequest, accountInferenceFrameSchema, parseAccountInferenceFrame, parseAccountInferenceFrames } from '@deepseek-ai/dsh-llm-account-inference'
 
 /** Root interface of the unified API. New client-request domain = one new file pair + one field here + one map row. */
 export interface ApiProxy {
@@ -38,25 +45,31 @@ export interface ApiProxy {
   /** Host-only download surfaces (GET, no wire envelope); absent from IApiClient. */
   downloads: DownloadsApi
   /**
-   * workbuddy multi-user account seam: signup / signin / signout / state, plus
+   * xiaowei multi-user account seam: signup / signin / signout / state, plus
    * email-verification code minting. Non-privileged — anonymous LAN callers
    * may hit signup, signin, and emailCode to grow the user base.
    */
   account: AccountApi
-  /** workbuddy wallet: balance, ledger, debit/credit/setQuota/refresh-daily.
+  /** xiaowei wallet: balance, ledger, debit/credit/setQuota/refresh-daily.
    *  The fence restricts credit/debit/setQuota/refreshDaily/grantWelcomeBonus
    *  to loopback; get and listLedger are loopback OR bearer. */
   wallet: WalletApi
-  /** workbuddy per-user model keys: provision/list/revoke. */
+  /** xiaowei per-user model keys: provision/list/revoke. */
   modelKeys: ModelKeysApi
-  /** workbuddy durable artifact registry: list/read/remove. */
+  customModels: CustomModelsApi
+  /** xiaowei durable artifact registry: list/read/remove. */
   artifactRegistry: ArtifactsApi
+  userContext: UserContextApi
+  accountPlugins: AccountPluginsApi
+  /** Session-free account-owned model inference stream. */
+  accountInference: AccountInferenceApi
   /**
    * Response entry for server requests; not a domain method.
    * @param message - Client response carrying the server request's rpcId.
+   * @param principal - authenticated carrier identity, when one is required.
    * @returns Transport receipt for the response delivery.
    */
-  respond(message: ClientResponse): Promise<RpcReceipt>
+  respond(message: ClientResponse, principal?: RpcPrincipal): Promise<RpcReceipt>
 }
 
 // ---- Domain interfaces and payload entities ----
@@ -87,15 +100,18 @@ export type {
   WalletApi, WalletView, LedgerEntry, WalletLedgerReason, AmountMicros, InsufficientBalanceReason,
 } from './wallet.ts'
 export type { ModelKeysApi, ModelKeyView, ProvisionedKey } from './model-keys.ts'
+export type { CustomModelsApi, CustomModelId, CustomModelView } from './custom-models.ts'
 export type {
   ArtifactsApi, ArtifactView, ArtifactKind, ArtifactSource, ArtifactMediaType,
 } from './artifacts.ts'
+export type { UserContextApi, UserContextKey, UserContextKind, UserContextView } from './user-context.ts'
+export type { AccountPluginsApi } from './account-plugins.ts'
 export type { ApprovalResponsePayload } from './approvals.ts'
 
 export type { QuestionResponsePayload } from './questions.ts'
 
 // ---- Message layer: narrow forms (domain-signature view) ----
-export type { RpcRequest, RpcResponse } from './rpc.ts'
+export type { RpcPrincipal, RpcRequest, RpcResponse } from './rpc.ts'
 
 // ---- Message layer: the four wire full forms + carrier receipt ----
 export type {

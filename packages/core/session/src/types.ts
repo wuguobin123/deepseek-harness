@@ -21,6 +21,18 @@ export type { JsonValue } from './json.ts'
 /** Identifies one session in the store (and its persistence artifacts). */
 export type SessionId = Branded<'SessionId'>
 
+/** Identifies the account that owns a session. */
+export type SessionOwnerId = Branded<'SessionOwnerId'>
+
+/**
+ * Brand an account owner id without importing the account capability.
+ * @param id - raw account identity validated by the account provider.
+ * @returns The same string branded for Session ownership.
+ */
+export function SessionOwnerId(id: string): SessionOwnerId {
+  return id as SessionOwnerId
+}
+
 /**
  * Brand a string as a {@link SessionId}.
  * @param id - the raw session id string.
@@ -34,8 +46,9 @@ export function SessionId(id: string): SessionId {
  * The on-disk session format version, stamped into every newly-written {@link SessionHeader}
  * and enforced by every persistence backend on load. The single source of truth for the
  * version — write sites and the load-time check all read it.
- * While the harness is unreleased it is pinned at `0`: no compatibility is
- * implied, incompatible logs are rejected, and no migration is provided.
+ * V1 adds the optional account owner field. While the harness is unreleased,
+ * no compatibility is implied: incompatible logs are rejected and no
+ * migration is provided.
  *
  * The version is a single monotonic integer with no major/minor split. Whether
  * a bump is needed is decided by what the WRITER emits, never by what a newer
@@ -53,7 +66,7 @@ export function SessionId(id: string): SessionId {
  * recorded in the session-log-version-mechanism Agent Note
  * (`.agents/notes/implemented/architecture/2026-08-10-session-log-version-mechanism.md`).
  */
-export const SESSION_FORMAT_VERSION = 0
+export const SESSION_FORMAT_VERSION = 1
 
 /**
  * Immutable validated storage metadata, kept outside the conversation event log.
@@ -67,6 +80,8 @@ export interface SessionHeader {
   readonly version: number
   /** The session's id (mirrors the {@link Session}'s id). */
   readonly id: SessionId
+  /** Account owner, absent for local single-user compositions. */
+  readonly ownerId?: SessionOwnerId
   /** Non-negative safe-integer Unix epoch milliseconds when the session was created. */
   readonly createdAt: number
   /** Absolute working directory the session was created in (if any). */
@@ -118,6 +133,8 @@ export interface CreateSessionOptions {
     readonly origin?: 'subagent'
     readonly delegationDepth?: number
     readonly agentPreset?: string
+    /** Account owner copied into durable session metadata. */
+    readonly ownerId?: SessionOwnerId
   }
 }
 

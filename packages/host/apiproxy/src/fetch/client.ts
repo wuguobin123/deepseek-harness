@@ -34,6 +34,7 @@ import {
 import {
   workspaceArchiveSessionValueSchema,
   workspaceCreateValueSchema,
+  workspaceImportDirectoryValueSchema,
   workspaceDeleteValueSchema,
   workspaceInsertBeforeValueSchema,
   workspaceInsertSessionBeforeValueSchema,
@@ -70,6 +71,7 @@ import {
 import {
   accountEmailCodeValueSchema, accountSigninValueSchema, accountSignoutValueSchema,
   accountSignupValueSchema, accountStateValueSchema,
+  accountInvitesCreateValueSchema, accountInvitesListValueSchema, accountInvitesRotateValueSchema,
 } from '../api/account.schema.ts'
 import {
   accountWalletCreditValueSchema, accountWalletDebitValueSchema, accountWalletGetValueSchema,
@@ -79,9 +81,15 @@ import {
 import {
   accountModelKeysListValueSchema, accountModelKeysProvisionValueSchema, accountModelKeysRevokeValueSchema,
 } from '../api/model-keys.schema.ts'
+import { accountCustomModelsCreateValueSchema, accountCustomModelsListValueSchema, accountCustomModelsRemoveValueSchema } from '../api/custom-models.schema.ts'
 import {
   artifactListValueSchema, artifactReadValueSchema, artifactRemoveValueSchema,
 } from '../api/artifacts.schema.ts'
+import {
+  userContextListValueSchema, userContextGetValueSchema,
+  userContextSetValueSchema, userContextDeleteValueSchema,
+} from '../api/user-context.schema.ts'
+import { accountPluginsListValueSchema, accountPluginsInstallValueSchema, accountPluginsUninstallValueSchema } from '../api/account-plugins.schema.ts'
 
 /**
  * Client consumption face of the contract (shape a): same domain tree as ApiProxy, but unary
@@ -130,6 +138,7 @@ export interface IApiClient {
   workspace: {
     list(payload: RequestPayload<'workspace.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.list'>>>
     create(payload: RequestPayload<'workspace.create'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.create'>>>
+    importDirectory(payload: RequestPayload<'workspace.importDirectory'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.importDirectory'>>>
     rename(payload: RequestPayload<'workspace.rename'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.rename'>>>
     delete(payload: RequestPayload<'workspace.delete'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.delete'>>>
     insertBefore(payload: RequestPayload<'workspace.insertBefore'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.insertBefore'>>>
@@ -176,15 +185,20 @@ export interface IApiClient {
     models(payload: RequestPayload<'llm.models'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'llm.models'>>>
     discoverModels(payload: RequestPayload<'llm.discoverModels'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'llm.discoverModels'>>>
   }
-  /** workbuddy multi-user account seam: signup / signin / signout / state / emailCode. */
+  /** xiaowei multi-user account seam: signup / signin / signout / state / emailCode. */
   account: {
     signup(payload: RequestPayload<'account.signup'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.signup'>>>
     emailCode(payload: RequestPayload<'account.emailCode'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.emailCode'>>>
     signin(payload: RequestPayload<'account.signin'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.signin'>>>
     signout(payload: RequestPayload<'account.signout'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.signout'>>>
     state(payload: RequestPayload<'account.state'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.state'>>>
+    invites: {
+      create(payload: RequestPayload<'account.invites.create'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.invites.create'>>>
+      list(payload: RequestPayload<'account.invites.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.invites.list'>>>
+      rotate(payload: RequestPayload<'account.invites.rotate'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.invites.rotate'>>>
+    }
   }
-  /** workbuddy wallet: get / credit / debit / setQuota / refreshDaily / grantWelcomeBonus / listLedger. */
+  /** xiaowei wallet: get / credit / debit / setQuota / refreshDaily / grantWelcomeBonus / listLedger. */
   wallet: {
     get(payload: RequestPayload<'account.wallet.get'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.wallet.get'>>>
     credit(payload: RequestPayload<'account.wallet.credit'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.wallet.credit'>>>
@@ -194,17 +208,33 @@ export interface IApiClient {
     grantWelcomeBonus(payload: RequestPayload<'account.wallet.grantWelcomeBonus'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.wallet.grantWelcomeBonus'>>>
     listLedger(payload: RequestPayload<'account.wallet.listLedger'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.wallet.listLedger'>>>
   }
-  /** workbuddy per-user model keys: provision / list / revoke. */
+  /** xiaowei per-user model keys: provision / list / revoke. */
   modelKeys: {
     provision(payload: RequestPayload<'account.modelKeys.provision'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.modelKeys.provision'>>>
     list(payload: RequestPayload<'account.modelKeys.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.modelKeys.list'>>>
     revoke(payload: RequestPayload<'account.modelKeys.revoke'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.modelKeys.revoke'>>>
   }
-  /** workbuddy durable artifact registry: list / read / remove. */
+  customModels: {
+    create(payload: RequestPayload<'account.customModels.create'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.customModels.create'>>>
+    list(payload: RequestPayload<'account.customModels.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.customModels.list'>>>
+    remove(payload: RequestPayload<'account.customModels.remove'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.customModels.remove'>>>
+  }
+  /** xiaowei durable artifact registry: list / read / remove. */
   artifactRegistry: {
     list(payload: RequestPayload<'artifact.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'artifact.list'>>>
     read(payload: RequestPayload<'artifact.read'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'artifact.read'>>>
     remove(payload: RequestPayload<'artifact.remove'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'artifact.remove'>>>
+  }
+  userContext: {
+    list(payload: RequestPayload<'userContext.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'userContext.list'>>>
+    get(payload: RequestPayload<'userContext.get'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'userContext.get'>>>
+    set(payload: RequestPayload<'userContext.set'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'userContext.set'>>>
+    delete(payload: RequestPayload<'userContext.delete'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'userContext.delete'>>>
+  }
+  accountPlugins: {
+    list(payload: RequestPayload<'account.plugins.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.plugins.list'>>>
+    install(payload: RequestPayload<'account.plugins.install'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.plugins.install'>>>
+    uninstall(payload: RequestPayload<'account.plugins.uninstall'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.plugins.uninstall'>>>
   }
   /** client-response passthrough (rpcId is a backfill of the server-request's id — never minted here). */
   respond(message: ClientResponse, signal?: AbortSignal): Promise<RpcReceipt>
@@ -238,6 +268,7 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
   'host.openPath': hostOpenPathValueSchema,
   'workspace.list': workspaceListValueSchema,
   'workspace.create': workspaceCreateValueSchema,
+  'workspace.importDirectory': workspaceImportDirectoryValueSchema,
   'workspace.rename': workspaceRenameValueSchema,
   'workspace.delete': workspaceDeleteValueSchema,
   'workspace.insertBefore': workspaceInsertBeforeValueSchema,
@@ -267,9 +298,12 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
   'llm.providers': llmProvidersValueSchema,
   'llm.models': llmModelsValueSchema,
   'llm.discoverModels': llmDiscoverModelsValueSchema,
-  // ---- workbuddy multi-user account seam ----
+  // ---- xiaowei multi-user account seam ----
   'account.signup': accountSignupValueSchema,
   'account.emailCode': accountEmailCodeValueSchema,
+  'account.invites.create': accountInvitesCreateValueSchema,
+  'account.invites.list': accountInvitesListValueSchema,
+  'account.invites.rotate': accountInvitesRotateValueSchema,
   'account.signin': accountSigninValueSchema,
   'account.signout': accountSignoutValueSchema,
   'account.state': accountStateValueSchema,
@@ -283,9 +317,19 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
   'account.modelKeys.provision': accountModelKeysProvisionValueSchema,
   'account.modelKeys.list': accountModelKeysListValueSchema,
   'account.modelKeys.revoke': accountModelKeysRevokeValueSchema,
+  'account.customModels.create': accountCustomModelsCreateValueSchema,
+  'account.customModels.list': accountCustomModelsListValueSchema,
+  'account.customModels.remove': accountCustomModelsRemoveValueSchema,
   'artifact.list': artifactListValueSchema,
   'artifact.read': artifactReadValueSchema,
   'artifact.remove': artifactRemoveValueSchema,
+  'userContext.list': userContextListValueSchema,
+  'userContext.get': userContextGetValueSchema,
+  'userContext.set': userContextSetValueSchema,
+  'userContext.delete': userContextDeleteValueSchema,
+  'account.plugins.list': accountPluginsListValueSchema,
+  'account.plugins.install': accountPluginsInstallValueSchema,
+  'account.plugins.uninstall': accountPluginsUninstallValueSchema,
 }
 
 /** Default timeout for bounded unary calls (rpc-compare 2026-07-19: a hung host must not leave callers pending forever). */
@@ -296,6 +340,13 @@ type UnaryTimeoutPolicy = 'default' | 'caller-signal-only'
 
 /** URL base for in-process handler injection (fake authority, opencode precedent). */
 const INTERNAL_BASE = 'http://dsh.internal'
+
+/** Redact write-only secrets before an outgoing request reaches diagnostics observers. */
+function observableClientRequest(message: ClientRequest): ClientRequest {
+  if (message.method !== 'account.customModels.create') return message
+  const payload = message.payload as RequestPayload<'account.customModels.create'>
+  return { ...message, payload: { ...payload, apiKey: '[redacted]' } }
+}
 
 /**
  * Abstract fetch-carrier client. Subclasses supply the transport (doFetch) and may refine the
@@ -401,7 +452,7 @@ export abstract class AbstractApiClient implements IApiClient {
     timeoutPolicy: UnaryTimeoutPolicy = 'default',
   ): Promise<RpcResponse<ResponseValue<K>>> {
     const message: ClientRequest = { type: 'client-request', rpcId: this.mintRpcId(), method, payload }
-    this.onEnvelope(message)
+    this.onEnvelope(observableClientRequest(message))
     const response = await this.postJson(`/api/${method}`, message, signal, timeoutPolicy)
     const full = serverResponseSchema.parse(await response.json())
     this.onEnvelope(full)
@@ -510,6 +561,7 @@ export abstract class AbstractApiClient implements IApiClient {
   readonly workspace: IApiClient['workspace'] = {
     list: (payload, signal) => this.callUnary('workspace.list', payload, signal),
     create: (payload, signal) => this.callUnary('workspace.create', payload, signal),
+    importDirectory: (payload, signal) => this.callUnary('workspace.importDirectory', payload, signal),
     rename: (payload, signal) => this.callUnary('workspace.rename', payload, signal),
     delete: (payload, signal) => this.callUnary('workspace.delete', payload, signal),
     insertBefore: (payload, signal) => this.callUnary('workspace.insertBefore', payload, signal),
@@ -567,9 +619,20 @@ export abstract class AbstractApiClient implements IApiClient {
   readonly account: IApiClient['account'] = {
     signup: (payload, signal) => this.callUnary('account.signup', payload, signal),
     emailCode: (payload, signal) => this.callUnary('account.emailCode', payload, signal, 'caller-signal-only'),
+    invites: {
+      create: (payload, signal) => this.callUnary('account.invites.create', payload, signal),
+      list: (payload, signal) => this.callUnary('account.invites.list', payload, signal),
+      rotate: (payload, signal) => this.callUnary('account.invites.rotate', payload, signal),
+    },
     signin: (payload, signal) => this.callUnary('account.signin', payload, signal),
     signout: (payload, signal) => this.callUnary('account.signout', payload, signal),
     state: (payload, signal) => this.callUnary('account.state', payload, signal),
+  }
+
+  readonly accountPlugins: IApiClient['accountPlugins'] = {
+    list: (payload, signal) => this.callUnary('account.plugins.list', payload, signal),
+    install: (payload, signal) => this.callUnary('account.plugins.install', payload, signal),
+    uninstall: (payload, signal) => this.callUnary('account.plugins.uninstall', payload, signal),
   }
 
   readonly wallet: IApiClient['wallet'] = {
@@ -587,11 +650,23 @@ export abstract class AbstractApiClient implements IApiClient {
     list: (payload, signal) => this.callUnary('account.modelKeys.list', payload, signal),
     revoke: (payload, signal) => this.callUnary('account.modelKeys.revoke', payload, signal),
   }
+  readonly customModels: IApiClient['customModels'] = {
+    create: (payload, signal) => this.callUnary('account.customModels.create', payload, signal),
+    list: (payload, signal) => this.callUnary('account.customModels.list', payload, signal),
+    remove: (payload, signal) => this.callUnary('account.customModels.remove', payload, signal),
+  }
 
   readonly artifactRegistry: IApiClient['artifactRegistry'] = {
     list: (payload, signal) => this.callUnary('artifact.list', payload, signal),
     read: (payload, signal) => this.callUnary('artifact.read', payload, signal),
     remove: (payload, signal) => this.callUnary('artifact.remove', payload, signal),
+  }
+
+  readonly userContext: IApiClient['userContext'] = {
+    list: (payload, signal) => this.callUnary('userContext.list', payload, signal),
+    get: (payload, signal) => this.callUnary('userContext.get', payload, signal),
+    set: (payload, signal) => this.callUnary('userContext.set', payload, signal),
+    delete: (payload, signal) => this.callUnary('userContext.delete', payload, signal),
   }
 
   readonly events: IApiClient['events'] = {

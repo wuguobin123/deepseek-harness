@@ -4,6 +4,10 @@
   // node types (packages that need them override locally).
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
+    // Keep client analyzers on referenced declaration outputs. Loading the
+    // referenced host sources would merge host Context services into client
+    // Context (for example SessionStore over the browser ISessions face).
+    "disableSourceOfProjectReferenceRedirect": true,
     "jsx": "react-jsx",
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "typeRoots": ["./scripts/types", "./node_modules/@types"],

@@ -9,7 +9,7 @@
  * menu in between; the flow and its error dialog live in WorkspacePicker
  * (same package — direct composition, no slot between them).
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
   Button, IconCloseFill14, IconPersonalizationOutline16,
@@ -329,6 +329,11 @@ function SessionTree({
     }),
     [list, orderedWorkspaces, archivedSessionIds, expandedGroups, sessionOrderByAccount],
   )
+  const displayGroups = useMemo(() => [...groups].sort((a, b) => {
+    const location = (id: string | undefined): number => id?.startsWith('dsh:local:') ? 0 : id?.startsWith('dsh:cloud:') ? 1 : 2
+    return location((a.workspaceId ?? ungroupedSessionIds[0]) as string | undefined)
+      - location((b.workspaceId ?? ungroupedSessionIds[0]) as string | undefined)
+  }), [groups, ungroupedSessionIds])
   const now = Date.now()
   const commitSessionDrag = (activeDrag: DragState, over: NonNullable<DragState['over']>): void => {
     if (sessionDropCommitted.current) return
@@ -365,14 +370,21 @@ function SessionTree({
     if (workspaceDropCommitted.current) return
     workspaceDropCommitted.current = true
     setWorkspaceDrag(null)
-    const rowIndex = workspaces.findIndex(workspace => workspace.workspaceId === over.id)
+    const source = workspaces.find(workspace => workspace.workspaceId === activeDrag.workspaceId)
+    const target = workspaces.find(workspace => workspace.workspaceId === over.id)
+    if (source === undefined || target === undefined) return
+    const sourceLocal = String(source?.workspaceId).startsWith('dsh:local:')
+    const targetLocal = String(target.workspaceId).startsWith('dsh:local:')
+    if (sourceLocal !== targetLocal) return
+    const sameHost = workspaces.filter(workspace => String(workspace.workspaceId).startsWith('dsh:local:') === sourceLocal)
+    const rowIndex = sameHost.findIndex(workspace => workspace.workspaceId === over.id)
     if (rowIndex === -1) return
-    const anchor = over.half === 'before' ? over.id : workspaces[rowIndex + 1]?.workspaceId
+    const anchor = over.half === 'before' ? over.id : sameHost[rowIndex + 1]?.workspaceId
     if (anchor === activeDrag.workspaceId) return
-    const sourceIndex = workspaces.findIndex(workspace => workspace.workspaceId === activeDrag.workspaceId)
+    const sourceIndex = sameHost.findIndex(workspace => workspace.workspaceId === activeDrag.workspaceId)
     const anchorIndex = anchor === undefined
-      ? workspaces.length
-      : workspaces.findIndex(workspace => workspace.workspaceId === anchor)
+      ? sameHost.length
+      : sameHost.findIndex(workspace => workspace.workspaceId === anchor)
     if (sourceIndex !== -1 && (anchorIndex === sourceIndex || anchorIndex === sourceIndex + 1)) return
     insertWorkspaceBefore(activeDrag.workspaceId, anchor).catch((reason: unknown) => {
       console.warn('workspace reorder rejected:', reason)
@@ -393,7 +405,8 @@ function SessionTree({
         {groups.length === 0 && (
           <div className={css.empty}>{t('empty.none')}</div>
         )}
-        {groups.map((group) => {
+        {displayGroups.map((group, groupIndex) => {
+          const location = String(group.workspaceId ?? ungroupedSessionIds[0]).startsWith('dsh:local:') ? 'local' : 'cloud'
           const workspaceId = group.workspaceId
           const workspaceMarker = workspaceId !== undefined && workspaceDrag?.over?.id === workspaceId
             ? workspaceDrag.over.half
@@ -426,117 +439,119 @@ function SessionTree({
               commitWorkspaceDrag(workspaceDrag, { id: workspaceId, half })
             }
           return (
-          // Group section: header row + expanded top-level session rows. The
-          // inter-group breathing room is the section's own margin
-          // (WorkspaceBrowser.module.css).
-            <div
-              key={group.key}
-              className={clsx(
-                css.groupSection,
-                workspaceMarker === 'before' && css.workspaceDropBefore,
-                workspaceMarker === 'after' && css.workspaceDropAfter,
+            <Fragment key={group.key}>
+              {(groupIndex === 0 || (String(displayGroups[groupIndex - 1]?.workspaceId ?? ungroupedSessionIds[0]).startsWith('dsh:local:') !== String(group.workspaceId ?? ungroupedSessionIds[0]).startsWith('dsh:local:'))) && (
+                <div className={css.sectionLabel} role="heading">{t(location === 'local' ? 'group.local' : 'group.cloud')}</div>
               )}
-              onDragOver={workspaceDrag === null || hoverWorkspace === undefined
-                ? undefined
-                : (e) => {
-                  e.preventDefault()
-                  e.dataTransfer.dropEffect = 'move'
-                  hoverWorkspace(workspaceGroupHalf(e))
-                }}
-              onDrop={workspaceDrag === null || dropWorkspace === undefined
-                ? undefined
-                : (e) => {
-                  e.preventDefault()
-                  dropWorkspace(workspaceGroupHalf(e))
-                }}
-            >
-              <ProjectRowItem
-                group={group}
-                home={home}
-                t={t}
-                onToggle={() => {
-                  if (group.expanded) {
-                    setExpandedSessionGroups(keys => keys.filter(key => key !== group.key))
-                  }
-                  setGroupExpanded(group.key, !group.expanded)
-                }}
-                onCreate={() => {
-                  if (group.workspaceId !== undefined) {
-                    setGroupExpanded(group.key, true)
-                    startSession(group.workspaceId)
-                  }
-                }}
-                drag={workspaceDragProps}
-                actions={group.workspaceId === undefined
+              {/* Group section spacing is owned by WorkspaceBrowser.module.css. */}
+              <div
+                className={clsx(
+                  css.groupSection,
+                  workspaceMarker === 'before' && css.workspaceDropBefore,
+                  workspaceMarker === 'after' && css.workspaceDropAfter,
+                )}
+                onDragOver={workspaceDrag === null || hoverWorkspace === undefined
                   ? undefined
-                  : {
-                    rename: () => {
-                    /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
-                      if (group.workspaceId !== undefined) onRenameRequest(group.workspaceId, group.label)
-                    },
-                    delete: () => {
-                    /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
-                      if (group.workspaceId !== undefined) onDeleteRequest(group.workspaceId, group.label)
-                    },
+                  : (e) => {
+                    e.preventDefault()
+                    e.dataTransfer.dropEffect = 'move'
+                    hoverWorkspace(workspaceGroupHalf(e))
                   }}
-              />
-              {(expandedSessionGroups.includes(group.key)
-                ? group.sessions
-                : group.sessions.slice(0, COLLAPSED_SESSION_LIMIT)
-              ).map((node) => {
-              // Session drag never leaves its group. Ungrouped writes only the
-              // browser-local account; real Workspaces may also write Host order.
-                const sameGroupDrag = drag !== null && drag.accountKey === group.key
-                const dragProps = {
-                  start: () => {
-                    sessionDropCommitted.current = false
-                    setDrag({ accountKey: group.key, sessionId: node.id, over: null })
-                  },
-                  active: sameGroupDrag,
-                  marker: sameGroupDrag && drag.over?.id === node.id ? drag.over.half : null,
-                  hover: (half: 'before' | 'after') => {
-                  /* v8 ignore next -- narrowing guard: Rows gates hover on `active`, which is false while the drag state is null. */
-                    setDrag(d => (d === null ? d : { ...d, over: { id: node.id, half } }))
-                  },
-                  drop: (half: 'before' | 'after') => {
-                  /* v8 ignore next -- narrowing guard: Rows gates drop on `active`, which is false while the drag state is null. */
-                    if (drag === null) return
-                    commitSessionDrag(drag, { id: node.id, half })
-                  },
-                  end: () => {
-                    if (drag?.over !== null && drag?.over !== undefined) commitSessionDrag(drag, drag.over)
-                    else setDrag(null)
-                    sessionDropCommitted.current = false
-                  },
-                }
-                return (
-                  <SessionNodeItem
-                    key={node.id}
-                    node={node}
-                    currentId={current}
-                    now={now}
-                    onOpen={open}
-                    onRename={onSessionRename}
-                    onFork={forkSession}
-                    onArchive={onSessionArchive}
-                    drag={dragProps}
-                    t={t}
-                  />
-                )
-              })}
-              {group.sessions.length > COLLAPSED_SESSION_LIMIT && (
-                <button
-                  type="button"
-                  className={css.sessionOverflowButton}
-                  aria-expanded={expandedSessionGroups.includes(group.key)}
-                  onClick={() => { setExpandedSessionGroups(keys => toggled(keys, group.key)) }}
-                >
-                  {expandedSessionGroups.includes(group.key)
-                    ? t('sessions.collapse')
-                    : t('sessions.expand', { n: group.sessions.length - COLLAPSED_SESSION_LIMIT })}
-                </button>
-              )}
-            </div>
+                onDrop={workspaceDrag === null || dropWorkspace === undefined
+                  ? undefined
+                  : (e) => {
+                    e.preventDefault()
+                    dropWorkspace(workspaceGroupHalf(e))
+                  }}
+              >
+                <ProjectRowItem
+                  group={group}
+                  home={home}
+                  t={t}
+                  onToggle={() => {
+                    if (group.expanded) {
+                      setExpandedSessionGroups(keys => keys.filter(key => key !== group.key))
+                    }
+                    setGroupExpanded(group.key, !group.expanded)
+                  }}
+                  onCreate={() => {
+                    if (group.workspaceId !== undefined) {
+                      setGroupExpanded(group.key, true)
+                      startSession(group.workspaceId)
+                    }
+                  }}
+                  drag={workspaceDragProps}
+                  actions={group.workspaceId === undefined
+                    ? undefined
+                    : {
+                      rename: () => {
+                        /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
+                        if (group.workspaceId !== undefined) onRenameRequest(group.workspaceId, group.label)
+                      },
+                      delete: () => {
+                        /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
+                        if (group.workspaceId !== undefined) onDeleteRequest(group.workspaceId, group.label)
+                      },
+                    }}
+                />
+                {(expandedSessionGroups.includes(group.key)
+                  ? group.sessions
+                  : group.sessions.slice(0, COLLAPSED_SESSION_LIMIT)
+                ).map((node) => {
+                  // Session drag never leaves its group. Ungrouped writes only the
+                  // browser-local account; real Workspaces may also write Host order.
+                  const sameGroupDrag = drag !== null && drag.accountKey === group.key
+                  const dragProps = {
+                    start: () => {
+                      sessionDropCommitted.current = false
+                      setDrag({ accountKey: group.key, sessionId: node.id, over: null })
+                    },
+                    active: sameGroupDrag,
+                    marker: sameGroupDrag && drag.over?.id === node.id ? drag.over.half : null,
+                    hover: (half: 'before' | 'after') => {
+                      /* v8 ignore next -- narrowing guard: Rows gates hover on `active`, which is false while the drag state is null. */
+                      setDrag(d => (d === null ? d : { ...d, over: { id: node.id, half } }))
+                    },
+                    drop: (half: 'before' | 'after') => {
+                      /* v8 ignore next -- narrowing guard: Rows gates drop on `active`, which is false while the drag state is null. */
+                      if (drag === null) return
+                      commitSessionDrag(drag, { id: node.id, half })
+                    },
+                    end: () => {
+                      if (drag?.over !== null && drag?.over !== undefined) commitSessionDrag(drag, drag.over)
+                      else setDrag(null)
+                      sessionDropCommitted.current = false
+                    },
+                  }
+                  return (
+                    <SessionNodeItem
+                      key={node.id}
+                      node={node}
+                      currentId={current}
+                      now={now}
+                      onOpen={open}
+                      onRename={onSessionRename}
+                      onFork={forkSession}
+                      onArchive={onSessionArchive}
+                      drag={dragProps}
+                      t={t}
+                    />
+                  )
+                })}
+                {group.sessions.length > COLLAPSED_SESSION_LIMIT && (
+                  <button
+                    type="button"
+                    className={css.sessionOverflowButton}
+                    aria-expanded={expandedSessionGroups.includes(group.key)}
+                    onClick={() => { setExpandedSessionGroups(keys => toggled(keys, group.key)) }}
+                  >
+                    {expandedSessionGroups.includes(group.key)
+                      ? t('sessions.collapse')
+                      : t('sessions.expand', { n: group.sessions.length - COLLAPSED_SESSION_LIMIT })}
+                  </button>
+                )}
+              </div>
+            </Fragment>
           )
         })}
       </div>

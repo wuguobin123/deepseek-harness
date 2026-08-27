@@ -19,9 +19,12 @@ A shipping web-tool deployment sets the provider backstop above the tool budget,
 - Accepts only `http:` and `https:` URLs; rejects credentials in URLs (`WEB_BLOCKED_URL`) and over-long/malformed URLs (`WEB_INVALID_URL`).
 - Enforces a max URL length, response byte cap (`WEB_FETCH_TOO_LARGE`), decoded body character cap, timeout (`WEB_FETCH_TIMEOUT`), and redirect hop cap.
 - Propagates the caller's abort signal (`WEB_ABORTED`) into the network request and the streaming read.
+- Retries transport failures within the single provider deadline, rotating the already validated address set between attempts; HTTP responses and safety failures are never retried.
 - Follows only **same-origin** redirects; a cross-origin redirect fails with `WEB_REDIRECT_BLOCKED`, requiring a fresh tool call (the model of Claude Code's WebFetch).
 - Sends an explicit product `User-Agent`, never a browser disguise.
 - Rejects unsupported (e.g. binary) content types with `WEB_UNSUPPORTED_CONTENT_TYPE`.
+- Resolves every initial and same-origin redirect hostname as A/AAAA records, rejects any non-public answer (`WEB_BLOCKED_URL`), and pins the verified address for the connection to prevent DNS rebinding.
+- Maps public GitHub repository roots to the anonymous GitHub README API and GitHub or `raw.githubusercontent.com` file URLs to the anonymous GitHub Contents API, while retaining the submitted URL in the result. This uses GitHub's raw response media type, keeps the same destination, timeout, size, and content-type checks, and lets an API 403 enter an explicitly configured fetch fallback.
 
 ## Config
 
@@ -32,9 +35,10 @@ A shipping web-tool deployment sets the provider backstop above the tool budget,
 | `maxBodyChars` | `100_000` | Maximum decoded body length in characters. |
 | `timeoutMs` | `30_000` | Fetch timeout within Node's timer range — a resource backstop for direct `ctx.web.fetch()` callers, not the model-facing tool-call budget (that is `dsh-tool-call-timeout-policy`). |
 | `maxRedirects` | `5` | Maximum same-origin redirect hops (`0` follows none). |
+| `maxAttempts` | `3` | Maximum transport attempts within the single `timeoutMs` deadline. |
 | `userAgent` | `deepseek-harness/…` | `User-Agent` header. |
 
-The numeric limits are validated at plugin construction: every cap except `maxRedirects` must be a positive finite number, and `maxRedirects` must be a non-negative integer. An invalid value throws rather than silently constructing a provider with nonsensical limits.
+The numeric limits are validated at plugin construction: byte, character, URL, and timeout caps must be positive finite numbers; `maxRedirects` must be a non-negative integer; and `maxAttempts` must be a positive integer. An invalid value throws rather than silently constructing a provider with nonsensical limits.
 
 ## Model Experience
 
@@ -46,6 +50,5 @@ No direct invalidation; the named consumer owns any request-prefix changes.
 
 ## Known Limitations and Deferred Work
 
-- **SSRF / private-network protection is deferred** — no blocking of private, loopback, link-local, multicast, or otherwise non-public destinations, no DNS-resolve-then-validate, no per-hop re-validation (see [the web capability seam Agent Note](../../../.agents/notes/implemented/architecture/2026-06-24-web-capability-seam.md)). Until it lands, this provider is an SSRF primitive and **must not be enabled** in a deployment that can reach sensitive internal network targets.
 - **Only textual content decodes** — html/xhtml and `text/*`-plus-JSON/XML families; a missing `Content-Type` or any binary type throws `WEB_UNSUPPORTED_CONTENT_TYPE`, and text-extractable PDF decoding is named deferred work.
 - **Charset comes only from the `Content-Type` header** (UTF-8 default) — an HTML `<meta charset>` declaration is ignored, and a declared-but-unrecognized charset label throws rather than falling back.

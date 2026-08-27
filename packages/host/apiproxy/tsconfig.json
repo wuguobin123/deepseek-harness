@@ -36,6 +36,9 @@
       "path": "../../llm/llm"
     },
     {
+      "path": "../../llm/account-inference"
+    },
+    {
       "path": "../../core/agent"
     },
     {
@@ -102,16 +105,7 @@
       "path": "../../util/native-command"
     },
     {
-      "path": "../../account/identity"
-    },
-    {
-      "path": "../../account/email-verification"
-    },
-    {
-      "path": "../../account/wallet"
-    },
-    {
-      "path": "../../account/model-keys"
+      "path": "../../account/api-provider"
     },
     {
       "path": "../../artifact/artifact"

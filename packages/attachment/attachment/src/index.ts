@@ -9,12 +9,15 @@ import type {
   RequestImageAttachment,
   SaveImageAttachment,
   StoredImageAttachment,
+  DocumentAttachmentRef, SaveDocumentAttachment, StoredDocumentAttachment,
+  DocumentAttachmentLimits,
 } from './types.ts'
 
 export { AttachmentId, ImageVariantId } from './brand.ts'
 export { AttachmentError, isImageAdmissionError } from './error.ts'
 export type { AttachmentErrorCode, ImageAdmissionErrorCode } from './error.ts'
 export { admitEncodedImages } from './admission.ts'
+export { admitEncodedDocuments } from './admission.ts'
 export type {
   AttachmentId as AttachmentIdType,
   EncodedImageAttachment,
@@ -25,6 +28,7 @@ export type {
   RequestImageAttachment,
   SaveImageAttachment,
   StoredImageAttachment,
+  DocumentAttachmentRef, SaveDocumentAttachment, StoredDocumentAttachment, DocumentMediaType, DocumentAttachmentLimits,
 } from './types.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -41,6 +45,13 @@ export abstract class AttachmentStore extends Service {
 
   /** Deployment-resolved image policy used by authoritative and fast-path validation. */
   abstract readonly imageLimits: ImageAttachmentLimits
+  /** Deployment-resolved PDF and Office upload policy; providers opt in with non-zero limits. */
+  readonly documentLimits: DocumentAttachmentLimits = Object.freeze({
+    maxDocumentBytes: 0,
+    maxDocumentsPerMessage: 0,
+    maxMessageDocumentBytes: 0,
+    mediaTypes: Object.freeze([]),
+  })
 
   /**
    * Validate one image without persisting it.
@@ -97,6 +108,50 @@ export abstract class AttachmentStore extends Service {
    * @returns the durable content-addressed normalized image reference.
    */
   abstract saveImage(input: SaveImageAttachment): Promise<ImageAttachmentRef>
+
+  /**
+   * Persist original document bytes after format admission.
+   * @param _input - verified document bytes and declaration.
+   * @returns the durable content-addressed reference.
+   */
+  saveDocument(_input: SaveDocumentAttachment): Promise<DocumentAttachmentRef> {
+    return Promise.reject(new AttachmentError(
+      'The mounted attachment provider cannot store documents.',
+      'ATTACHMENT_PROJECTION_UNSUPPORTED',
+    ))
+  }
+
+  /**
+   * Validate and durably commit one ordered document batch.
+   * @param inputs - decoded documents in owning-message order.
+   * @returns durable references in the same order.
+   */
+  async saveDocuments(inputs: readonly SaveDocumentAttachment[]): Promise<readonly DocumentAttachmentRef[]> {
+    if (inputs.length === 0) return []
+    const { maxDocumentsPerMessage, maxMessageDocumentBytes, mediaTypes } = this.documentLimits
+    if (inputs.length > maxDocumentsPerMessage) throw new AttachmentError('Document batch exceeds the configured count limit.', 'DOCUMENT_TOO_LARGE')
+    if (inputs.reduce((sum, input) => sum + input.data.byteLength, 0) > maxMessageDocumentBytes) throw new AttachmentError('Document batch exceeds the configured byte limit.', 'DOCUMENT_TOO_LARGE')
+    for (const input of inputs) {
+      if (input.data.byteLength > this.documentLimits.maxDocumentBytes) throw new AttachmentError('Document exceeds the configured byte limit.', 'DOCUMENT_TOO_LARGE')
+      if (!mediaTypes.includes(input.mediaType)) throw new AttachmentError(`Document type ${input.mediaType} is not accepted by this deployment.`, 'DOCUMENT_UNSUPPORTED')
+    }
+    const refs: DocumentAttachmentRef[] = []
+    for (const input of inputs) refs.push(await this.saveDocument(input))
+    return refs
+  }
+
+  /**
+   * Read and integrity-check a previously persisted document.
+   * @param _ref - durable reference recorded by a Session.
+   * @param _signal - optional cancellation for storage reads.
+   * @returns verified original document bytes.
+   */
+  readDocument(_ref: DocumentAttachmentRef, _signal?: AbortSignal): Promise<StoredDocumentAttachment> {
+    return Promise.reject(new AttachmentError(
+      'The mounted attachment provider cannot read documents.',
+      'ATTACHMENT_PROJECTION_UNSUPPORTED',
+    ))
+  }
 
   /**
    * Read one image and verify that bytes still match the recorded reference.

@@ -47,6 +47,22 @@ describe('local attachment service', () => {
     }
   })
 
+  it('keeps image storage available when the deployment omits document parsing', async () => {
+    const service = new LocalAttachmentStore(new Context(), { documents: false })
+    expect(service.documentLimits).toEqual({
+      maxDocumentBytes: 0,
+      maxDocumentsPerMessage: 0,
+      maxMessageDocumentBytes: 0,
+      mediaTypes: [],
+    })
+    await expect(service.saveDocument({
+      data: Uint8Array.of(1),
+      mediaType: 'application/pdf',
+      kind: 'pdf',
+      summary: 'disabled document fixture',
+    })).rejects.toMatchObject({ code: 'ATTACHMENT_PROJECTION_UNSUPPORTED' })
+  })
+
   it('saves and reads through the service boundary', async () => {
     const dshHome = await mkdtemp(join(tmpdir(), 'dsh-attachment-service-'))
     try {

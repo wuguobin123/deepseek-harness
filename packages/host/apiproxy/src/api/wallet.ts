@@ -1,6 +1,6 @@
 /**
  * Wallet domain contract — wire projection of `ctx.wallet` for the multi-user
- * workbuddy backend.
+ * xiaowei backend.
  *
  * The seam is one Service Definition (`WalletService` in
  * `@deepseek-ai/dsh-account-wallet`) plus six unary methods. Three of them
@@ -38,6 +38,7 @@ export type WalletLedgerReason =
   | 'debit'
   | 'set-quota'
   | 'refund'
+  | 'model-usage'
 
 /** Signed integer micros (1 CNY = 1_000_000 micros). The wire carries plain numbers. */
 export type AmountMicros = Branded<'AmountMicros'>

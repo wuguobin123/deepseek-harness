@@ -19,6 +19,8 @@ import type {
 import type {
   AssistantMetricDetail, TrajectoryCellKind, TrajectoryCellProps, TrajectorySourceBlock,
 } from './trajectory-record.ts'
+import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import type { NS } from './locales.ts'
 import { formatElapsedSeconds, trajectoryRecordId } from './trajectory-record.ts'
 import {
   groupTrajectoryVirtualRows, trajectoryVirtualRecordKey,
@@ -43,6 +45,12 @@ const KIND_LABEL: Record<TrajectoryCellKind, string> = {
   message: 'ASSISTANT',
   tool: 'TOOL',
   subtool: 'SUBTOOL',
+}
+function kindLabel(kind: TrajectoryCellKind, t?: TranslateNS<typeof NS>): string {
+  return t?.(`kind.${kind}`) ?? KIND_LABEL[kind]
+}
+function textLabel(t: TranslateNS<typeof NS> | undefined, key: Parameters<TranslateNS<typeof NS>>[0], fallback: string): string {
+  return t?.(key) ?? fallback
 }
 
 function ToolWrenchIcon(): ReactNode {
@@ -207,18 +215,18 @@ const TOOL_REQUEST_MAX_WIDTH = 480
 const DEFAULT_TOOL_REQUEST_SHARE = 0.36
 const DEFAULT_TOOL_REQUEST_OFFSET = 56
 const SYSTEM_PROMPT_TABS: readonly DetailTabItem[] = [
-  { id: 'system-prompt', label: 'System Prompt' },
-  { id: 'tools', label: 'Tools' },
+  { id: 'system-prompt', label: '系统提示词' },
+  { id: 'tools', label: '工具' },
 ]
 const SYSTEM_UPDATE_TABS: readonly DetailTabItem[] = [
-  { id: 'diff', label: 'Diff' },
+  { id: 'diff', label: '差异' },
   ...SYSTEM_PROMPT_TABS,
 ]
 const REQUEST_TABS: readonly DetailTabItem[] = [
-  { id: 'overview', label: 'Summary' },
-  { id: 'options', label: 'Options' },
-  { id: 'usage', label: 'Usage' },
-  { id: 'timing', label: 'Timing' },
+  { id: 'overview', label: '摘要' },
+  { id: 'options', label: '选项' },
+  { id: 'usage', label: '用量' },
+  { id: 'timing', label: '计时' },
 ]
 
 type TrajectorySplitStyle = CSSProperties & {
@@ -263,7 +271,7 @@ function formatDurationMs(milliseconds: number): string {
 }
 
 function formatStartedAt(timestamp: number | null): string {
-  if (timestamp === null || !Number.isFinite(timestamp)) return 'Not available'
+  if (timestamp === null || !Number.isFinite(timestamp)) return '不可用'
   const date = new Date(timestamp)
   const two = (value: number) => String(value).padStart(2, '0')
   const three = (value: number) => String(value).padStart(3, '0')
@@ -283,13 +291,13 @@ function clickSelectsText(target: Node): boolean {
 
 function StartedAtValue({ timestamp }: { timestamp: number | null }) {
   const [showUnix, setShowUnix] = useState(false)
-  if (timestamp === null || !Number.isFinite(timestamp)) return <dd>Not available</dd>
+  if (timestamp === null || !Number.isFinite(timestamp)) return <dd>不可用</dd>
   return (
     <dd>
       <button
         type="button"
         className={css.timestampToggle}
-        title={showUnix ? 'Show local time' : 'Show Unix timestamp'}
+        title={showUnix ? '显示本地时间' : '显示 Unix 时间戳'}
         onClick={(event) => {
           if (clickSelectsText(event.currentTarget)) return
           setShowUnix(current => !current)
@@ -302,49 +310,51 @@ function StartedAtValue({ timestamp }: { timestamp: number | null }) {
 }
 
 function totalTime(metrics: AssistantMetricDetail): string {
-  if (!metrics.timingRecorded) return 'Not recorded'
-  if (metrics.stepStartTime === null) return 'Step start unavailable'
-  if (metrics.completedTime === null) return 'Pending'
+  if (!metrics.timingRecorded) return '未记录'
+  if (metrics.stepStartTime === null) return '步骤开始时间不可用'
+  if (metrics.completedTime === null) return '进行中'
   return formatDurationMs(Math.max(0, metrics.completedTime - metrics.stepStartTime))
 }
 
 function ttft(metrics: AssistantMetricDetail): string {
-  if (!metrics.timingRecorded) return 'Not recorded'
-  if (metrics.stepStartTime === null) return 'Step start unavailable'
-  if (metrics.firstTokenTime === null) return 'First token unavailable'
+  if (!metrics.timingRecorded) return '未记录'
+  if (metrics.stepStartTime === null) return '步骤开始时间不可用'
+  if (metrics.firstTokenTime === null) return '首 Token 时间不可用'
   return formatDurationMs(Math.max(0, metrics.firstTokenTime - metrics.stepStartTime))
 }
 
 function generationTime(metrics: AssistantMetricDetail): string {
-  if (!metrics.timingRecorded || metrics.firstTokenTime === null) return 'First token unavailable'
-  if (metrics.completedTime === null) return 'Pending'
+  if (!metrics.timingRecorded || metrics.firstTokenTime === null) return '首 Token 时间不可用'
+  if (metrics.completedTime === null) return '进行中'
   return formatDurationMs(Math.max(0, metrics.completedTime - metrics.firstTokenTime))
 }
 
 function throughput(metrics: AssistantMetricDetail): string {
-  if (!metrics.usageProvided) return 'Usage unavailable'
-  if (metrics.outputTokens === null) return 'Output tokens unavailable'
-  if (!metrics.timingRecorded || metrics.firstTokenTime === null) return 'First token unavailable'
-  if (metrics.completedTime === null) return 'Pending'
+  if (!metrics.usageProvided) return '用量不可用'
+  if (metrics.outputTokens === null) return '输出 Token 不可用'
+  if (!metrics.timingRecorded || metrics.firstTokenTime === null) return '首 Token 时间不可用'
+  if (metrics.completedTime === null) return '进行中'
   const generationSeconds = (metrics.completedTime - metrics.firstTokenTime) / 1_000
-  if (generationSeconds <= 0) return 'Duration too short'
+  if (generationSeconds <= 0) return '时长过短'
   return `${(metrics.outputTokens / generationSeconds).toFixed(1)} tok/s`
 }
 
 function AssistantTimingPanel({ metrics }: { metrics: AssistantMetricDetail }) {
   return (
     <dl className={css.overview}>
-      <div><dt>Started</dt><StartedAtValue timestamp={metrics.stepStartTime} /></div>
-      <div><dt>Total duration</dt><dd>{totalTime(metrics)}</dd></div>
-      <div><dt>TTFT</dt><dd>{ttft(metrics)}</dd></div>
-      <div><dt>Generation</dt><dd>{generationTime(metrics)}</dd></div>
-      <div><dt>Throughput</dt><dd>{throughput(metrics)}</dd></div>
+      <div><dt>开始时间</dt><StartedAtValue timestamp={metrics.stepStartTime} /></div>
+      <div><dt>总时长</dt><dd>{totalTime(metrics)}</dd></div>
+      <div><dt>首 Token 延迟</dt><dd>{ttft(metrics)}</dd></div>
+      <div><dt>生成</dt><dd>{generationTime(metrics)}</dd></div>
+      <div><dt>吞吐量</dt><dd>{throughput(metrics)}</dd></div>
     </dl>
   )
 }
 
 /** Props for the trajectory ledger. */
 export interface TrajectoryTableProps {
+  /** Active locale translator for product-owned labels. */
+  t?: TranslateNS<typeof NS>
   /** Session-global request numbers for the request groups visible in this context. */
   requestNumbers?: readonly TrajectoryRequestNumber[]
   /** Grouped records in display order. */
@@ -510,8 +520,17 @@ function indexRequestBoundaries(records: readonly TableRecord[]): ReadonlyMap<st
   return boundaries
 }
 
-function sectionLabel(turn: number | null): string {
-  return turn === null ? 'Between turns' : `Turn ${turn}`
+function sectionLabel(turn: number | null, t?: TranslateNS<typeof NS>): string {
+  return turn === null
+    ? textLabel(t, 'common.betweenTurns', 'Between turns')
+    : `${textLabel(t, 'common.turn', 'Turn')} ${turn}`
+}
+function displayGroup(group: string, t?: TranslateNS<typeof NS>): string {
+  const step = /^Step (\d+)$/.exec(group)
+  if (step !== null) return `${textLabel(t, 'common.step', 'Step')} ${step[1]}`
+  const compaction = /^Compaction (\d+)$/.exec(group)
+  if (compaction !== null) return `${textLabel(t, 'common.compaction', 'Compaction')} ${compaction[1]}`
+  return group
 }
 
 function indexRequestNumbers(
@@ -561,8 +580,8 @@ function summarizeTurn(records: readonly TableRecord[]): string {
     record.cell.kind === 'tool' || record.cell.kind === 'subtool',
   ).length
   return [
-    `${steps} ${steps === 1 ? 'step' : 'steps'}`,
-    `${toolCalls} tool ${toolCalls === 1 ? 'call' : 'calls'}`,
+    `${steps} 个步骤`,
+    `${toolCalls} 个工具调用`,
   ].join(' · ')
 }
 
@@ -621,7 +640,7 @@ function summarizeAssistantTools(records: readonly TableRecord[]): string {
     return separator === -1 ? record.cell.text : record.cell.text.slice(0, separator)
   }).filter(name => name !== ''))]
   const count = records.length
-  const summary = `${count} tool ${count === 1 ? 'call' : 'calls'}`
+  const summary = `${count} 个工具调用`
   return names.length > 0 ? `${summary} · ${names.join(', ')}` : summary
 }
 
@@ -674,31 +693,31 @@ function stateOf(record: TableRecord): RecordState {
   return 'complete'
 }
 
-function statusLabel(state: RecordState): string {
-  if (state === 'error') return 'Failed'
-  if (state === 'running') return 'Pending'
-  return 'Completed'
+function statusLabel(state: RecordState, t?: TranslateNS<typeof NS>): string {
+  if (state === 'error') return textLabel(t, 'common.failed', 'Failed')
+  if (state === 'running') return textLabel(t, 'common.pending', 'Pending')
+  return textLabel(t, 'common.completed', 'Completed')
 }
 
-function TokenRows({ cell }: { cell: TrajectoryCellProps }) {
+function TokenRows({ cell, t }: { cell: TrajectoryCellProps; t?: TranslateNS<typeof NS> | undefined }) {
   const content = cell.output !== undefined && cell.think !== undefined
     ? Math.max(0, cell.output - cell.think)
     : undefined
   return (
     <>
       <div>
-        <dt>Tokens</dt>
+        <dt>{textLabel(t, 'common.tokens', 'Tokens')}</dt>
         <dd>{cell.output === undefined ? '—' : `${cell.output} tok`}</dd>
       </div>
       {cell.think !== undefined && (
         <div className={css.requestTokenDetail}>
-          <dt>Reasoning</dt>
+          <dt>{textLabel(t, 'common.reasoning', 'Reasoning')}</dt>
           <dd>{cell.think} tok</dd>
         </div>
       )}
       {content !== undefined && (
         <div className={css.requestTokenDetail}>
-          <dt>Content</dt>
+          <dt>{textLabel(t, 'common.content', 'Content')}</dt>
           <dd>{content} tok</dd>
         </div>
       )}
@@ -716,7 +735,7 @@ function inputTotal(usage: TrajectoryUsage): number | undefined {
 }
 
 function UsageRows({ usage }: { usage: TrajectoryUsage | undefined }) {
-  if (usage === undefined) return <p className={css.noPayload}>Usage not reported</p>
+  if (usage === undefined) return <p className={css.noPayload}>未报告用量</p>
   const totalInput = inputTotal(usage)
   const otherOutput = usage.output !== undefined && usage.reasoning !== undefined
     ? usage.output - usage.reasoning
@@ -724,38 +743,38 @@ function UsageRows({ usage }: { usage: TrajectoryUsage | undefined }) {
   return (
     <dl className={css.overview}>
       {totalInput !== undefined && (
-        <div><dt>Input</dt><dd>{totalInput} tok</dd></div>
+        <div><dt>输入</dt><dd>{totalInput} tok</dd></div>
       )}
       {usage.cacheRead !== undefined && (
         <div className={css.requestTokenDetail}>
-          <dt>Cached</dt>
+          <dt>缓存读取</dt>
           <dd>{usage.cacheRead} tok</dd>
         </div>
       )}
       {usage.cacheWrite !== undefined && (
         <div className={css.requestTokenDetail}>
-          <dt>Cache created</dt>
+          <dt>缓存写入</dt>
           <dd>{usage.cacheWrite} tok</dd>
         </div>
       )}
       {usage.input !== undefined && (
         <div className={css.requestTokenDetail}>
-          <dt>Other</dt>
+          <dt>其他</dt>
           <dd>{usage.input} tok</dd>
         </div>
       )}
       {usage.output !== undefined && (
-        <div><dt>Output</dt><dd>{usage.output} tok</dd></div>
+        <div><dt>输出</dt><dd>{usage.output} tok</dd></div>
       )}
       {usage.reasoning !== undefined && (
         <div className={css.requestTokenDetail}>
-          <dt>Reasoning</dt>
+          <dt>推理</dt>
           <dd>{usage.reasoning} tok</dd>
         </div>
       )}
       {otherOutput !== undefined && (
         <div className={css.requestTokenDetail}>
-          <dt>Content</dt>
+          <dt>内容</dt>
           <dd>{otherOutput} tok</dd>
         </div>
       )}
@@ -773,11 +792,11 @@ function RequestUsagePanel({
   return (
     <div className={css.usagePanel}>
       <section className={css.usageGroup}>
-        <h4 className={css.usageHeading}>This request</h4>
+        <h4 className={css.usageHeading}>本次请求</h4>
         <UsageRows usage={usage} />
       </section>
       <section className={css.usageGroup}>
-        <h4 className={css.usageHeading}>Session cumulative</h4>
+        <h4 className={css.usageHeading}>会话累计</h4>
         <UsageRows usage={cumulative} />
       </section>
     </div>
@@ -792,12 +811,12 @@ function RequestOptions({
   preview?: boolean
 }) {
   if (options === undefined) {
-    return <p className={css.noPayload}>Options not recorded</p>
+    return <p className={css.noPayload}>未记录选项</p>
   }
   return (
     <JsonTree
       data={options}
-      label="Request options JSON"
+      label="请求选项 JSON"
       className={preview ? css.jsonPreview : css.jsonPayload}
     />
   )
@@ -805,37 +824,37 @@ function RequestOptions({
 
 function messageSourceLabel(source: unknown): string {
   if (typeof source !== 'object' || source === null || Array.isArray(source)) {
-    return 'Unknown'
+    return '未知'
   }
   const properties = source as Record<string, unknown>
   const kind = properties.kind
-  if (kind === 'user') return 'User'
+  if (kind === 'user') return '用户'
   if (kind === 'plugin') {
     const plugin = properties.plugin
     return typeof plugin === 'string' && plugin !== ''
-      ? `Plugin · ${plugin}`
-      : 'Plugin'
+      ? `插件 · ${plugin}`
+      : '插件'
   }
   if (kind === 'goal') {
     const round = properties.round
     return typeof round === 'number' && round > 0
-      ? `Goal · Round ${round}`
-      : 'Goal'
+      ? `目标 · 第 ${round} 轮`
+      : '目标'
   }
-  if (typeof kind !== 'string' || kind === '') return 'Unknown'
+  if (typeof kind !== 'string' || kind === '') return '未知'
   return `${kind[0]?.toUpperCase() ?? ''}${kind.slice(1)}`
 }
 
 function MessageSource({ record }: { record: TableRecord }) {
   const source = record.cell.messageSource
-  if (source === undefined) return <p className={css.noPayload}>Source not recorded</p>
+  if (source === undefined) return <p className={css.noPayload}>未记录来源</p>
   const data = typeof source === 'object' && source !== null
     ? source
     : { value: source }
   return (
     <JsonTree
       data={data}
-      label="Message source JSON"
+      label="消息来源 JSON"
       className={css.jsonPayload}
     />
   )
@@ -891,7 +910,7 @@ function markdownSource(record: TableRecord): string | undefined {
   return undefined
 }
 
-function detailTabs(record: TableRecord): readonly DetailTabItem[] {
+function detailTabs(record: TableRecord, t?: TranslateNS<typeof NS>): readonly DetailTabItem[] {
   if (record.cell.kind === 'system') {
     return record.cell.previousPromptDetail === undefined
       ? SYSTEM_PROMPT_TABS
@@ -899,26 +918,26 @@ function detailTabs(record: TableRecord): readonly DetailTabItem[] {
   }
   if (record.cell.kind === 'compacted') {
     return [
-      { id: 'overview', label: 'Summary' },
-      { id: 'raw', label: 'Raw Output' },
+      { id: 'overview', label: textLabel(t, 'common.summary', 'Summary') },
+      { id: 'raw', label: textLabel(t, 'common.raw', 'Raw Output') },
     ]
   }
   if (isMarkdownRecord(record)) {
     return [
-      { id: 'overview', label: 'Summary' },
-      { id: 'rendered', label: 'Preview' },
-      { id: 'raw', label: 'Raw' },
+      { id: 'overview', label: textLabel(t, 'common.summary', 'Summary') },
+      { id: 'rendered', label: textLabel(t, 'common.preview', 'Preview') },
+      { id: 'raw', label: textLabel(t, 'common.raw', 'Raw') },
       ...(record.cell.messageSource === undefined
         ? []
-        : [{ id: 'source', label: 'Source' } as const]),
+        : [{ id: 'source', label: textLabel(t, 'common.source', 'Source') } as const]),
     ]
   }
   return [
-    { id: 'overview', label: 'Summary' },
-    ...(record.cell.inputDetail ? [{ id: 'input', label: 'Payload' } as const] : []),
-    ...(record.cell.outputDetail ? [{ id: 'output', label: 'Result' } as const] : []),
-    { id: 'schema', label: 'Schema' },
-    { id: 'timing', label: 'Timing' },
+    { id: 'overview', label: textLabel(t, 'common.summary', 'Summary') },
+    ...(record.cell.inputDetail ? [{ id: 'input', label: textLabel(t, 'common.payload', 'Payload') } as const] : []),
+    ...(record.cell.outputDetail ? [{ id: 'output', label: textLabel(t, 'common.result', 'Result') } as const] : []),
+    { id: 'schema', label: textLabel(t, 'common.schema', 'Schema') },
+    { id: 'timing', label: textLabel(t, 'common.timing', 'Timing') },
   ]
 }
 
@@ -1068,8 +1087,8 @@ function SourceBlocks({
               <button
                 type="button"
                 className={css.sourceBlockJumpTarget}
-                aria-label={`Open Block #${index + 1} tool call summary`}
-                title="Open tool call summary"
+                aria-label={`打开第 ${index + 1} 个区块的工具调用摘要`}
+                title="打开工具调用摘要"
                 onClick={() => {
                   if (block.callId !== undefined) onOpenCall(block.callId)
                 }}
@@ -1110,7 +1129,7 @@ function PanelImage({
       href={block.imageSrc}
       target="_blank"
       rel="noopener noreferrer"
-      title="Open image"
+      title="打开图片"
     >
       <img
         className={css.panelImage}
@@ -1158,7 +1177,7 @@ function AssistantToolCalls({
           <button
             type="button"
             className={css.assistantToolCallButton}
-            title="Open tool call summary"
+            title="打开工具调用摘要"
             onClick={() => {
               if (call.callId !== undefined) onOpenCall(call.callId)
             }}
@@ -1216,7 +1235,7 @@ function ToolGlyph() {
 }
 
 function ToolCatalog({ tools }: { tools: ConversationPromptSnapshot['tools'] }) {
-  if (tools.length === 0) return <p className={css.noPayload}>No tools in this request</p>
+  if (tools.length === 0) return <p className={css.noPayload}>此请求没有工具</p>
   return (
     <div className={css.toolCatalog}>
       {tools.map((tool, index) => (
@@ -1304,14 +1323,14 @@ function SystemPromptDiff({
     <div className={css.promptDiffSections}>
       {before.system !== after.system && (
         <PromptDiffSection
-          title="System Prompt"
+          title="系统提示词"
           before={before.system}
           after={after.system}
         />
       )}
       {toolsBefore !== toolsAfter && (
         <PromptDiffSection
-          title="Tools"
+          title="工具"
           before={toolsBefore}
           after={toolsAfter}
         />
@@ -1354,6 +1373,7 @@ function MarkdownRecordContent({
   thinkingExpanded,
   onThinkingExpandedChange,
   onOpenCall,
+  t,
 }: {
   record: TableRecord
   rendered: boolean
@@ -1361,6 +1381,7 @@ function MarkdownRecordContent({
   thinkingExpanded: boolean
   onThinkingExpandedChange: (expanded: boolean) => void
   onOpenCall: (callId: string) => void
+  t?: TranslateNS<typeof NS> | undefined
 }) {
   if (!rendered && record.cell.sourceBlocks && record.cell.sourceBlocks.length > 0) {
     return <SourceBlocks blocks={record.cell.sourceBlocks} onOpenCall={onOpenCall} />
@@ -1387,7 +1408,7 @@ function MarkdownRecordContent({
             aria-expanded={thinkingExpanded}
             onClick={() => { onThinkingExpandedChange(!thinkingExpanded) }}
           >
-            Thinking
+            {textLabel(t, 'common.thinking', 'Thinking')}
             <IconChevronRightOutline14 className={css.thinkingChevron} size={12} />
           </button>
           {thinkingExpanded && (
@@ -1425,8 +1446,8 @@ function MarkdownRecordContent({
     && record.cell.sourceBlocks?.some(block => block.type === 'tool-call') === true
   if (!source && !hasImages && !hasToolCalls) {
     const emptyLabel = isToolCallOnly(record.cell)
-      ? 'Tool call only'
-      : record.cell.text || 'No content'
+      ? '仅工具调用'
+      : record.cell.text || '无内容'
     return <p className={css.noPayload}>{emptyLabel}</p>
   }
   if (!rendered || (!hasImages && !hasToolCalls)) {
@@ -1452,9 +1473,9 @@ function RecordTiming({ record }: { record: TableRecord }) {
     ? <AssistantTimingPanel metrics={record.cell.assistantMetrics} />
     : (
       <dl className={css.overview}>
-        <div><dt>Started</dt><StartedAtValue timestamp={record.cell.startedAt ?? null} /></div>
-        <div><dt>Duration</dt><dd>{formatElapsedSeconds(record.cell.timeSeconds)}</dd></div>
-        <div><dt>Timing source</dt><dd>{record.cell.timeSeconds === null ? 'Not available' : 'Session timestamps'}</dd></div>
+        <div><dt>开始时间</dt><StartedAtValue timestamp={record.cell.startedAt ?? null} /></div>
+        <div><dt>时长</dt><dd>{formatElapsedSeconds(record.cell.timeSeconds)}</dd></div>
+        <div><dt>计时来源</dt><dd>{record.cell.timeSeconds === null ? '不可用' : '会话时间戳'}</dd></div>
       </dl>
     )
 }
@@ -1475,11 +1496,11 @@ function RequestTiming({
       : Math.max(0, (request.completedAt - request.startedAt) / 1000)
     return (
       <dl className={css.overview}>
-        <div><dt>Started</dt><StartedAtValue timestamp={request.startedAt} /></div>
-        <div><dt>Duration</dt><dd>{formatElapsedSeconds(duration)}</dd></div>
+        <div><dt>开始时间</dt><StartedAtValue timestamp={request.startedAt} /></div>
+        <div><dt>时长</dt><dd>{formatElapsedSeconds(duration)}</dd></div>
         <div>
-          <dt>Timing source</dt>
-          <dd>{duration === null ? 'Session timestamps (running)' : 'Session timestamps'}</dd>
+          <dt>计时来源</dt>
+          <dd>{duration === null ? '会话时间戳（进行中）' : '会话时间戳'}</dd>
         </div>
       </dl>
     )
@@ -1487,10 +1508,10 @@ function RequestTiming({
   return (
     <dl className={css.overview}>
       <div>
-        <dt>Started</dt>
+        <dt>开始时间</dt>
         <StartedAtValue timestamp={anchor?.cell.startedAt ?? null} />
       </div>
-      <div><dt>Duration</dt><dd>{formatElapsedSeconds(null)}</dd></div>
+      <div><dt>时长</dt><dd>{formatElapsedSeconds(null)}</dd></div>
     </dl>
   )
 }
@@ -1506,8 +1527,8 @@ function RecordPayload({
 }) {
   const value = direction === 'input' ? record.cell.inputDetail : record.cell.outputDetail
   const missing = direction === 'input'
-    ? 'No payload captured'
-    : 'No result captured'
+    ? '未捕获载荷'
+    : '未捕获结果'
   if (!value) return <p className={css.noPayload}>{missing}</p>
   const error = direction === 'output' && record.cell.isError === true
   const payloadClass = preview ? css.jsonPreview : css.jsonPayload
@@ -1562,7 +1583,7 @@ function RecordPayload({
     return (
       <JsonTree
         data={json}
-        label={`${direction === 'input' ? 'Payload' : 'Result'} JSON`}
+        label={`${direction === 'input' ? '载荷' : '结果'} JSON`}
         className={payloadClassName}
       />
     )
@@ -1588,7 +1609,7 @@ function RecordSchema({
   preview?: boolean
 }) {
   if (!record.cell.schemaDetail) {
-    return <p className={css.noPayload}>Schema unavailable</p>
+    return <p className={css.noPayload}>Schema 不可用</p>
   }
   const schema = parseToolSchema(record.cell.schemaDetail)
   if (schema !== undefined) {
@@ -1599,7 +1620,7 @@ function RecordSchema({
           <p className={css.schemaDescription}>{schema.description}</p>
         </header>
         <section className={css.schemaParameters}>
-          <h4 className={css.schemaParametersTitle}>Parameters</h4>
+          <h4 className={css.schemaParametersTitle}>参数</h4>
           <JsonTree
             data={schema.parameters}
             label={`${schema.name} parameters JSON`}
@@ -1712,6 +1733,7 @@ export function TrajectoryTable({
   onToggleAssistant,
   inspectCallId = null,
   onInspectApplied,
+  t,
 }: TrajectoryTableProps) {
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null)
   const [selectedRequest, setSelectedRequest] = useState<SelectedRequest | null>(null)
@@ -1917,7 +1939,7 @@ export function TrajectoryTable({
     : selectedRequestRecords[0]?.section
   const selectedTabs = selectedRequest !== null
     ? REQUEST_TABS.filter(tab => tab.id !== 'options' || selectedRequestOptions !== undefined)
-    : selected === undefined ? [] : detailTabs(selected)
+    : selected === undefined ? [] : detailTabs(selected, t)
   const selectedParents: ParentRecords = selected === undefined
     ? {}
     : parentRecords(allRecords, selected)
@@ -1970,7 +1992,7 @@ export function TrajectoryTable({
     setSelectedRequest(null)
     setSelectedRecordId(record === undefined ? null : trajectoryRecordId(record.cell))
     if (record === undefined) return
-    const tabs = detailTabs(record)
+    const tabs = detailTabs(record, t)
     const available = new Set(tabs.map(tab => tab.id))
     const recent = [...tabHistory.current].reverse().find(tab => available.has(tab))
     setActiveTab(recent ?? tabs[0]?.id ?? 'overview')
@@ -2213,7 +2235,7 @@ export function TrajectoryTable({
           <div className={css.historyLoading} role="status" aria-live="polite">
             <span className={css.historyLoadingBar}>
               <span className={css.historyLoadingSpinner} aria-hidden="true" />
-              Loading trajectory…
+              {textLabel(t, 'common.loadingTrajectory', 'Loading trajectory…')}
             </span>
           </div>
         )}
@@ -2240,7 +2262,7 @@ export function TrajectoryTable({
                     disabled={olderBusy || onLoadOlder === undefined}
                     aria-label={olderBusy
                       ? 'Loading earlier history…'
-                      : 'Load earlier history'}
+                      : textLabel(t, 'timeline.loadEarlier', 'Load earlier history')}
                     onClick={() => {
                       const pane = tablePaneRef.current
                       if (pane !== null) requestOlder(pane, false)
@@ -2250,7 +2272,7 @@ export function TrajectoryTable({
                       <span className={css.historyLoadingSpinner} aria-hidden="true" />
                     )}
                     <span aria-hidden="true">
-                      {olderBusy ? 'Loading earlier history…' : 'Load earlier history'}
+                      {olderBusy ? textLabel(t, 'timeline.loadingEarlier', 'Loading earlier history…') : textLabel(t, 'timeline.loadEarlier', 'Load earlier history')}
                     </span>
                     <span className={css.visuallyHidden} role="status" aria-live="polite">
                       {olderBusy ? 'Loading earlier history…' : ''}
@@ -2296,7 +2318,7 @@ export function TrajectoryTable({
                   }
                   const requestLabel = request === undefined
                     ? undefined
-                    : `Request #${request}${requestInfo?.purpose === 'compaction' ? ' · Compaction' : ''}`
+                    : `${textLabel(t, 'common.request', 'Request')} #${request}${requestInfo?.purpose === 'compaction' ? ` · ${textLabel(t, 'common.compaction', 'Compaction')}` : ''}`
                   const requestSelected = request !== undefined
                 && selectedRequest?.turn === record.turn
                 && selectedRequest.group === record.group
@@ -2310,8 +2332,8 @@ export function TrajectoryTable({
                       aria-label={isCollapsedSummary
                         ? `Collapsed ${record.collapsedSummaryKind} summary, ${record.collapsedSummary}`
                         : isRequestOnly
-                          ? `Request ${request ?? ''}, compaction`
-                          : `${request === undefined ? '' : `Request ${request}, `}${KIND_LABEL[record.cell.kind]}, ${listDisplayText || 'no content'}`}
+                          ? `${textLabel(t, 'common.request', 'Request')} ${request ?? ''}, ${textLabel(t, 'common.compaction', 'compaction')}`
+                          : `${request === undefined ? '' : `${textLabel(t, 'common.request', 'Request')} ${request}, `}${kindLabel(record.cell.kind, t)}, ${listDisplayText || textLabel(t, 'common.noContent', 'no content')}`}
                       aria-selected={!isCollapsedSummary && !isRequestOnly && selectedIndex === record.cell.index}
                       data-kind={record.cell.kind}
                       data-trajectory-row-key={trajectoryVirtualRecordKey(record)}
@@ -2416,14 +2438,14 @@ export function TrajectoryTable({
                             className={sectionActive
                               ? `${css.turnLabel} ${css.turnLabelActive}`
                               : css.turnLabel}
-                            aria-label={sectionLabel(record.turn)}
+                            aria-label={sectionLabel(record.turn, t)}
                           >
                             {record.turn === null
-                              ? sectionLabel(record.turn)
+                              ? sectionLabel(record.turn, t)
                               : (
                                 <>
                                   <span className={css.turnLabelFull} aria-hidden="true">
-                                    {sectionLabel(record.turn)}
+                                    {sectionLabel(record.turn, t)}
                                   </span>
                                   <span className={css.turnLabelCompact} aria-hidden="true">
                                     #{record.turn}
@@ -2456,7 +2478,7 @@ export function TrajectoryTable({
                                 data-role-kind={record.cell.kind}
                               >
                                 <Tooltip
-                                  label={KIND_LABEL[record.cell.kind]}
+                                  label={kindLabel(record.cell.kind, t)}
                                   side="right"
                                 >
                                   <span className={css.kindTagIcon} aria-hidden="true">
@@ -2464,7 +2486,7 @@ export function TrajectoryTable({
                                   </span>
                                 </Tooltip>
                                 <span className={css.kindTagLabel}>
-                                  {KIND_LABEL[record.cell.kind]}
+                                  {kindLabel(record.cell.kind, t)}
                                 </span>
                               </span>
                             </span>
@@ -2498,7 +2520,7 @@ export function TrajectoryTable({
                                 {resultText !== undefined && (
                                   <span className={record.cell.isError ? `${css.inlineResult} ${css.error}` : css.inlineResult}>
                                     <span className={css.arrow}>→</span>
-                                    <span className={resultText === 'No output'
+                                    <span className={resultText === textLabel(t, 'common.noOutput', 'No output')
                                       ? `${css.inlineResultText} ${css.noOutputText}`
                                       : css.inlineResultText}
                                     >
@@ -2532,17 +2554,17 @@ export function TrajectoryTable({
         || (selected !== undefined && selectedState !== undefined)) && (
         <aside
           className={css.details}
-          aria-label="Event details"
+          aria-label={textLabel(t, 'common.eventDetails', 'Event details')}
           style={detailsWidth === null ? undefined : { width: detailsWidth }}
         >
           <div
             className={css.detailsResizeHandle}
             role="separator"
-            aria-label="Resize event details"
+            aria-label={textLabel(t, 'common.resize', 'Resize event details')}
             aria-controls="trajectory-detail-panel"
             aria-orientation="vertical"
             tabIndex={0}
-            title="Drag to resize. Double-click to reset."
+            title={textLabel(t, 'common.dragResize', 'Drag to resize. Double-click to reset.')}
             onDoubleClick={() => {
               setDetailsWidth(null)
               setToolRequestOffset(null)
@@ -2618,19 +2640,19 @@ export function TrajectoryTable({
                   <>
                     <span className={css.requestDetailsDot} aria-hidden="true" />
                     <span className={css.requestDetailsName}>
-                      Request #{selectedRequestNumber ?? '—'}
+                      {textLabel(t, 'common.request', 'Request')} #{selectedRequestNumber ?? '—'}
                     </span>
                     <span className={css.detailsLocation}>
                       {selectedRequestInfo?.purpose === 'compaction'
-                        ? `Compaction · ${sectionLabel(selectedRequest.turn)}`
-                        : sectionLabel(selectedRequest.turn)}
+                        ? `${textLabel(t, 'common.compaction', 'Compaction')} · ${sectionLabel(selectedRequest.turn, t)}`
+                        : sectionLabel(selectedRequest.turn, t)}
                     </span>
                   </>
                 )
                 : promptSelected
                   ? (
                     <>
-                      <span className={`${css.kindTag} ${css.systemNeutral}`}>SYSTEM</span>
+                      <span className={`${css.kindTag} ${css.systemNeutral}`}>{kindLabel('system', t)}</span>
                       <span className={css.detailsLocation}>{selected?.cell.text}</span>
                     </>
                   )
@@ -2650,12 +2672,12 @@ export function TrajectoryTable({
                                   : css[selected.cell.kind]
                       }`}
                       >
-                        {KIND_LABEL[selected.cell.kind]}
+                        {kindLabel(selected.cell.kind, t)}
                       </span>
                       <span className={css.detailsLocation}>
                         {selected.cell.kind === 'compacted'
-                          ? sectionLabel(selected.turn)
-                          : `${sectionLabel(selected.turn)} · ${selected.group}`}
+                          ? sectionLabel(selected.turn, t)
+                          : `${sectionLabel(selected.turn, t)} · ${displayGroup(selected.group, t)}`}
                       </span>
                     </>
                   )}
@@ -2663,13 +2685,13 @@ export function TrajectoryTable({
             <button
               type="button"
               className={css.close}
-              aria-label="Close details"
+              aria-label={textLabel(t, 'common.close', 'Close details')}
               onClick={clearInspectorSelection}
             >
               <span aria-hidden="true">×</span>
             </button>
           </div>
-          <div className={css.detailTabs} role="tablist" aria-label="Event details">
+          <div className={css.detailTabs} role="tablist" aria-label={textLabel(t, 'common.eventDetails', 'Event details')}>
             {selectedTabs.map(tab => (
               <button
                 key={tab.id}
@@ -2702,21 +2724,21 @@ export function TrajectoryTable({
                   data-summary-scroll-region=""
                 >
                   <div>
-                    <dt>Status</dt>
+                    <dt>{textLabel(t, 'common.status', 'Status')}</dt>
                     <dd className={selectedRequestState === 'error' ? css.error : undefined}>
-                      {statusLabel(selectedRequestState)}
+                      {statusLabel(selectedRequestState, t)}
                     </dd>
                   </div>
                   {selectedRequestInfo?.purpose === 'compaction' && (
                     <div>
-                      <dt>Purpose</dt>
-                      <dd>Compaction</dd>
+                      <dt>{textLabel(t, 'common.purpose', 'Purpose')}</dt>
+                      <dd>{textLabel(t, 'common.compaction', 'Compaction')}</dd>
                     </div>
                   )}
                   {(selectedRequestInfo?.provider
                     ?? selectedRequestInfo?.requestConfig?.provider) !== undefined && (
                     <div>
-                      <dt>Provider</dt>
+                      <dt>{textLabel(t, 'common.provider', 'Provider')}</dt>
                       <dd>
                         {selectedRequestInfo?.provider
                           ?? selectedRequestInfo?.requestConfig?.provider}
@@ -2726,7 +2748,7 @@ export function TrajectoryTable({
                   {(selectedRequestInfo?.model
                     ?? selectedRequestInfo?.requestConfig?.model) !== undefined && (
                     <div>
-                      <dt>Model</dt>
+                      <dt>{textLabel(t, 'common.modelLabel', 'Model')}</dt>
                       <dd>
                         {selectedRequestInfo?.model
                           ?? selectedRequestInfo?.requestConfig?.model}
@@ -2734,41 +2756,41 @@ export function TrajectoryTable({
                     </div>
                   )}
                   <div>
-                    <dt>Tool calls</dt>
+                    <dt>{textLabel(t, 'common.toolCalls', 'Tool calls')}</dt>
                     <dd>{selectedRequestToolCalls}</dd>
                   </div>
                   {selectedRequestSubtoolCalls > 0 && (
                     <div>
-                      <dt>Subtool calls</dt>
+                      <dt>{textLabel(t, 'common.subtoolCalls', 'Subtool calls')}</dt>
                       <dd>{selectedRequestSubtoolCalls}</dd>
                     </div>
                   )}
                   {selectedRequestInfo?.error !== undefined && (
                     <div>
-                      <dt>Error</dt>
+                      <dt>{textLabel(t, 'common.error', 'Error')}</dt>
                       <dd className={css.error}>{selectedRequestInfo.error}</dd>
                     </div>
                   )}
                   {selectedRequestInfo?.retry !== undefined && (
                     <div>
-                      <dt>Retry</dt>
+                      <dt>{textLabel(t, 'common.retry', 'Retry')}</dt>
                       <dd>
-                        Scheduled {selectedRequestInfo.retry}
+                        {textLabel(t, 'common.scheduled', 'Scheduled')} {selectedRequestInfo.retry}
                         {selectedRequestInfo.maxRetries === undefined
                           ? ''
-                          : ` of ${selectedRequestInfo.maxRetries}`}
+                          : ` ${textLabel(t, 'common.of', 'of')} ${selectedRequestInfo.maxRetries}`}
                       </dd>
                     </div>
                   )}
                   {selectedRequestInfo?.retryDelayMs !== undefined && (
                     <div>
-                      <dt>Retry delay</dt>
+                      <dt>{textLabel(t, 'common.retryDelay', 'Retry delay')}</dt>
                       <dd>{formatDurationMs(selectedRequestInfo.retryDelayMs)}</dd>
                     </div>
                   )}
                   {selectedRequestResult !== undefined && (
                     <div>
-                      <dt>Result</dt>
+                      <dt>{textLabel(t, 'common.result', 'Result')}</dt>
                       <dd className={css.overviewParentLinks}>
                         <button
                           type="button"
@@ -2779,8 +2801,8 @@ export function TrajectoryTable({
                         >
                           <span>
                             {selectedRequestInfo?.purpose === 'compaction'
-                              ? 'Compacted'
-                              : 'Assistant Message'}
+                              ? '已压缩'
+                              : '助手消息'}
                           </span>
                           <IconChevronRightOutline14
                             className={css.overviewHierarchyJumpIconTight}
@@ -2793,7 +2815,7 @@ export function TrajectoryTable({
                 </dl>
                 <div className={css.overviewSections}>
                   {selectedRequestOptions !== undefined && (
-                    <OverviewSection label="Options" onOpen={() => { activateTab('options') }}>
+                    <OverviewSection label={textLabel(t, 'common.options', 'Options')} onOpen={() => { activateTab('options') }}>
                       <RequestOptions options={selectedRequestOptions} preview />
                     </OverviewSection>
                   )}
@@ -2836,7 +2858,7 @@ export function TrajectoryTable({
             )}
             {promptSelected && activeTab === 'system-prompt' && (
               selectedPrompt.system === ''
-                ? <p className={css.noPayload}>No system prompt in this request</p>
+                ? <p className={css.noPayload}>{textLabel(t, 'common.noSystemPrompt', 'No system prompt in this request')}</p>
                 : (
                   <div className={`${css.markdownPayload} ${css.systemPrompt}`}>
                     <MarkdownText text={selectedPrompt.system} />
@@ -2856,17 +2878,17 @@ export function TrajectoryTable({
                   data-summary-scroll-region=""
                 >
                   <div>
-                    <dt>Status</dt>
+                    <dt>{textLabel(t, 'common.status', 'Status')}</dt>
                     <dd className={selectedState === 'error' ? css.error : undefined}>
-                      {statusLabel(selectedState)}
+                      {statusLabel(selectedState, t)}
                     </dd>
                   </div>
                   <div>
-                    <dt>Duration</dt>
+                    <dt>{textLabel(t, 'common.duration', 'Duration')}</dt>
                     <dd>{formatElapsedSeconds(selected.cell.timeSeconds)}</dd>
                   </div>
                   <div>
-                    <dt>Tokens</dt>
+                    <dt>{textLabel(t, 'common.tokens', 'Tokens')}</dt>
                     <dd>—</dd>
                   </div>
                 </dl>
@@ -2881,6 +2903,7 @@ export function TrajectoryTable({
                       thinkingExpanded={thinkingExpanded}
                       onThinkingExpandedChange={setThinkingExpanded}
                       onOpenCall={openCallSummary}
+                      t={t}
                     />
                   </div>
                 )}
@@ -2898,7 +2921,7 @@ export function TrajectoryTable({
                 >
                   {selected.cell.messageSource !== undefined && (
                     <div>
-                      <dt>Source</dt>
+                      <dt>{textLabel(t, 'common.source', 'Source')}</dt>
                       <dd className={css.overviewParentLinks}>
                         <button
                           type="button"
@@ -2918,8 +2941,8 @@ export function TrajectoryTable({
                     <div>
                       <dt>
                         {selectedAssistantRequestTarget !== undefined
-                          ? 'Source'
-                          : 'Hierarchy'}
+                          ? textLabel(t, 'common.source', 'Source')
+                          : '层级'}
                       </dt>
                       <dd className={css.overviewParentLinks}>
                         {selectedAssistantRequestTarget !== undefined && (
@@ -2930,7 +2953,7 @@ export function TrajectoryTable({
                               selectRequest(selectedAssistantRequestTarget)
                             }}
                           >
-                            <span>Request #{selectedAssistantRequest ?? '—'}</span>
+                            <span>{textLabel(t, 'common.request', 'Request')} #{selectedAssistantRequest ?? '—'}</span>
                             <IconChevronRightOutline14
                               className={css.overviewHierarchyJumpIconTight}
                               size={11}
@@ -2943,7 +2966,7 @@ export function TrajectoryTable({
                             className={css.overviewHierarchyNavLink}
                             onClick={() => { openRecordSummary(selectedParentMessage) }}
                           >
-                            <span>Assistant Message</span>
+                            <span>助手消息</span>
                             <IconChevronRightOutline14
                               className={css.overviewHierarchyJumpIconTight}
                               size={11}
@@ -2956,7 +2979,7 @@ export function TrajectoryTable({
                             className={css.overviewHierarchyNavLink}
                             onClick={() => { openRecordSummary(selectedParentTool) }}
                           >
-                            <span>Tool Call</span>
+                            <span>工具调用</span>
                             <IconChevronRightOutline14
                               className={css.overviewHierarchyJumpIconTight}
                               size={11}
@@ -2967,17 +2990,17 @@ export function TrajectoryTable({
                     </div>
                   )}
                   <div>
-                    <dt>Status</dt>
+                    <dt>{textLabel(t, 'common.status', 'Status')}</dt>
                     <dd className={selectedState === 'error' ? css.error : undefined}>
-                      {statusLabel(selectedState)}
+                      {statusLabel(selectedState, t)}
                     </dd>
                   </div>
                   {selected.cell.kind === 'message' && (
-                    <TokenRows cell={selected.cell} />
+                    <TokenRows cell={selected.cell} t={t} />
                   )}
                   {(selected.cell.kind === 'user' || selected.cell.kind === 'context') && (
                     <div>
-                      <dt>Duration</dt>
+                      <dt>{textLabel(t, 'common.duration', 'Duration')}</dt>
                       <dd>{formatElapsedSeconds(selected.cell.timeSeconds)}</dd>
                     </div>
                   )}
@@ -2986,7 +3009,7 @@ export function TrajectoryTable({
                   {isMarkdownRecord(selected)
                     ? (
                       <>
-                        <OverviewSection label="Preview" onOpen={() => { activateTab('rendered') }}>
+                        <OverviewSection label={textLabel(t, 'common.preview', 'Preview')} onOpen={() => { activateTab('rendered') }}>
                           <MarkdownRecordContent
                             record={selected}
                             rendered
@@ -2994,6 +3017,7 @@ export function TrajectoryTable({
                             thinkingExpanded={thinkingExpanded}
                             onThinkingExpandedChange={setThinkingExpanded}
                             onOpenCall={openCallSummary}
+                            t={t}
                           />
                         </OverviewSection>
                       </>
@@ -3001,23 +3025,23 @@ export function TrajectoryTable({
                     : (
                       <>
                         {selected.cell.inputDetail && (
-                          <OverviewSection label="Payload" onOpen={() => { activateTab('input') }}>
+                          <OverviewSection label={textLabel(t, 'common.payload', 'Payload')} onOpen={() => { activateTab('input') }}>
                             <RecordPayload record={selected} direction="input" preview />
                           </OverviewSection>
                         )}
                         {selected.cell.outputDetail && (
-                          <OverviewSection label="Result" onOpen={() => { activateTab('output') }}>
+                          <OverviewSection label={textLabel(t, 'common.result', 'Result')} onOpen={() => { activateTab('output') }}>
                             <RecordPayload record={selected} direction="output" preview />
                           </OverviewSection>
                         )}
-                        <OverviewSection label="Schema" onOpen={() => { activateTab('schema') }}>
+                        <OverviewSection label={textLabel(t, 'common.schema', 'Schema')} onOpen={() => { activateTab('schema') }}>
                           <RecordSchema record={selected} preview />
                         </OverviewSection>
                       </>
                     )}
                   {selectedAssistantRequestTarget !== undefined && (
                     <OverviewSection
-                      label="Request Timing"
+                      label={`${textLabel(t, 'common.result', 'Request')} ${textLabel(t, 'common.timing', 'Timing')}`}
                       onOpen={() => {
                         selectRequest(selectedAssistantRequestTarget, 'timing')
                       }}
@@ -3026,7 +3050,7 @@ export function TrajectoryTable({
                     </OverviewSection>
                   )}
                   {(selected.cell.kind === 'tool' || selected.cell.kind === 'subtool') && (
-                    <OverviewSection label="Timing" onOpen={() => { activateTab('timing') }}>
+                    <OverviewSection label={textLabel(t, 'common.timing', 'Timing')} onOpen={() => { activateTab('timing') }}>
                       <RecordTiming record={selected} />
                     </OverviewSection>
                   )}
@@ -3040,6 +3064,7 @@ export function TrajectoryTable({
                 thinkingExpanded={thinkingExpanded}
                 onThinkingExpandedChange={setThinkingExpanded}
                 onOpenCall={openCallSummary}
+                t={t}
               />
             )}
             {!promptSelected && selected !== undefined && activeTab === 'raw' && (
@@ -3049,6 +3074,7 @@ export function TrajectoryTable({
                 thinkingExpanded={thinkingExpanded}
                 onThinkingExpandedChange={setThinkingExpanded}
                 onOpenCall={openCallSummary}
+                t={t}
               />
             )}
             {!promptSelected && selected !== undefined && activeTab === 'source' && (

@@ -1,0 +1,24 @@
+name: dsh-xiaowei-search
+
+services:
+  searxng:
+    container_name: dsh-xiaowei-searxng
+    # Pin the official multi-architecture image index resolved on 2026-08-25.
+    # Update the digest deliberately after reviewing upstream release changes.
+    image: docker.io/searxng/searxng@sha256:11a9b34cdc0b1ec2b991470a2762ecb5a1a531898289fb51dcd015260450729e
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${XIAOWEI_SEARXNG_PORT:-18081}:8080"
+    volumes:
+      - /etc/dsh-xiaowei/searxng/settings.yml:/etc/searxng/settings.yml:ro
+      - searxng-cache:/var/cache/searxng
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  searxng-cache:

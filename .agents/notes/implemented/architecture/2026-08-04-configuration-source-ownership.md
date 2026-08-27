@@ -48,6 +48,8 @@ The line is that these take effect with no user action, before any turn, outside
 
 **`packages/util/launch-environment` owns the snapshot**, deliberately as a utility rather than a three-package capability seam. The snapshot is frozen before Cordis starts and injected once by the launcher, so there is no runtime implementation to swap; consumers need types and pure functions, which a `util/` package gives them without depending on a UI package. `launchEnvironmentOf(ctx)` returns the launcher's snapshot, or the inherited environment as the only layer — an SDK host or bare `cordis.yml` discovered no files, so its single layer really is what it was launched with, and the same trusted lookups keep working there unchanged.
 
+**Generic pi-ai profiles may reference an endpoint with `baseURLEnv`.** The adapter resolves the named value from that immutable launch snapshot when it materializes profiles; an explicit `baseURL` has priority, while a missing or empty referenced value fails loud. This keeps deployment-specific endpoint names in shipped composition without re-reading mutable `process.env` during requests or settings changes.
+
 **`verify-config-source-ownership`** is a narrow tripwire for the ordinary single-line form of an `apiKey`/`baseURL`/`headers` environment inline in shipped Cordis configuration. Removing those inlines is what makes the deployment tier meaningful — with the shipped tree silent on `baseURL`, a present value means a human or deployment set it. Adapters own actual resolution; the gate makes no repository-wide claim about `process.env` access.
 
 ## Consequences
@@ -55,6 +57,7 @@ The line is that these take effect with no user action, before any turn, outside
 - The web credential form now takes effect against an older key in the user's `.env`; only a key exported in the launching shell still makes it read-only, and the diagnostic says so.
 - A `.env` holding `DSH_*`, `PATH`, `BROWSER`, or a proxy variable fails the launch instead of being applied. Developers keeping switches in a repository `.env` move them to their shell — a deliberate, loud break.
 - Composition is no longer overridable by a stale shell endpoint. It is still overridable by a user's stored `settings.yaml`, which is the settings seam's layering and not something this note changes; the product CLI offers no flag above it, so a deployment that must win against stored settings owns its own bin or loader tree.
+- A composition can carry `baseURLEnv` instead of an inline endpoint. Its value is fixed by the launch snapshot for that process, and an explicit profile `baseURL` remains the higher-priority composition or settings value.
 - Not solved: the layers are still materialized into `process.env`, so ordinary project variables continue to reach child processes under the subprocess scrub. Bootstrap variables cannot come from a file at all; the environment package records the remaining subprocess reach as a limitation.
 - Exa and Perplexity still capture their key at load time rather than through the credential seam. They no longer read raw `process.env` — they resolve through the trusted layers — but converting them to per-request credential resolution is separate work.
 

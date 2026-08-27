@@ -812,16 +812,18 @@ describe('WorkspaceBrowser', () => {
     }
   })
 
-  it('rail add-workspace raises the directory flow in place, with no menu and no expansion', () => {
+  it('rail add-workspace offers explicit local and cloud actions without expanding', () => {
     const expandSidebar = vi.fn()
     mount({ wide: false, expandSidebar, useWorkspaces: hook(workspaceState([workspace('alpha', [])])) })
     fireEvent.click(screen.getByRole('button', { name: '添加工作区' }))
     expect(expandSidebar).not.toHaveBeenCalled()
-    // Adding is the header's only action, so the gesture IS that action: no
-    // one-row popover, and existing workspaces stay in the tree below.
-    expect(screen.queryByRole('menu')).toBeNull()
+    // Local live access and cloud-copy import have different persistence and
+    // privacy semantics, so the rail keeps the explicit choice in place.
+    expect(screen.getByRole('menu')).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: '打开本机文件夹（实时，不上传）' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: '导入云端副本（独立副本）' })).toBeTruthy()
     expect(screen.queryByRole('menuitem', { name: 'alpha' })).toBeNull()
-    expect(screen.getByTestId('directory-flow')).toBeTruthy()
+    expect(screen.queryByTestId('directory-flow')).toBeNull()
   })
 
   it('hides the add button when no directory-flow occupant is composed', () => {

@@ -12,9 +12,9 @@
  * without bespoke switch statements.
  */
 
-export type Locale = 'zh-CN' | 'en';
+export type Locale = 'zh-CN' | 'en'
 
-const dictionaries: Record<Locale, Record<string, string>> = {
+const dictionaries: Record<Locale, Partial<Record<string, string>>> = {
   'zh-CN': {
     'app.title': '企业 AI 工作台',
     'app.boot.loading': '正在加载…',
@@ -149,33 +149,30 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'tooltip.resolve': '此异常已修复，标记为已解决',
     'tooltip.ignore': '忽略此异常（不会再出现在队列里）',
     'tooltip.claim': '认领此异常，负责跟进',
-    'tooltip.sendMessage': '发送消息给 AI 助手'
+    'tooltip.sendMessage': '发送消息给 AI 助手',
   },
-  en: {} // fallback to key
-};
+  en: {}, // fallback to key
+}
 
-let activeLocale: Locale = 'zh-CN';
+let activeLocale: Locale = 'zh-CN'
 
 export function setLocale(locale: Locale): void {
-  activeLocale = locale;
+  activeLocale = locale
 }
 
 export function getLocale(): Locale {
-  return activeLocale;
+  return activeLocale
 }
 
 export function t(key: string, params?: Record<string, string | number>): string {
-  const dict = dictionaries[activeLocale] ?? {};
-  let value = dict[key];
-  if (value === undefined) {
-    value = key;
-  }
+  const dict = dictionaries[activeLocale]
+  let value = dict[key] ?? key
   if (params) {
     for (const [name, replacement] of Object.entries(params)) {
-      value = value.split(`{${name}}`).join(String(replacement));
+      value = value.split(`{${name}}`).join(String(replacement))
     }
   }
-  return value;
+  return value
 }
 
 // ---------------------------------------------------------------------------
@@ -186,8 +183,8 @@ export const SEVERITY_LABELS: Record<string, string> = {
   low: '低',
   medium: '中',
   high: '高',
-  critical: '紧急'
-};
+  critical: '紧急',
+}
 
 export const ANOMALY_STATUS_LABELS: Record<string, string> = {
   pending: '待处理',
@@ -195,24 +192,24 @@ export const ANOMALY_STATUS_LABELS: Record<string, string> = {
   awaiting_approval: '待审批',
   verifying: '验证中',
   resolved: '已解决',
-  ignored: '已忽略'
-};
+  ignored: '已忽略',
+}
 
 export const TRIGGER_STATUS_LABELS: Record<string, string> = {
   draft: '草稿',
   enabled: '已启用',
   paused: '已暂停',
   error: '异常',
-  archived: '已归档'
-};
+  archived: '已归档',
+}
 
 export const TRIGGER_TYPE_LABELS: Record<string, string> = {
   at: '执行一次 (At)',
   every: '固定间隔 (Every)',
   cron: '定时 (Cron)',
   event: '事件 (Event)',
-  condition: '条件 (Condition)'
-};
+  condition: '条件 (Condition)',
+}
 
 export const FIRING_STATUS_LABELS: Record<string, string> = {
   scheduled: '已计划',
@@ -224,30 +221,30 @@ export const FIRING_STATUS_LABELS: Record<string, string> = {
   succeeded: '已成功',
   failed: '失败',
   dead_letter: '已进入死信',
-  cancelled: '已取消'
-};
+  cancelled: '已取消',
+}
 
 export function severityLabel(value: string | null | undefined): string {
-  if (!value) return t('common.unknown');
-  return SEVERITY_LABELS[value] ?? value;
+  if (!value) return t('common.unknown')
+  return SEVERITY_LABELS[value] ?? value
 }
 
 export function anomalyStatusLabel(value: string | null | undefined): string {
-  if (!value) return t('common.unknown');
-  return ANOMALY_STATUS_LABELS[value] ?? value;
+  if (!value) return t('common.unknown')
+  return ANOMALY_STATUS_LABELS[value] ?? value
 }
 
 export function triggerStatusLabel(value: string | null | undefined): string {
-  if (!value) return t('common.unknown');
-  return TRIGGER_STATUS_LABELS[value] ?? value;
+  if (!value) return t('common.unknown')
+  return TRIGGER_STATUS_LABELS[value] ?? value
 }
 
 export function firingStatusLabel(value: string | null | undefined): string {
-  if (!value) return t('common.unknown');
-  return FIRING_STATUS_LABELS[value] ?? value;
+  if (!value) return t('common.unknown')
+  return FIRING_STATUS_LABELS[value] ?? value
 }
 
 export function triggerTypeLabel(value: string | null | undefined): string {
-  if (!value) return t('common.unknown');
-  return TRIGGER_TYPE_LABELS[value] ?? value;
+  if (!value) return t('common.unknown')
+  return TRIGGER_TYPE_LABELS[value] ?? value
 }

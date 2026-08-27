@@ -34,6 +34,7 @@ export interface HeaderLine {
   type: 'session'
   version: number
   id: SessionId
+  ownerId?: SessionHeader['ownerId']
   createdAt: number
   cwd?: string
   parentSession?: SessionId
@@ -53,6 +54,7 @@ export function toHeaderLine(header: SessionHeader): HeaderLine {
     type: 'session',
     version: header.version,
     id: header.id,
+    ...header.ownerId !== undefined ? { ownerId: header.ownerId } : {},
     createdAt: header.createdAt,
     ...header.cwd !== undefined ? { cwd: header.cwd } : {},
     ...header.parentSession !== undefined ? { parentSession: header.parentSession } : {},
@@ -75,6 +77,7 @@ export function fromHeaderLine(line: HeaderLine): SessionHeader {
   return {
     version: line.version,
     id: line.id,
+    ...line.ownerId !== undefined ? { ownerId: line.ownerId } : {},
     createdAt: line.createdAt,
     ...line.cwd !== undefined ? { cwd: line.cwd } : {},
     ...line.parentSession !== undefined ? { parentSession: line.parentSession } : {},
@@ -92,6 +95,8 @@ function isHeaderLine(value: unknown): value is HeaderLine {
     && (value as { type?: unknown }).type === 'session'
     && typeof (value as { version?: unknown }).version === 'number'
     && typeof (value as { id?: unknown }).id === 'string'
+    && ((value as { ownerId?: unknown }).ownerId === undefined
+      || (typeof (value as { ownerId?: unknown }).ownerId === 'string' && (value as { ownerId: string }).ownerId.length > 0))
     && typeof (value as { createdAt?: unknown }).createdAt === 'number'
     && Number.isSafeInteger((value as { createdAt: number }).createdAt)
     && (value as { createdAt: number }).createdAt >= 0

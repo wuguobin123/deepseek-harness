@@ -50,6 +50,7 @@ interface OpsIo {
   stderr: { write(chunk: string): unknown }
 }
 
+/** Injectable output streams used by tests of the one-shot ops runner. */
 export const internals: { stdout: OpsIo['stdout']; stderr: OpsIo['stderr'] } = {
   stdout: process.stdout,
   stderr: process.stderr,

@@ -50,6 +50,10 @@ Here are some core packages that contribute to the Cordis tree.
 | [`core/scope`](subsystems/scope.md) | The per-agent scoped-registration primitive | library, no key |
 | [`llm/llm`](subsystems/llm-streaming.md) | Message and stream vocabulary plus the adapter seam | `ctx.llm` |
 
+## Authenticated account composition
+
+Multi-user hosts keep account installation state on the host plane and apply selected capabilities before an Agent is published. The authenticated RPC principal owns plugin-factory mutations; the durable Session `ownerId` owns Skill lookup and conversational Skill writes. System plugin and Skill roots remain deployment-owned defaults, while optional plugin rows and writable Skill directories are isolated by account. Each account Session records its optional plugin selection at creation. Later installation changes affect only later Sessions; cold restoration and forks use the recorded selection so a history retains the capabilities that produced it. See the [implementation note](../.agents/notes/implemented/architecture/2026-08-26-account-scoped-plugin-and-skill-installation.md).
+
 ## Events
 
 Events are the extension points, and picking the right domain is the first decision in most changes.

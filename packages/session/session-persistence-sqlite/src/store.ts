@@ -373,6 +373,7 @@ export class SqliteStore implements PersistenceBackend<number> {
       meta.version,
       meta.createdAt,
       meta.cwd ?? null,
+      meta.ownerId ?? null,
       meta.parentSession ?? null,
       meta.seedLength ?? null,
       meta.origin ?? null,

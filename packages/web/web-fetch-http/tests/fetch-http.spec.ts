@@ -4,9 +4,10 @@ import { AddressInfo } from 'node:net'
 import { Context } from '@deepseek-ai/cordis'
 import WebRuntime from '@deepseek-ai/dsh-web'
 import { HttpFetchProvider, LOCAL_FETCH_PROVIDER_ID } from '@deepseek-ai/dsh-web-fetch-http'
-import type { HttpFetchLimits } from '@deepseek-ai/dsh-web-fetch-http'
+import type { HttpFetchDependencies, HttpFetchLimits } from '@deepseek-ai/dsh-web-fetch-http'
 import * as fetchPlugin from '@deepseek-ai/dsh-web-fetch-http'
-import { classifyContentType, decoderForCharset, isSameOrigin, parseCharset, validateFetchUrl } from '../src/policy.ts'
+import { classifyContentType, decoderForCharset, isPublicAddress, isSameOrigin, parseCharset, validateFetchUrl } from '../src/policy.ts'
+import { githubContentTarget, pinnedLookup } from '../src/provider.ts'
 
 const limits: HttpFetchLimits = {
   maxUrlLength: 2048,
@@ -14,6 +15,7 @@ const limits: HttpFetchLimits = {
   maxBodyChars: 100_000,
   timeoutMs: 5_000,
   maxRedirects: 5,
+  maxAttempts: 3,
   userAgent: 'test-agent/1.0',
 }
 
@@ -37,8 +39,137 @@ afterEach(async () => {
 })
 
 function provider(overrides: Partial<HttpFetchLimits> = {}): HttpFetchProvider {
-  return new HttpFetchProvider({ ...limits, ...overrides })
+  return new HttpFetchProvider({ ...limits, ...overrides }, {
+    resolveAddresses: async () => [{ address: '93.184.216.34', family: 4 }],
+    request: async (url, init) => await fetch(url, init),
+  })
 }
+
+describe('public address policy', () => {
+  it('blocks private, reserved, local, multicast, and mapped addresses', () => {
+    for (const address of ['not-an-ip', '0.0.0.0', '10.0.0.1', '100.64.0.1', '127.0.0.1', '169.254.1.1', '192.0.2.1', '192.168.1.1', '224.0.0.1', '255.255.255.255', '::', '::1', 'fc00::1', 'fe80::1', 'ff02::1', '2001:db8::1', '::ffff:127.0.0.1']) {
+      expect(isPublicAddress(address), address).toBe(false)
+    }
+    expect(isPublicAddress('8.8.8.8')).toBe(true)
+    expect(isPublicAddress('2001:4860:4860::8888')).toBe(true)
+    expect(isPublicAddress('::ffff:8.8.8.8')).toBe(true)
+  })
+
+  it('returns the pinned address for single and all-address Node lookups', async () => {
+    const lookup = pinnedLookup([
+      { address: '140.82.112.4', family: 4 },
+      { address: '2606:50c0:8000::154', family: 6 },
+    ])
+    const single = await new Promise<{ address: string | import('node:dns').LookupAddress[]; family: number | undefined }>((resolve, reject) => {
+      lookup('github.com', { all: false }, (error, address, family) => {
+        if (error !== null) reject(error)
+        else resolve({ address, family })
+      })
+    })
+    const all = await new Promise<string | import('node:dns').LookupAddress[]>((resolve, reject) => {
+      lookup('github.com', { all: true }, (error, address) => {
+        if (error !== null) reject(error)
+        else resolve(address)
+      })
+    })
+
+    expect(single).toEqual({ address: '140.82.112.4', family: 4 })
+    expect(all).toEqual([
+      { address: '140.82.112.4', family: 4 },
+      { address: '2606:50c0:8000::154', family: 6 },
+    ])
+  })
+
+  it('rejects mixed public and private DNS answers before transport', async () => {
+    const request = vi.fn<NonNullable<HttpFetchDependencies['request']>>()
+    const guarded = new HttpFetchProvider(limits, {
+      resolveAddresses: async () => [
+        { address: '93.184.216.34', family: 4 },
+        { address: '10.0.0.8', family: 4 },
+      ],
+      request,
+    })
+
+    await expect(guarded.fetch({ url: 'https://github.com/deepseek-ai' }))
+      .rejects.toThrow(expect.objectContaining({ code: 'WEB_BLOCKED_URL' }))
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it('re-resolves a same-origin redirect and blocks a public-to-private change', async () => {
+    const resolveAddresses = vi.fn()
+      .mockResolvedValueOnce([{ address: '140.82.112.4', family: 4 }])
+      .mockResolvedValueOnce([{ address: '127.0.0.1', family: 4 }])
+    const request = vi.fn(async () => new Response(null, {
+      status: 302,
+      headers: { location: '/deepseek-ai/deepseek-harness' },
+    }))
+    const guarded = new HttpFetchProvider(limits, { resolveAddresses, request })
+
+    await expect(guarded.fetch({ url: 'https://github.com/deepseek-ai' }))
+      .rejects.toThrow(expect.objectContaining({ code: 'WEB_BLOCKED_URL' }))
+    expect(resolveAddresses).toHaveBeenCalledTimes(2)
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ['GitHub raw text', 'https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/main/README.md', 'text/plain', '# DeepSeek Harness', 'text'],
+  ] as const)('retrieves deterministic public %s content without credentials', async (_label, url, contentType, content, kind) => {
+    const request = vi.fn(async (_url: URL, _init: RequestInit) => new Response(content, {
+      status: 200,
+      headers: { 'content-type': contentType },
+    }))
+    const guarded = new HttpFetchProvider(limits, {
+      resolveAddresses: async () => [{ address: '140.82.112.4', family: 4 }],
+      request,
+    })
+
+    await expect(guarded.fetch({ url })).resolves.toMatchObject({
+      statusCode: 200,
+      body: { kind, content },
+    })
+    expect(request).toHaveBeenCalledOnce()
+    expect(request.mock.calls[0]?.[1].headers).not.toHaveProperty('authorization')
+  })
+
+  it('retrieves a repository README through the official GitHub API and preserves the source URL', async () => {
+    const request = vi.fn(async (_url: URL, _init: RequestInit) => new Response('# DeepSeek Harness', {
+      status: 200,
+      headers: { 'content-type': 'application/vnd.github.raw+json; charset=utf-8' },
+    }))
+    const guarded = new HttpFetchProvider(limits, {
+      resolveAddresses: async () => [{ address: '20.205.243.168', family: 4 }],
+      request,
+    })
+
+    await expect(guarded.fetch({ url: 'https://github.com/deepseek-ai/deepseek-harness' })).resolves.toMatchObject({
+      url: 'https://github.com/deepseek-ai/deepseek-harness',
+      statusCode: 200,
+      body: { kind: 'text', content: '# DeepSeek Harness' },
+    })
+    expect(request.mock.calls[0]?.[0].toString()).toBe('https://api.github.com/repos/deepseek-ai/deepseek-harness/readme')
+    expect(request.mock.calls[0]?.[1].headers).toEqual(expect.objectContaining({
+      accept: 'application/vnd.github.raw+json',
+    }))
+  })
+
+  it('retrieves a GitHub blob through raw.githubusercontent.com and preserves the source URL', async () => {
+    const request = vi.fn(async (_url: URL, _init: RequestInit) => new Response('# Configuration', {
+      status: 200,
+      headers: { 'content-type': 'text/plain' },
+    }))
+    const guarded = new HttpFetchProvider(limits, {
+      resolveAddresses: async () => [{ address: '185.199.110.133', family: 4 }],
+      request,
+    })
+    const source = 'https://github.com/openai/codex/blob/main/docs/config.md'
+
+    await expect(guarded.fetch({ url: source })).resolves.toMatchObject({
+      url: source,
+      body: { content: '# Configuration' },
+    })
+    expect(request.mock.calls[0]?.[0].toString()).toBe('https://api.github.com/repos/openai/codex/contents/docs/config.md?ref=main')
+  })
+})
 
 describe('policy helpers', () => {
   it('validates scheme, credentials, and length', () => {
@@ -64,6 +195,23 @@ describe('policy helpers', () => {
     expect(isSameOrigin(new URL('http://a.com'), new URL('https://a.com'))).toBe(false)
   })
 
+  it('maps only supported GitHub public-content URLs', () => {
+    expect(githubContentTarget(new URL('https://www.github.com/openai/codex.git'))?.toString())
+      .toBe('https://api.github.com/repos/openai/codex/readme')
+    expect(githubContentTarget(new URL('https://github.com/openai/codex/raw/main/README.md'))?.toString())
+      .toBe('https://api.github.com/repos/openai/codex/contents/README.md?ref=main')
+    expect(githubContentTarget(new URL('https://raw.githubusercontent.com/openai/codex/main/README.md'))?.toString())
+      .toBe('https://api.github.com/repos/openai/codex/contents/README.md?ref=main')
+    expect(githubContentTarget(new URL('https://github.com/openai/codex/issues/1'))).toBeUndefined()
+    expect(githubContentTarget(new URL('http://github.com/openai/codex'))).toBeUndefined()
+    expect(githubContentTarget(new URL('https://example.com/openai/codex'))).toBeUndefined()
+    expect(githubContentTarget(new URL('https://github.com/openai'))).toBeUndefined()
+    expect(githubContentTarget(new URL('https://github.com/open%2Fai/codex'))).toBeUndefined()
+    expect(githubContentTarget(new URL('https://github.com/openai/.git'))).toBeUndefined()
+    expect(githubContentTarget(new URL('https://raw.githubusercontent.com/openai'))).toBeUndefined()
+    expect(githubContentTarget(new URL('https://raw.githubusercontent.com/open%2Fai/codex/main/README.md'))).toBeUndefined()
+  })
+
   it('parses the charset parameter', () => {
     expect(parseCharset('text/html; charset=UTF-8')).toBe('utf-8')
     expect(parseCharset('text/plain; charset="iso-8859-1"')).toBe('iso-8859-1')
@@ -79,6 +227,21 @@ describe('policy helpers', () => {
 })
 
 describe('HttpFetchProvider success', () => {
+  it('retries a transport failure within the provider deadline', async () => {
+    const request = vi.fn<NonNullable<HttpFetchDependencies['request']>>()
+      .mockRejectedValueOnce(new Error('transient connect failure'))
+      .mockResolvedValueOnce(new Response('recovered', { status: 200, headers: { 'content-type': 'text/plain' } }))
+    const guarded = new HttpFetchProvider(limits, {
+      resolveAddresses: async () => [{ address: '93.184.216.34', family: 4 }],
+      request,
+    })
+
+    await expect(guarded.fetch({ url: 'https://example.com/' })).resolves.toMatchObject({
+      body: { content: 'recovered' },
+    })
+    expect(request).toHaveBeenCalledTimes(2)
+  })
+
   it('fetches a text body', async () => {
     handler = (_req, res) => { res.writeHead(200, { 'content-type': 'text/plain' }); res.end('hello world') }
     const result = await provider().fetch({ url: base })
@@ -284,6 +447,36 @@ describe('HttpFetchProvider invalid URLs and abort', () => {
       .rejects.toThrow(expect.objectContaining({ code: 'WEB_BLOCKED_URL' }))
   })
 
+  it('blocks private IPv4 and IPv6 literals before DNS or network access', async () => {
+    await expect(new HttpFetchProvider(limits).fetch({ url: 'http://127.0.0.1/' }))
+      .rejects.toThrow(expect.objectContaining({ code: 'WEB_BLOCKED_URL' }))
+    await expect(new HttpFetchProvider(limits).fetch({ url: 'http://[::1]/' }))
+      .rejects.toThrow(expect.objectContaining({ code: 'WEB_BLOCKED_URL' }))
+  })
+
+  it('maps a DNS resolution failure to WEB_PROVIDER_ERROR', async () => {
+    const guarded = new HttpFetchProvider(limits, {
+      resolveAddresses: async () => { throw new Error('resolver unavailable') },
+    })
+    await expect(guarded.fetch({ url: 'https://github.com/' }))
+      .rejects.toThrow(expect.objectContaining({ code: 'WEB_PROVIDER_ERROR' }))
+  })
+
+  it('closes the pinned dispatcher after a request-phase failure', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('connection failed') }))
+    await expect(new HttpFetchProvider(limits).fetch({ url: 'https://8.8.8.8/' }))
+      .rejects.toThrow(expect.objectContaining({ code: 'WEB_PROVIDER_ERROR' }))
+  })
+
+  it('maps an AbortError from transport even before the signal observes cancellation', async () => {
+    const guarded = new HttpFetchProvider(limits, {
+      resolveAddresses: async () => [{ address: '140.82.112.4', family: 4 }],
+      request: async () => { throw new DOMException('aborted', 'AbortError') },
+    })
+    await expect(guarded.fetch({ url: 'https://github.com/' }))
+      .rejects.toThrow(expect.objectContaining({ code: 'WEB_ABORTED' }))
+  })
+
   it('honors a pre-aborted signal', async () => {
     const controller = new AbortController()
     controller.abort()
@@ -365,6 +558,14 @@ describe('HttpFetchProvider body cancellation on error paths', () => {
       .rejects.toThrow(expect.objectContaining({ code: 'WEB_PROVIDER_ERROR' }))
     expect(cancelled()).toBe(true)
   })
+
+  it('cancels the body when a redirect Location cannot be parsed', async () => {
+    const { response, cancelled } = fakeResponse({ status: 302, headers: {}, location: 'http://[' })
+    vi.stubGlobal('fetch', vi.fn(async () => response))
+    await expect(provider().fetch({ url: 'http://127.0.0.1:9/' }))
+      .rejects.toThrow(expect.objectContaining({ code: 'WEB_PROVIDER_ERROR' }))
+    expect(cancelled()).toBe(true)
+  })
 })
 
 describe('web-fetch-http plugin registration', () => {
@@ -372,10 +573,11 @@ describe('web-fetch-http plugin registration', () => {
     const ctx = new Context()
     await ctx.plugin(WebRuntime, { fetchProvider: LOCAL_FETCH_PROVIDER_ID })
     const fiber = await ctx.plugin(fetchPlugin, {})
-    await expect(ctx.web.fetch({ url: `${base}/` }))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })))
+    await expect(ctx.web.fetch({ url: 'https://example.com/' }))
       .resolves.toMatchObject({ statusCode: 200 })
     await fiber.dispose()
-    await expect(ctx.web.fetch({ url: `${base}/` }))
+    await expect(ctx.web.fetch({ url: 'https://example.com/' }))
       .rejects.toThrow(expect.objectContaining({ code: 'WEB_PROVIDER_CONFIGURED_MISSING' }))
   })
 
@@ -418,11 +620,19 @@ describe('web-fetch-http plugin registration', () => {
       .rejects.toThrow(/maxRedirects must be a non-negative integer/)
   })
 
+  it('rejects a non-positive transport attempt cap at construction', async () => {
+    const ctx = new Context()
+    await ctx.plugin(WebRuntime, { fetchProvider: LOCAL_FETCH_PROVIDER_ID })
+    await expect(ctx.plugin(fetchPlugin, { maxAttempts: 0 }))
+      .rejects.toThrow(/maxAttempts must be a positive integer/)
+  })
+
   it('accepts maxRedirects: 0 (follow no redirects) as valid config', async () => {
     const ctx = new Context()
     await ctx.plugin(WebRuntime, { fetchProvider: LOCAL_FETCH_PROVIDER_ID })
     const fiber = await ctx.plugin(fetchPlugin, { maxRedirects: 0 })
-    await expect(ctx.web.fetch({ url: `${base}/` }))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })))
+    await expect(ctx.web.fetch({ url: 'https://example.com/' }))
       .resolves.toMatchObject({ statusCode: 200 })
     await fiber.dispose()
   })

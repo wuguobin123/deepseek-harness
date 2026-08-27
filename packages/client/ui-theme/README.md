@@ -2,9 +2,9 @@
 
 English | [中文](README.zh.md)
 
-Theme plugin: ThemeRuntime over the --dsw-* token base stylesheets (static scale + alias semantic layers). The service owns the live theme preference (`light`/`dark`/`system`), resolves `system` through `prefers-color-scheme`, and publishes immutable `ThemeSnapshot`s on the `theme/change` event; it never touches the DOM — ui-layout's presenter applies the resolved snapshot (`html { color-scheme }`, `body[data-ds-dark-theme]`, and inline alias tokens). A loopback browser provides the service immediately with `system`, then loads `ui-theme.preference` in the background and writes each built-in selection through the Host settings API, whose local provider stores it in `$DSH_HOME/settings.yaml` by default; pushed settings changes and reconnects refetch it, rapid selections are serialized in gesture order with namespace revisions, and a rejected latest write reloads the durable value. A remote browser cannot access the privileged settings API, so its selection remains process-local. Third-party registered theme ids remain an in-process extension and do not cross the built-in settings schema; removing one never overwrites the last durable built-in preference. The [Host-backed preferences decision](../../../.agents/notes/implemented/bug-fix/2026-08-06-host-backed-web-preferences.md) owns the persistence boundary.
+Theme plugin: ThemeRuntime over the --dsw-* token base stylesheets (static scale + alias semantic layers). The shipped client and Host bootstrap start directly in `light`; the product registers no Appearance settings row or Host theme setting, and ignores legacy `ui-theme.preference` and desktop `dsh.theme` values. The service publishes immutable `ThemeSnapshot`s on `theme/change` and never touches the DOM — ui-layout's presenter applies the resolved snapshot (`html { color-scheme }`, `body[data-ds-dark-theme]`, and inline alias tokens). Programmatic `setTheme` and third-party theme registration remain in-process extension APIs, including `system` resolution through `prefers-color-scheme`. The [fixed product presentation decision](../../../.agents/notes/implemented/simplification/2026-08-24-fixed-chinese-light-client.md) owns the product default and removed setting.
 
-When the host composition includes an HTTP server, the host half injects a synchronous bootstrap immediately after the opening `<body>` tag. Each index response embeds the registered Host setting for `ui-theme.preference`, or `system` when no settings provider is present; the browser resolves `system` from the OS scheme, then sets `color-scheme` and `body[data-ds-dark-theme]` before the shell loading page renders. Compositions without an HTTP server remain unaffected, and ThemeRuntime and ui-layout remain authoritative for client state and subsequent DOM updates after the plugin tree activates.
+When the host composition includes an HTTP server, the host half injects a synchronous light bootstrap immediately after the opening `<body>` tag, then sets `color-scheme` and clears `body[data-ds-dark-theme]` before the shell loading page renders. Compositions without an HTTP server remain unaffected, and ThemeRuntime and ui-layout remain authoritative for client state and subsequent DOM updates after the plugin tree activates.
 
 `src/styles/` holds five sheets imported in order by ui-theme's dynamic client entry: `base.css`, `design-platform.css`, `scrollbar.css`, `gradient-shadow-text.css`, and `shiki.css`. The client bundle compiles and injects them as plugin-owned global styles, so unload and HMR remove them with ui-theme instead of leaving theme CSS in the static web shell. `scrollbar.css` is the sole consumer of the `--dsw-alias-scrollbar-*` tokens and must follow `design-platform.css`, which declares them.
 
@@ -14,7 +14,7 @@ The two paths are mutually exclusive by construction. `scrollbar-width`/`scrollb
 
 ## Model Experience
 
-None, as the theme service manages a browser preference; nothing here reaches a model request.
+None, as the theme service manages browser presentation state; nothing here reaches a model request.
 
 #### KV Cache effect
 

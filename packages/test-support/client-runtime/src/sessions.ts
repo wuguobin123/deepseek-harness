@@ -107,6 +107,14 @@ export class FixtureSession implements SessionFace {
   }
 
   /**
+   * Fail-loud stub; supply `retryOpen` on the fixture to exercise it.
+   * @returns Never; the unstubbed method always throws.
+   */
+  retryOpen(): never {
+    throw new Error(`test session "${this.sessionId}": retryOpen is not stubbed — supply it on the fixture's session face`)
+  }
+
+  /**
    * Fail-loud stub; supply `cancel` on the fixture's session face to exercise it.
    * @returns never — always throws.
    */

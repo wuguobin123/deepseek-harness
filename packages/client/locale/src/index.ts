@@ -1,8 +1,6 @@
-/** Host registration for the browser locale preference. */
+/** Host half for selecting the Chinese-default browser locale client. */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
-import { LOCALE_SETTINGS_NAMESPACE, LocaleSettingsSchema } from './locale-settings.ts'
 
 export {
   LOCALE_IDS, LOCALE_PREFERENCE_FIELD, LOCALE_SETTINGS_NAMESPACE,
@@ -10,14 +8,8 @@ export {
 } from './locale-settings.ts'
 
 /**
- * Register the durable locale section when a settings provider exists.
- * @param ctx - Host context whose optional settings service owns the section.
+ * The product exposes no Host language setting; the function plugin remains
+ * as the package entry that selects the browser client half.
+ * @param _ctx - Host context unused by the fixed-locale entry.
  */
-export function apply(ctx: Context): void {
-  ctx.inject(['settings'], (settingsCtx) => {
-    settingsCtx.settings.register(
-      settingsNamespace(LOCALE_SETTINGS_NAMESPACE),
-      LocaleSettingsSchema,
-    )
-  })
-}
+export function apply(_ctx: Context): void {}

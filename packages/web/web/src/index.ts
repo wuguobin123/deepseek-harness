@@ -2,7 +2,7 @@
  * Service Definition for the web access capability seam (`ctx.web`): registries and provider-selecting execution for search and
  * fetch. Duplicate ids are rejected. At execution time, a configured provider must exist and
  * be usable; without one, exactly one usable provider is required, so selection never depends
- * on registration order.
+ * on registration order. Fetch can retry safe 403/429 responses through an explicit fallback provider.
  * @module @deepseek-ai/dsh-web
  */
 
@@ -49,14 +49,22 @@ interface Selection<P> {
 /**
  * Config for the web seam. `searchProvider` / `fetchProvider` pin which provider
  * wins for each capability; both are optional (a single registered usable
- * provider auto-selects). Operational overrides such as environment variables
- * must feed these same fields rather than introduce a hidden priority chain.
+ * provider auto-selects). Search credential fallback requires an explicit
+ * `searchProvider` and runs only when that provider reports missing credentials.
+ * Fetch status fallback requires an explicit `fetchProvider` and runs only for
+ * a primary result with status 403 or 429.
+ * Operational overrides such as environment variables must feed these same
+ * fields rather than introduce a hidden priority chain.
  */
 export interface WebRuntimeConfig {
   /** Explicit search provider id. Omitted = auto-select when exactly one usable. */
   readonly searchProvider?: string
+  /** Explicit search provider used only after the primary reports missing credentials. */
+  readonly searchCredentialFallbackProvider?: string
   /** Explicit fetch provider id. Omitted = auto-select when exactly one usable. */
   readonly fetchProvider?: string
+  /** Explicit fetch provider used only after a primary 403 or 429 result. */
+  readonly fetchFallbackProvider?: string
 }
 
 /**
@@ -75,22 +83,46 @@ export class WebRuntime extends Service {
   /**
    * Provider selection config. Operational env overrides feed the SAME fields:
    * `$DSH_WEB_SEARCH_PROVIDER` / `$DSH_WEB_FETCH_PROVIDER` are equivalent to
-   * `searchProvider` / `fetchProvider` and are NOT a hidden priority chain.
+   * `searchProvider` / `fetchProvider`; `$DSH_WEB_SEARCH_CREDENTIAL_FALLBACK_PROVIDER`
+   * is equivalent to `searchCredentialFallbackProvider`; `$DSH_WEB_FETCH_FALLBACK_PROVIDER`
+   * is equivalent to `fetchFallbackProvider`. These are NOT a hidden
+   * priority chain.
    */
   static Config: z<WebRuntimeConfig> = z.object({
     searchProvider: z.string(),
+    searchCredentialFallbackProvider: z.string(),
     fetchProvider: z.string(),
+    fetchFallbackProvider: z.string(),
   })
 
   private searchProviders = new Map<string, WebSearchProvider>()
   private fetchProviders = new Map<string, WebFetchProvider>()
   private readonly searchProviderId: string | undefined
+  private readonly searchCredentialFallbackProviderId: string | undefined
   private readonly fetchProviderId: string | undefined
+  private readonly fetchFallbackProviderId: string | undefined
 
   constructor(ctx: Context, config: WebRuntimeConfig = {}) {
     super(ctx, 'web')
     this.searchProviderId = config.searchProvider ?? process.env.DSH_WEB_SEARCH_PROVIDER
+    this.searchCredentialFallbackProviderId = config.searchCredentialFallbackProvider
+      ?? process.env.DSH_WEB_SEARCH_CREDENTIAL_FALLBACK_PROVIDER
     this.fetchProviderId = config.fetchProvider ?? process.env.DSH_WEB_FETCH_PROVIDER
+    this.fetchFallbackProviderId = config.fetchFallbackProvider ?? process.env.DSH_WEB_FETCH_FALLBACK_PROVIDER
+    if (this.searchCredentialFallbackProviderId !== undefined
+      && (this.searchProviderId === undefined || this.searchCredentialFallbackProviderId === this.searchProviderId)) {
+      throw new WebError(
+        'searchCredentialFallbackProvider requires a distinct explicit searchProvider',
+        'WEB_INVALID_CONFIG',
+      )
+    }
+    if (this.fetchFallbackProviderId !== undefined
+      && (this.fetchProviderId === undefined || this.fetchFallbackProviderId === this.fetchProviderId)) {
+      throw new WebError(
+        'fetchFallbackProvider requires a distinct explicit fetchProvider',
+        'WEB_INVALID_CONFIG',
+      )
+    }
   }
 
   /**
@@ -142,14 +174,25 @@ export class WebRuntime extends Service {
       providers: this.searchProviders,
       ...this.searchProviderId !== undefined ? { configuredId: this.searchProviderId } : {},
     })
-    const result = await provider.search(request, signal)
+    let result: WebSearchResult
+    try {
+      result = await provider.search(request, signal)
+    } catch (error: unknown) {
+      if (!isCredentialMissingError(error) || this.searchCredentialFallbackProviderId === undefined) throw error
+      const fallback = resolveProvider({
+        providers: this.searchProviders,
+        configuredId: this.searchCredentialFallbackProviderId,
+      })
+      result = await fallback.search(request, signal)
+    }
     return capSources(result, request.maxResults)
   }
 
   /**
    * Retrieve one URL through the selected provider. Resolves the provider at
    * call time with the selection rules above; throws {@link WebError} when the
-   * capability cannot run. A non-2xx response is a result, not a throw.
+   * capability cannot run. A primary 403 or 429 result invokes the explicit
+   * fallback; a fallback credential error preserves the primary result.
    * @param request - the URL plus retrieval options.
    * @param signal - optional cancellation signal forwarded to the provider.
    * @returns the retrieval outcome; non-2xx responses resolve descriptively.
@@ -159,8 +202,27 @@ export class WebRuntime extends Service {
       providers: this.fetchProviders,
       ...this.fetchProviderId !== undefined ? { configuredId: this.fetchProviderId } : {},
     })
-    return provider.fetch(request, signal)
+    const result = await provider.fetch(request, signal)
+    if (this.fetchFallbackProviderId === undefined || !isFetchFallbackStatus(result.statusCode)) return result
+    const fallback = resolveProvider({
+      providers: this.fetchProviders,
+      configuredId: this.fetchFallbackProviderId,
+    })
+    try {
+      return await fallback.fetch(request, signal)
+    } catch (error: unknown) {
+      if (isCredentialMissingError(error)) return result
+      throw error
+    }
   }
+}
+
+function isCredentialMissingError(error: unknown): error is WebError {
+  return error instanceof WebError && error.code === 'WEB_PROVIDER_CREDENTIAL_MISSING'
+}
+
+function isFetchFallbackStatus(statusCode: number): boolean {
+  return statusCode === 403 || statusCode === 429
 }
 
 interface ResolvableProvider {

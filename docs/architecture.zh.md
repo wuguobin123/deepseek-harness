@@ -50,6 +50,10 @@ dsh --profile web --dump-config
 | [`core/scope`](subsystems/scope.zh.md) | 按 agent 划分作用域的注册原语 | 库，无 ctx 键 |
 | [`llm/llm`](subsystems/llm-streaming.zh.md) | 消息与流式词汇表，以及适配器 seam | `ctx.llm` |
 
+## 认证账号组合
+
+多用户 Host 在宿主平面保存账号安装状态，并在 Agent 发布前应用所选能力。认证 RPC principal 拥有插件工厂修改；持久 Session `ownerId` 拥有 Skill 查询与对话式 Skill 写入。系统插件与 Skill 根目录仍是部署拥有的默认项，可选插件记录与可写 Skill 目录则按账号隔离。每个账号 Session 在创建时记录其可选插件选择；后续安装变化只影响后续 Session，冷恢复与 fork 使用已记录选择，使历史记录保留生成它时的能力集合。参见[实现说明](../.agents/notes/implemented/architecture/2026-08-26-account-scoped-plugin-and-skill-installation.zh.md)。
+
 <a id="events"></a>
 
 ## 事件

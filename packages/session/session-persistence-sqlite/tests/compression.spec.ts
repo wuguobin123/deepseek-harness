@@ -160,7 +160,7 @@ describe('SQLite compression', () => {
     expect(() => decodeStorageRecord(record)).toThrow(/malformed .* storage row/)
   })
 
-  it('decodes the schema-17 row vocabulary without another package codec', () => {
+  it('decodes the schema-18 row vocabulary without another package codec', () => {
     const fixture: EventRow = {
       seq: 7,
       type: 'text-chunks',

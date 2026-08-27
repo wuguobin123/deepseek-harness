@@ -2,16 +2,9 @@
 
 English | [中文](README.zh.md)
 
-The Python subagent provider for the ops group. Each child is a fresh Python
-interpreter process that runs the my-agents business logic (the ops-domain
-Pydantic business models and skill implementations) and exchanges
-newline-delimited JSON-RPC 2.0 messages with the parent harness over stdio.
-The child shares no Cordis context with the parent.
+The Python subagent provider for the ops group. Each child is a fresh Python interpreter process that runs the my-agents business logic (the ops-domain Pydantic business models and skill implementations) and exchanges newline-delimited JSON-RPC 2.0 messages with the parent harness over stdio. The child shares no Cordis context with the parent.
 
-This is the in-tree counterpart to [`dsh-subagent-dsh-sdk`](../../subagent/subagent-dsh-sdk/README.md):
-that backend spawns a child TypeScript harness runtime; this one spawns a
-Python interpreter, so the business runtime that holds the Pydantic domain
-models can stay where it is most productive.
+This is the in-tree counterpart to [`dsh-subagent-dsh-sdk`](../../subagent/subagent-dsh-sdk/README.md): that backend spawns a child TypeScript harness runtime; this one spawns a Python interpreter, so the business runtime that holds the Pydantic domain models can stay where it is most productive.
 
 ## Wire protocol
 
@@ -24,38 +17,19 @@ The wire is intentionally minimal for the Phase 0 zero-milestone:
 | Python -> TS | `agent.turn.result` | `{ content, tool_calls, stop_reason, usage }` — one model response |
 | Python -> TS (notification) | `session.event` | `{ type, data }` — append-only ops-domain fact to the parent session log |
 
-The Python child reads/writes one JSON object per line on stdin/stdout; the
-parent harness parses line-delimited JSON. JSON-RPC 2.0 framing is preserved
-so future phases can add `tool.call` forwarding, `request.context` injection,
-and `subagent.continuation` for child-to-parent messaging without changing
-the wire shape.
+The Python child reads/writes one JSON object per line on stdin/stdout; the parent harness parses line-delimited JSON. JSON-RPC 2.0 framing is preserved so future phases can add `tool.call` forwarding, `request.context` injection, and `subagent.continuation` for child-to-parent messaging without changing the wire shape.
 
 ## Start and ownership
 
-`start(request)` resolves the child's working directory exactly like the
-SDK and ACP backends (config override validated once at load, else the
-delegating parent session's cwd — never the server process's own cwd),
-spawns `python -m <config.module>` and the configured `args`, then performs
-the `initialize` JSON-RPC handshake. Fulfillment happens before the run returns,
-so a successful start means the Python child is ready.
+`start(request)` resolves the child's working directory exactly like the SDK and ACP backends (config override validated once at load, else the delegating parent session's cwd — never the server process's own cwd), spawns `python -m <config.module>` and the configured `args`, then performs the `initialize` JSON-RPC handshake. Fulfillment happens before the run returns, so a successful start means the Python child is ready.
 
-The returned run id is minted in the parent namespace; the child's session
-id exists only inside the Python process. After publication the provider
-owns the subprocess and forwards any `session.event` notifications through
-the parent session log so persistence, projection, and UI replay all
-reflect ops-domain facts without re-implementing them.
+The returned run id is minted in the parent namespace; the child's session id exists only inside the Python process. After publication the provider owns the subprocess and forwards any `session.event` notifications through the parent session log so persistence, projection, and UI replay all reflect ops-domain facts without re-implementing them.
 
-`dispose()` closes stdin, waits for `disposeEofGraceMs`, then escalates
-SIGTERM (with `disposeGraceMs` to SIGKILL).
+`dispose()` closes stdin, waits for `disposeEofGraceMs`, then escalates SIGTERM (with `disposeGraceMs` to SIGKILL).
 
 ## Capabilities and context
 
-The provider advertises no start-time capabilities
-(`outputSchema` / `depthLimit` / `toolFilter` / `persona` all false) and
-`inheritsParentContext: false`: the child is a fresh interpreter in another
-process and the only parent-derived input is the workspace cwd. Tool
-routing is parent-side; the Python side sees tool definitions in the
-`agent.turn` payload and decides how to use them.
+The provider advertises no start-time capabilities (`outputSchema` / `depthLimit` / `toolFilter` / `persona` all false) and `inheritsParentContext: false`: the child is a fresh interpreter in another process and the only parent-derived input is the workspace cwd. Tool routing is parent-side; the Python side sees tool definitions in the `agent.turn` payload and decides how to use them.
 
 ## Configuration
 
@@ -85,6 +59,19 @@ routing is parent-side; the Python side sees tool definitions in the
 
 ## See also
 
-- [`dsh-subagent`](../subagent/README.md) — provider registry contract and out-of-process helpers
-- [`dsh-subprocess`](../subprocess/subprocess/README.md) — `scrubbedParentEnv` for safe child env layering
-- [`dsh-session`](../core/session/README.md) — `session.append` for forwarding ops-domain events
+- [`dsh-subagent`](../../subagent/subagent/README.md) — provider registry contract and out-of-process helpers
+- [`dsh-subprocess`](../../subprocess/subprocess/README.md) — `scrubbedParentEnv` for safe child env layering
+- [`dsh-session`](../../core/session/README.md) — `session.append` for forwarding ops-domain events
+
+## Model Experience
+
+Indirectly, through the parent-owned messages and tool definitions passed to the child runtime for its model request.
+
+#### KV Cache effect
+
+Provider startup adds no parent request prefix; the child runtime owns caching for its independent request.
+
+## Known Limitations and Deferred Work
+
+- **One process per child run.** The provider has no interpreter pool or warm continuation process.
+- **Minimal wire only.** Parent tool-call forwarding and continuable child-to-parent messaging remain deferred protocol additions.

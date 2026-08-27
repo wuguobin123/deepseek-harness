@@ -31,12 +31,16 @@ function scriptedApi(overrides: {
   account?: Partial<ApiProxy['account']>
   wallet?: Partial<ApiProxy['wallet']>
   modelKeys?: Partial<ApiProxy['modelKeys']>
+  customModels?: Partial<ApiProxy['customModels']>
   artifactRegistry?: Partial<ApiProxy['artifactRegistry']>
+  userContext?: Partial<ApiProxy['userContext']>
+  accountInference?: Partial<ApiProxy['accountInference']>
   respond?: ApiProxy['respond']
 } = {}): ApiProxy {
   async function *empty<F>(): AsyncGenerator<RpcRequest<F>> { /* no frames */ }
   const err = <T>(r: RpcRequest<unknown>): Promise<RpcResponse<T>> =>
     Promise.resolve({ rpcId: r.rpcId, result: { ok: false, error: { code: 'internal' as const, message: 'stub', details: {} } } })
+  const accountPlugin = { pluginId: 'stub', title: 'Stub', description: 'Fixture', version: '1', systemDefault: false, installed: false }
   return {
     sessions: {
       list: r => ok(r, { items: [] }),
@@ -85,6 +89,7 @@ function scriptedApi(overrides: {
       ...overrides.host,
     },
     workspace: {
+      importDirectory: r => ok(r, { workspace: { workspaceId: 'w1' as never, path: '/t', title: 't', sessionIds: [], createdAt: '0', updatedAt: '0' }, created: true }),
       list: r => ok(r, { items: [], archivedSessionIds: [] }),
       create: r => ok(r, { workspace: { workspaceId: 'w1' as never, path: '/t', title: 't', sessionIds: [], createdAt: '0', updatedAt: '0' }, created: true }),
       rename: r => ok(r, { workspace: { workspaceId: 'w1' as never, path: '/t', title: 't', sessionIds: [], createdAt: '0', updatedAt: '0' } }),
@@ -135,6 +140,14 @@ function scriptedApi(overrides: {
     account: {
       signup: r => ok(r, { userId: 'u-test', displayName: null, sessionToken: 'tok-test', expiresAt: 0 }),
       emailCode: r => ok(r, { expiresInSeconds: 600, retryAfterSeconds: 60 }),
+      invites: {
+        create: r => ok(r, {
+          invitationId: 'inv-test', code: 'share-code', codeMask: '••••code',
+          createdAt: 1, expiresAt: 2, consumedAt: null, redeemedBy: null,
+        }),
+        rotate: r => ok(r, { invitationId: 'inv-test', code: 'share-code', codeMask: '••••code', createdAt: 1, expiresAt: 2, consumedAt: null, redeemedBy: null }),
+        list: r => ok(r, { items: [] }),
+      },
       signin: r => ok(r, { userId: 'u-test', displayName: null, sessionToken: 'tok-test', expiresAt: 0 }),
       signout: r => ok(r, { revoked: true }),
       state: r => ok(r, null),
@@ -151,10 +164,21 @@ function scriptedApi(overrides: {
       ...overrides.wallet,
     },
     modelKeys: {
-      provision: r => ok(r, { keyId: 'mk_test', userId: 'u-test', label: 'workbuddy', createdAt: 0, keyValue: 'sk_test' }),
+      provision: r => ok(r, { keyId: 'mk_test', userId: 'u-test', label: 'xiaowei', createdAt: 0, keyValue: 'sk_test' }),
       list: r => ok(r, { items: [] }),
       revoke: r => ok(r, { revoked: true }),
       ...overrides.modelKeys,
+    },
+    customModels: {
+      create: err,
+      list: r => ok(r, { items: [] }),
+      remove: r => ok(r, { removed: false }),
+      ...overrides.customModels,
+    },
+    accountPlugins: {
+      list: r => ok(r, { items: [] }),
+      install: r => ok(r, { ...accountPlugin, pluginId: r.payload.pluginId, installed: true }),
+      uninstall: r => ok(r, { ...accountPlugin, pluginId: r.payload.pluginId }),
     },
     artifactRegistry: {
       list: r => ok(r, { items: [] }),
@@ -162,7 +186,30 @@ function scriptedApi(overrides: {
       remove: r => ok(r, { removed: true }),
       ...overrides.artifactRegistry,
     },
+    userContext: {
+      list: r => ok(r, { items: [] }),
+      get: r => ok(r, { missing: true as const }),
+      set: r => ok(r, {
+        entry: {
+          kind: r.payload.kind,
+          key: r.payload.key,
+          workspaceId: r.payload.workspaceId ?? null,
+          value: r.payload.value,
+          updatedAt: 0,
+          createdAt: 0,
+        },
+      }),
+      delete: r => ok(r, { removed: false }),
+      ...overrides.userContext,
+    },
     events: { mux: () => empty<MuxFrame>(), host: () => empty<HostFrame>(), ...overrides.events },
+    accountInference: {
+      async *stream() {
+        yield { version: 1, type: 'chunk', chunk: { type: 'finish', reason: { kind: 'stop' } } }
+        yield { version: 1, type: 'done' }
+      },
+      ...overrides.accountInference,
+    },
     respond: overrides.respond ?? (() => Promise.resolve({ accepted: false as const, reason: 'not-pending' as const })),
     downloads: { sessionLog: async () => new Response('stub', { status: 404 }) },
   }

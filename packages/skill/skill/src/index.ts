@@ -14,6 +14,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import { assertNever } from '@deepseek-ai/dsh-llm'
 import { NamedEntries, ScopedLayers, scopeChainOf, scopeOf } from '@deepseek-ai/dsh-scope'
 import type { ScopeKey, ScopeLayer } from '@deepseek-ai/dsh-scope'
+import type { SessionOwnerId } from '@deepseek-ai/dsh-session'
 import z from '@deepseek-ai/schemastery'
 import type Schema from '@deepseek-ai/schemastery'
 
@@ -106,6 +107,8 @@ export interface SkillLookupOptions {
   readonly cwd?: string | undefined
   /** Abort discovery or loading work for the current caller. */
   readonly signal?: AbortSignal | undefined
+  /** Account owner used by account-scoped providers; never supplied by model tool arguments. */
+  readonly ownerId?: SessionOwnerId | undefined
 }
 
 /**
@@ -525,7 +528,7 @@ export class SkillRegistry extends Service {
       // The chain is part of the key rather than assumed stable: a blank-session
       // recompose re-parents an existing scope without touching this registry,
       // and only a chain-bearing key makes the next read see the new preset.
-      const key = this.collectCacheKey(options.cwd, scopeChainOf(options.scope), revision)
+      const key = this.collectCacheKey(options.cwd, options.ownerId, scopeChainOf(options.scope), revision)
       const cached = this.collectCache.get(key)
       if (cached !== undefined) return { entries: cached, cacheable: true }
 
@@ -625,6 +628,15 @@ export class SkillRegistry extends Service {
     this.notifyChange()
   }
 
+  /**
+   * Invalidate provider-backed catalogs after a trusted first-party mutation.
+   * Provider plugins normally use their registration control; this entry is
+   * for a service that owns the durable write but not the provider instance.
+   */
+  refresh(): void {
+    this.invalidateCache()
+  }
+
   /** Invalidate after a stale definition load, only while the exact registration that produced the entry is still live. */
   private invalidateEntry(entry: IndexedCandidate): void {
     /* v8 ignore else -- A definition load can outlive the exact provider registration it selected. */
@@ -641,8 +653,13 @@ export class SkillRegistry extends Service {
     return id
   }
 
-  private collectCacheKey(cwd: string | undefined, chain: ScopeKey[], revision: number): string {
-    return JSON.stringify({ cwd, scopes: chain.map(key => this.scopeId(key)), revision })
+  private collectCacheKey(
+    cwd: string | undefined,
+    ownerId: SessionOwnerId | undefined,
+    chain: ScopeKey[],
+    revision: number,
+  ): string {
+    return JSON.stringify({ cwd, ownerId, scopes: chain.map(key => this.scopeId(key)), revision })
   }
 
   /** Notify catalog observers without making their refresh work load-bearing. */

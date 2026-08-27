@@ -78,10 +78,11 @@ describe('gate graph validation', () => {
     await expect(runGates(subject, subject.length, execute)).resolves.toHaveLength(subject.length)
   })
 
-  it('keeps the public repository link policy in the documentation gate', () => {
-    const ids = withPnpmEntrypoint(() => gatesForMode('doc-sync').map(subject => subject.id))
+  it.each(['doc-sync', 'ci-static'] as const)('keeps documentation policy gates in %s', (mode) => {
+    const ids = withPnpmEntrypoint(() => gatesForMode(mode).map(subject => subject.id))
 
     expect(ids).toContain('public-repository-links')
+    expect(ids).toContain('sdd')
   })
 
   it('keeps the hygiene aggregate aligned with the package script checks', () => {

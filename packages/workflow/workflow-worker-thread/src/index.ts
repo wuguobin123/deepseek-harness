@@ -141,6 +141,13 @@ class WorkerThreadWorkflowEngine extends WorkflowEngine {
    * @returns the live run (its `result` resolves when the script settles).
    */
   start(request: WorkflowStartRequest): WorkflowRun {
+    const ownerId = request.parent.session?.header?.ownerId
+    if (ownerId !== undefined && ownerId.length > 0) {
+      throw new WorkflowError(
+        'account session cannot run host worker workflow until an account-confined provider is composed',
+        'ACCOUNT_HOST_EXECUTION_DENIED',
+      )
+    }
     const meta = validateMeta(request.meta)
     assertBodyParses(request.script, meta.name)
     const subagentProvider = resolveSubagentProvider(this.ctx, this.config.provider, request.subagentProvider)

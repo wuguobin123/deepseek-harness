@@ -40,6 +40,7 @@ function sessionFakeFor() {
   return {
     open: vi.fn(() => Promise.resolve()),
     loadOlder: vi.fn<ISession['loadOlder']>(() => Promise.resolve()),
+    retryOpen: vi.fn<ISession['retryOpen']>(() => Promise.resolve()),
     prompt: vi.fn<ISession['prompt']>(() => Promise.resolve({ ok: true, value: { accepted: true } })),
     cancel: vi.fn<ISession['cancel']>(() => Promise.resolve({ ok: true, value: { accepted: true } })),
   } satisfies SessionBehaviorOverrides
@@ -140,6 +141,8 @@ describe('conversation slot inject API', () => {
     const chatView = b.chatViewApi(ROOT)
     chatView.injected.loadOlder()
     expect(b.sessionFake.loadOlder).toHaveBeenCalledTimes(1)
+    chatView.injected.retryHistory()
+    expect(b.sessionFake.retryOpen).toHaveBeenCalledTimes(1)
     chatView.injected.forkAt(17)
     await vi.waitFor(() => {
       expect(b.runtime.sessions.calls).toContainEqual({ method: 'open', args: [ROOT] })
@@ -350,13 +353,15 @@ describe('details inject API', () => {
   it('details injects the one layout callback; selection rides the shared store instead', async () => {
     const b = await bench()
     const entry = b.entryOf('details')
-    const injected = (entry.inject as unknown as () => DetailsInjected)()
+    const details = b.runtime.storeOf('details', ROOT) as ChatInstance
+    const injected = (entry.inject as unknown as (
+      sessionId: SessionId, actions: ChatActions,
+    ) => DetailsInjected)(ROOT, details.actions)
     expect(Object.keys(injected)).toEqual(['closeDetails'])
     injected.closeDetails()
     expect(b.layoutFake.closeDetails).toHaveBeenCalledTimes(1)
     // The shared handle: details resolves the SAME instance conversation writes.
     const conv = b.runtime.storeOf('conversation.session', ROOT)
-    const details = b.runtime.storeOf('details', ROOT)
     expect(details).toBe(conv)
     await b.runtime.dispose()
   })

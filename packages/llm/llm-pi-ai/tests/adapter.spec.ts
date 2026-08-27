@@ -10,6 +10,7 @@ import type {
   StoredImageAttachment,
 } from '@deepseek-ai/dsh-attachment'
 import LlmRuntime, { createUserMessage, CONTEXT_WINDOW_EXCEEDED_CODE, LlmError, ReasoningEffortId, userAgent } from '@deepseek-ai/dsh-llm'
+import { createLaunchEnvironmentSnapshot, DSH_LAUNCH_ENVIRONMENT_KEY } from '@deepseek-ai/dsh-launch-environment'
 import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
@@ -74,6 +75,30 @@ describe('PiAiAdapter provider routing', () => {
     expect(result.message.content).toEqual([{ type: 'text', text: 'hello' }])
     expect(result.finish).toEqual({ kind: 'stop' })
     expect(result.usage).toEqual({ inputTokens: 3, outputTokens: 1 })
+    expect(server.paths).toEqual(['/chat/completions'])
+  })
+
+  it('resolves a declared route endpoint from the immutable launch environment', async () => {
+    const server = await mockServer([{ events: textEvents }])
+    const ctx = new Context()
+    ctx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, createLaunchEnvironmentSnapshot([{
+      source: 'process',
+      values: { PI_ENDPOINT_REF: server.url, PI_TEST_KEY: 'test-key' },
+    }]))
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmPiAi, {
+      providers: {
+        'acme-gateway': {
+          apiKeyEnv: 'PI_TEST_KEY',
+          api: 'openai-completions',
+          baseURLEnv: 'PI_ENDPOINT_REF',
+          models: [{ id: 'acme-large' }],
+        },
+      },
+    })
+
+    const result = await assemble(ctx, { provider: 'acme-gateway', model: 'acme-large', messages: [] })
+    expect(result.finish).toEqual({ kind: 'stop' })
     expect(server.paths).toEqual(['/chat/completions'])
   })
 
@@ -413,7 +438,6 @@ describe('PiAiAdapter provider routing', () => {
 describe('provider profile lifecycle', () => {
   it('keeps adapter helpers off the package root', () => {
     for (const helper of [
-      'resolveProfiles',
       'toPiContext',
       'toPiReplayState',
       'toPiAssistant',
@@ -807,12 +831,42 @@ describe('provider profile lifecycle', () => {
     expect(() => resolveProfiles([{ provider: 'openai' }] as never)).toThrow(/dict keyed by provider/)
     expect(() => resolveProfiles({ openai: { provider: 'openai' } as never })).toThrow(/moved to the providers dict key/)
     expect(() => resolveProfiles({ openai: { baseURL: '' } })).toThrow(/empty baseURL/)
+    expect(() => resolveProfiles({ openai: { baseURLEnv: 'not-a-var!' } })).toThrow(/baseURLEnv/)
     expect(() => resolveProfiles({ openai: { apiKeyEnv: 'not-a-var!' } })).toThrow(/must match/)
     expect(() => resolveProfiles({ openai: { maxRequestImageBytes: 0 } })).toThrow(/maxRequestImageBytes/)
     expect(resolveProfiles({ openai: {} }).get('openai')?.maxRequestImageBytes)
       .toBe(DEFAULT_MAX_REQUEST_IMAGE_BYTES)
     expect(resolveProfiles({ openai: { maxRequestImageBytes: 1024 } }).get('openai')?.maxRequestImageBytes)
       .toBe(1024)
+  })
+
+  it('gives an explicit endpoint priority and refuses missing endpoint references', () => {
+    const configured = {
+      api: 'openai-completions' as const,
+      models: [{ id: 'm' }],
+    }
+    const environment = createLaunchEnvironmentSnapshot([{
+      source: 'process',
+      values: { PI_ENDPOINT_REF: 'https://environment.test/v1' },
+    }])
+    const explicit = resolveProfiles({
+      'acme-gateway': {
+        ...configured,
+        baseURL: 'https://explicit.test/v1',
+        baseURLEnv: 'PI_MISSING_ENDPOINT',
+      },
+    }, environment)
+    expect(explicit.get('acme-gateway')?.baseURL).toBe('https://explicit.test/v1')
+
+    expect(() => resolveProfiles({
+      'acme-gateway': { ...configured, baseURLEnv: 'PI_MISSING_ENDPOINT' },
+    }, environment)).toThrow(/PI_MISSING_ENDPOINT.*not set or is empty/)
+    expect(() => resolveProfiles({
+      'acme-gateway': { ...configured, baseURLEnv: 'PI_EMPTY_ENDPOINT' },
+    }, createLaunchEnvironmentSnapshot([{
+      source: 'process',
+      values: { PI_EMPTY_ENDPOINT: '' },
+    }]))).toThrow(/PI_EMPTY_ENDPOINT.*not set or is empty/)
   })
 
   it.each(['maxRetries', 'maxRetryDelayMs'] as const)(

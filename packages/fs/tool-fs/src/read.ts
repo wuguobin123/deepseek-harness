@@ -31,6 +31,8 @@ export interface ReadToolCaps {
   maxBytes: number
   /** Files at or above this size stream; smaller files read whole into memory. */
   streamMinSize: number
+  /** Whether every model path must resolve below the calling session cwd. */
+  workspaceOnly: boolean
 }
 
 /** Validated `read` arguments after defaulting. */
@@ -137,7 +139,7 @@ export function applyReadTool(ctx: Context, caps: ReadToolCaps): void {
       const input = parseReadArgs(args, caps.limit)
       // One stat: absence observation OR type check + size routing + present version.
       // A concurrent write can only make a later guarded mutation fail stale and require reread.
-      const { target, info } = await resolveRegularReadTarget(ctx, exec, input.filePath)
+      const { target, info } = await resolveRegularReadTarget(ctx, exec, input.filePath, caps.workspaceOnly)
 
       // Stream when the file is large OR size is unknown, so a size-less backend
       // never buffers an arbitrarily large file.

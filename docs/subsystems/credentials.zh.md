@@ -212,6 +212,264 @@ abstract deleteRecord(key: CredentialKey): Promise<void>
 
 Source: [`packages/credentials/credentials/src/index.ts`](../../packages/credentials/credentials/src/index.ts)
 
+<a id="ctxemailverification--emailverificationservice-abstract-seam"></a>
+
+### `ctx.emailVerification` — `EmailVerificationService` (abstract seam)
+
+The Service Definition. Wire methods project its two public methods.
+
+Implementations MUST be safe to call concurrently from the same Cordis context — the host-side RPC handlers do not serialize requests.
+
+```ts cordis-catalog
+/**
+ * Whether the seam is wired. `false` means `verifyCode` becomes a no-op.
+ * @returns `true` when verification gates `signup`; `false` when the seam
+ *   is disabled and `verifyCode` is a pass-through.
+ */
+abstract isEnabled(): boolean
+
+/**
+ * Mint and dispatch a fresh 6-digit code to the given email.
+ * @param input.email The email address the code is dispatched to.
+ * @returns The TTL and resend cooldown the renderer should advertise.
+ * @throws EmailVerificationError on bad input, cooldown, rate-limit, lockout,
+ *   or transport failure. The host layer maps these to wire codes.
+ */
+abstract requestCode(input: { email: string }): Promise<EmailCodeRequestResult>
+
+/**
+ * Verify a code against the row that `requestCode` produced.
+ * @param input.email The email address the code was sent to.
+ * @param input.code The 6-digit candidate code the caller is asserting.
+ * @returns `true` when the code matches and the row is within TTL and not
+ *   locked. The verified row is deleted so the same code cannot be reused.
+ * @throws EmailVerificationError on bad input, missing row, wrong code,
+ *   expired code, or lockout. Errors that increment the attempts counter
+ *   are reflected in the row before the throw.
+ */
+abstract verifyCode(input: { email: string; code: string }): Promise<boolean>
+```
+
+Source: [`packages/account/email-verification/src/index.ts`](../../packages/account/email-verification/src/index.ts)
+
+<a id="ctxidentity--identityservice-abstract-seam"></a>
+
+### `ctx.identity` — `IdentityService` (abstract seam)
+
+The Service Definition for the identity seam. Every implementation owns one `users` table and one `sessions` table; cross-process or hosted IdPs would extend this contract without changing the wire shape.
+
+```ts cordis-catalog
+/**
+ * Create one account and return an immediately-valid session.
+ * @param input - email + password + optional display name.
+ * @returns the new account's id, the opaque bearer token, and the absolute
+ *   unix-millisecond expiry. The token is the ONLY thing the desktop /
+ *   browser must persist; the rest is included for the cold-start card.
+ * @throws IdentityError(EMAIL_TAKEN) when the email is already present.
+ * @throws IdentityError(BAD_REQUEST) on schema-rejected input.
+ */
+abstract signup(input: { email: string; password: string; displayName?: string }): Promise<SignedIn>
+
+/**
+ * Verify an email + password pair and issue a fresh session token.
+ * Constant-time failure: a wrong password and a missing account return the
+ * same wire code (`UNAUTHENTICATED`) and the same message.
+ * @param input - email + password.
+ * @returns the userId, the opaque bearer token, and absolute expiry.
+ * @throws IdentityError(UNAUTHENTICATED) on either wrong password or
+ *   missing account. Distinguishing the two leaks an email-oracle.
+ */
+abstract signin(input: { email: string; password: string }): Promise<SignedIn>
+
+/**
+ * Revoke one bearer token. Idempotent: removing an unknown token resolves
+ * with `{ revoked: true }` rather than throwing.
+ * @param input - the token to revoke.
+ * @returns `{ revoked: true }` once the row is removed (or was never there).
+ */
+abstract signout(input: { sessionToken: SessionToken }): Promise<{ revoked: true }>
+
+/**
+ * Resolve a bearer token to its account view. Used by `account.state` (a
+ * desktop-cold-start probe) AND by the trust fence on every privileged
+ * request; called per request so revocation propagates without delay.
+ * @param input - the token to validate.
+ * @returns the user id, display name, and absolute expiry, or `null` when
+ *   the token is unknown / expired / revoked.
+ */
+abstract validate(input: { sessionToken: SessionToken }): Promise<AuthenticatedView | null>
+```
+
+Source: [`packages/account/identity/src/index.ts`](../../packages/account/identity/src/index.ts)
+
+<a id="ctxusermodelkeys--usermodelkeyservice-abstract-seam"></a>
+
+### `ctx.userModelKeys` — `UserModelKeyService` (abstract seam)
+
+The Service Definition. Every implementation owns one `user_model_keys` table; hosted / Stripe-backed providers would extend this contract without changing the wire shape.
+
+```ts cordis-catalog
+/**
+ * Ensure one active upstream credential for this user and provider route.
+ * @param input.userId The user the key is issued for.
+ * @param input.label Optional human label (default from `Config.defaultLabel`).
+ * @returns Metadata for the active credential. The bearer token remains internal.
+ * @throws ModelKeyError when configured key material or upstream issuance fails.
+ * @throws ModelKeyError when the upstream issuer cannot ensure a credential.
+ */
+abstract provision(input: { userId: UserId; label?: string }): Promise<ProvisionedKey>
+
+/**
+ * List metadata for every key owned by `userId`, newest first.
+ * @param input.userId The user whose key metadata is queried.
+ * @returns Newest-first key metadata rows (never the plaintext `keyValue`).
+ */
+abstract list(input: { userId: UserId }): Promise<ModelKeyView[]>
+
+/**
+ * Mark `keyId` as revoked. Idempotent — revoking an unknown or already-
+ * revoked key resolves with `revoked: false` rather than throwing.
+ * @param input.keyId The key row id to revoke.
+ * @returns `{ revoked: true }` if this call closed a live row; `false`
+ *   if the row was unknown or already revoked.
+ */
+abstract revoke(input: { keyId: KeyId }): Promise<{ revoked: boolean }>
+
+/**
+ * Resolve the encrypted active upstream token for model execution.
+ * @param input.userId User whose credential is needed.
+ * @param input.route Optional provider route filter.
+ * @returns Internal credential metadata and token, or undefined when absent.
+ */
+abstract resolveActive(input: { userId: UserId; route?: string }): Promise<ActiveModelCredential | undefined>
+
+/**
+ * Create one account-owned custom model with an encrypted API key.
+ * @param input - Owner, public endpoint metadata, upstream model, and write-only key.
+ * @returns Public metadata without the API key.
+ */
+abstract createCustom(input: { userId: UserId; label: string; api: 'openai-completions' | 'openai-responses'; baseURL: string; upstreamModel: string; apiKey: string }): Promise<CustomModelView>
+
+/**
+ * List custom models for one account.
+ * @param input - Account whose records are listed.
+ * @returns Newest-first metadata without API keys.
+ */
+abstract listCustom(input: { userId: UserId }): Promise<CustomModelView[]>
+
+/**
+ * Revoke one custom model only when owned by the account.
+ * @param input - Account and opaque custom-model id.
+ * @returns Whether this call revoked an active owned row.
+ */
+abstract removeCustom(input: { userId: UserId; customModelId: CustomModelId }): Promise<{ removed: boolean }>
+
+/**
+ * Resolve one custom model only when owned by the account.
+ * @param input - Account and opaque custom-model id.
+ * @returns Decrypted internal record, or undefined when unavailable.
+ */
+abstract resolveCustom(input: { userId: UserId; customModelId: CustomModelId }): Promise<ResolvedCustomModel | undefined>
+```
+
+Source: [`packages/account/model-keys/src/index.ts`](../../packages/account/model-keys/src/index.ts)
+
+<a id="ctxwallet--walletservice-abstract-seam"></a>
+
+### `ctx.wallet` — `WalletService` (abstract seam)
+
+The Service Definition for the wallet seam. Every implementation owns one `wallets` table and one `wallet_ledger` table; cross-process or hosted providers (Stripe, new-api, etc.) would extend this contract without changing the wire shape.
+
+```ts cordis-catalog
+/**
+ * Fetch the wallet view for one user. Returns a zero-balance view when the
+ * user has no row yet; this is the same default the bootstrap path inserts.
+ * @param input.userId The user whose wallet view is requested.
+ * @returns A `WalletView` snapshot of the current balance and timestamp.
+ */
+abstract get(input: { userId: UserId }): Promise<WalletView>
+
+/**
+ * Add `amountMicros` to the user's balance and append a ledger row.
+ * @param input The credit payload.
+ * @returns The new wallet view after the credit is applied.
+ * @throws WalletError(BAD_REQUEST) on schema-rejected input.
+ */
+abstract credit(input: { userId: UserId; amountMicros: number; reason: LedgerReason; idempotencyKey?: string }): Promise<WalletView>
+
+/**
+ * Subtract `amountMicros` from the user's balance; throws when the result
+ * would be negative.
+ * @param input The debit payload.
+ * @returns The new wallet view after the debit is applied.
+ * @throws WalletError(INSUFFICIENT_BALANCE) when the balance cannot cover.
+ */
+abstract debit(input: { userId: UserId; amountMicros: number; reason: LedgerReason; idempotencyKey?: string }): Promise<WalletView>
+
+/**
+ * Force the balance to `balanceMicros` and append a `set-quota` ledger row.
+ * Admin-privileged; wire-layer fence restricts callers to loopback.
+ * @param input The quota override payload.
+ * @returns The new wallet view after the override is applied.
+ */
+abstract setQuota(input: { userId: UserId; balanceMicros: number; reason: LedgerReason }): Promise<WalletView>
+
+/**
+ * Apply the configured daily-refresh amount once. Idempotent by date: a
+ * second call with the same `idempotencyKey` returns the prior balance
+ * without applying a second delta.
+ * @param input The refresh payload (must carry today's idempotency key).
+ * @returns The wallet view after the refresh (or the existing one when
+ *   the key was already applied today).
+ */
+abstract refreshDaily(input: { userId: UserId; idempotencyKey: string }): Promise<WalletView>
+
+/**
+ * Apply the configured welcome bonus. Convenience for `credit`.
+ * @param input The user id to credit.
+ * @returns The new wallet view after the welcome bonus is applied.
+ */
+abstract grantWelcomeBonus(input: { userId: UserId }): Promise<WalletView>
+
+/**
+ * Return the most-recent ledger entries, newest first.
+ * @param input.userId The user whose ledger is queried.
+ * @param input.limit Optional cap on returned rows (server default applies
+ *   when omitted).
+ * @returns Newest-first ledger rows.
+ */
+abstract listLedger(input: { userId: UserId; limit?: number }): Promise<LedgerEntry[]>
+
+/** Reserve available balance without changing the reported current balance.
+ * @param input.userId Account owning the reservation.
+ * @param input.reservationId Stable 1..64-character operation identifier.
+ * @param input.amountMicros Non-negative safe-integer amount to hold.
+ * @returns The durable active reservation; an exact retry returns the same record.
+ * @throws WalletError on invalid input, conflicting identity, or insufficient available balance.
+ */
+abstract reserve(input: { userId: UserId; reservationId: string; amountMicros: number }): Promise<WalletReservation>
+
+/** Settle a reservation and charge actual model usage.
+ * @param input.userId Account owning the reservation.
+ * @param input.reservationId Reservation to settle.
+ * @param input.actualMicros Non-negative usage, no greater than reserved amount.
+ * @param input.idempotencyKey Stable ledger idempotency key.
+ * @returns The committed settlement; an exact retry returns the same result.
+ * @throws WalletError on missing/cancelled reservations, parameter drift, or invalid input.
+ */
+abstract settle(input: { userId: UserId; reservationId: string; actualMicros: number; idempotencyKey: string }): Promise<WalletSettlement>
+
+/** Cancel a reservation and release its hold without writing a ledger row.
+ * @param input.userId Account owning the reservation.
+ * @param input.reservationId Reservation to cancel.
+ * @returns The durable reservation record; repeated cancellation returns the same record.
+ * @throws WalletError when the reservation is missing or already settled.
+ */
+abstract cancel(input: { userId: UserId; reservationId: string }): Promise<WalletReservation>
+```
+
+Source: [`packages/account/wallet/src/index.ts`](../../packages/account/wallet/src/index.ts)
+
 <a id="authorization-events"></a>
 
 ### `authorization/*` events

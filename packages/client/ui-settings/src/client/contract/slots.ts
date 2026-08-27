@@ -21,6 +21,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * the shipped composition always registers the seat).
      */
     'settings.trigger': { kind: 'single'; scope: 'root'; owner: SettingsTriggerOwnerProps }
+    /** Optional full settings launcher supplied by a product shell. */
+    'settings.launcher': { kind: 'single'; scope: 'root'; owner: SettingsLauncherOwnerProps }
     /**
      * The panel title text seat. Content renders inside the nav heading row;
      * the dialog's accessible name points at that node via aria-labelledby.
@@ -75,8 +77,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * One preference row inside the General section — the additive seat for a
      * single setting that needs no page of its own (a whole page is
      * `settings.section`), contributed by the feature plugin that owns the
-     * preference (locale → Language, ui-theme → Appearance, ui-conversation →
-     * Composer Enter). Options: `id` (row key), `order` (row position). The
+     * preference (for example, ui-conversation → Composer Enter). Options:
+     * `id` (row key), `order` (row position). The
      * section column only stacks rows, so a row draws its own internals,
      * including its label: nothing projects a `label` here and the owner passes
      * no props at all — copy, current value, and the write path are all yours,
@@ -104,6 +106,18 @@ export interface SettingsPluginsTabOwnerProps {
 export interface SettingsTriggerOwnerProps {
   /** Whether the sidebar renders wide content (false = 56px rail, icon only). */
   wide: boolean
+}
+
+/** Owner share of the optional launcher that replaces the shell fallback. */
+export interface SettingsLauncherOwnerProps {
+  /** Whether the sidebar renders wide content (false = rail). */
+  wide: boolean
+  /** Whether the settings panel is currently open. */
+  isOpen: boolean
+  /** Open settings without selecting a section. */
+  openSettings: () => void
+  /** Open settings on a registered section. */
+  openSection: (id: string) => void
 }
 
 /** Owner share of the header title seat (the shell supplies nothing). */

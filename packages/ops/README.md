@@ -2,36 +2,16 @@
 
 English | [中文](README.zh.md)
 
-`ops` is the **product group** that hosts "小薇办公助手" (ServicePilot) — the
-business layer on top of the dsh agent harness. It exists so the dsh core
-seams are not specialised for any single product; ops-* packages implement
-the enterprise workbench pieces that consume them.
+`ops` is the **product group** that hosts "小薇办公助手" (ServicePilot) — the business layer on top of the dsh agent harness. It exists so the dsh core seams are not specialised for any single product; ops-* packages implement the enterprise workbench pieces that consume them.
 
-Every package in this group **registers through a dsh seam** (`ctx.subagents`,
-`ctx.tools`, `ctx.sessionTitle`, `ctx.userApproval`, …) rather than patching
-the host runtime directly; the host-runtime policy, the loader smoke, and
-the persistence catalog still own whether they are visible to a given
-profile.
+Every package in this group **registers through a dsh seam** (`ctx.subagents`, `ctx.tools`, `ctx.sessionTitle`, `ctx.userApproval`, …) rather than patching the host runtime directly; the host-runtime policy, the loader smoke, and the persistence catalog still own whether they are visible to a given profile.
 
 ## Group contract
 
-- **Use the dsh cordis vocabulary.** Every contribution goes through
-  `ctx.effect()`, `ctx.on()`, or `ctx.waterfall()`. Plugin default-export
-  shape is reserved for Service subclasses; function plugins named-export
-  `name` / `inject` / `Config` / `apply`.
-- **The Python business runtime is `ctx.subagents` peer.** `ops-subagent-python`
-  registers a Python subagent provider; my-agents business logic (the ops-domain
-  Pydantic business models and skill implementations) runs in its own
-  process and exchanges JSON-RPC messages over stdio, sharing no Cordis context.
-- **My-agents' lifecycle boundaries stay on the business side.** The session
-  log is the source of truth for every model-visible fact (the
-  "model-visible ⟺ logged" invariant), so the Python side writes ops-domain
-  facts by sending `session.event` notifications; the TS harness projects,
-  persists, and replays them.
-- **No third native framework inside this group.** Python-side framework
-  concerns (LangGraph state graphs, FastAPI, the OpenClaw plugin loader)
-  live in `my-agents/` and are replaced by dsh seams, not by another
-  in-process framework.
+- **Use the dsh cordis vocabulary.** Every contribution goes through `ctx.effect()`, `ctx.on()`, or `ctx.waterfall()`. Plugin default-export shape is reserved for Service subclasses; function plugins named-export `name` / `inject` / `Config` / `apply`.
+- **The Python business runtime is `ctx.subagents` peer.** `ops-subagent-python` registers a Python subagent provider; my-agents business logic (the ops-domain Pydantic business models and skill implementations) runs in its own process and exchanges JSON-RPC messages over stdio, sharing no Cordis context.
+- **My-agents' lifecycle boundaries stay on the business side.** The session log is the source of truth for every model-visible fact (the "model-visible ⟺ logged" invariant), so the Python side writes ops-domain facts by sending `session.event` notifications; the TS harness projects, persists, and replays them.
+- **No third native framework inside this group.** Python-side framework concerns (LangGraph state graphs, FastAPI, the OpenClaw plugin loader) live in `my-agents/` and are replaced by dsh seams, not by another in-process framework.
 
 ## Packages
 

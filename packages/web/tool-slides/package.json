@@ -1,0 +1,30 @@
+{
+  "name": "@deepseek-ai/dsh-tool-slides",
+  "description": "Xiaowei slide-deck delivery (slides_build). Renders Reveal.js single-file HTML with CSS inlined (no CDN), persists as kind: 'slides'.",
+  "version": "0.1.1-rc.2",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "files": [
+    "lib/index.js",
+    "lib/types/index.d.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && cp lib/types/index.js lib/index.js && cp lib/types/index.d.ts lib/index.d.ts"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-artifact": "workspace:^",
+    "@deepseek-ai/dsh-tools": "workspace:^",
+    "@deepseek-ai/schemastery": "workspace:^"
+  }
+}

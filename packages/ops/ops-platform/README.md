@@ -18,7 +18,11 @@ Empty. Config lands with the first capability manifest.
 
 ## Model Experience
 
-None. The plugin registers no service and emits no event today; mounting it does not change the model's request prefix.
+None, as the current skeleton registers no service, event, prompt, or tool.
+
+#### KV Cache effect
+
+None. Mounting the skeleton does not change the request prefix.
 
 ## Known Limitations and Deferred Work
 

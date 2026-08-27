@@ -11,7 +11,7 @@
  * @module @deepseek-ai/dsh/profile-boot
  */
 
-import { writeFileSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { FiberState, type Context } from '@deepseek-ai/cordis'
@@ -157,11 +157,22 @@ function composeProfile(
   // The writable root the roster appends is `dsh-agent-presets`' own, so a
   // launcher that never reaches this patch still finds a person's presets.
   if (rows.has('agent-presets')) {
+    const isLocalXiaowei = profile.layers.some(
+      layer => layer.packageName === '@deepseek-ai/dsh-xiaowei-local',
+    )
+    const bundleRoots = profile.layers
+      .map(layer => join(layer.packageDir, 'agent-presets'))
+      .filter(path => existsSync(path))
+      .map(path => ({ path, trust: 'system' as const }))
     composedOverlays.push({
       id: 'agent-presets',
       config: {
         ...(rows.get('agent-presets')?.config ?? {}) as Record<string, unknown>,
-        roots: [{ path: SHIPPED_PRESET_ROOT, trust: 'system' }],
+        roots: [
+          ...bundleRoots,
+          ...isLocalXiaowei ? [] : [{ path: SHIPPED_PRESET_ROOT, trust: 'system' as const }],
+        ],
+        ...(isLocalXiaowei ? { includeUserRoot: false } : {}),
       },
     })
   }
@@ -298,3 +309,6 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
   }
   return { ctx, shutdown }
 }
+
+/** Source-mode composition hooks used by assembled profile acceptance tests. */
+export const __testing__ = { composeProfile, allPatches }

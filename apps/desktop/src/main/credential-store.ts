@@ -1,12 +1,13 @@
 /**
- * Credential store. Persists the dsh-ops baseUrl and the workbuddy
- * bearer-session envelope at rest via Electron's `safeStorage`.
+ * Credential store. Persists the xiaowei bearer-session envelope at rest via
+ * Electron's `safeStorage`. Non-secret connection preferences use a separate
+ * JSON file so changing execution environments never invokes OS key storage.
  *
  * Version history:
  * - v1: apiKey / tenantId / actorId (my-agents legacy); loaded-and-dropped.
  * - v2: baseUrl only (loopback / nginx-fronted trust-fence flow).
  * - v3: baseUrl + sessionToken / userId / displayName / expiresAt
- *   (workbuddy multi-user backend; the bearer token rides Authorization
+ *   (xiaowei multi-user backend; the bearer token rides Authorization
  *   header on every privileged request and survives cold start).
  *
  * v2 → v3 is forward-compatible: old blobs load with `sessionToken`
@@ -23,7 +24,15 @@ import { promises as fsp } from 'node:fs'
 import path from 'node:path'
 
 const CREDENTIAL_FILENAME = 'credentials.bin'
+const CONNECTION_FILENAME = 'connection.json'
 const CREDENTIAL_VERSION = 3
+const CONNECTION_VERSION = 2
+
+interface PersistedConnection {
+  version: number
+  baseUrl: string
+  lastLocation: 'local' | 'cloud'
+}
 
 interface PersistedCredentials {
   version: number
@@ -33,7 +42,8 @@ interface PersistedCredentials {
   actorId?: string
   /** v2: loopback / nginx-fronted baseUrl. */
   baseUrl: string
-  /** v3: workbuddy multi-user bearer session; undefined on v2 blobs. */
+  environment?: 'local' | 'cloud'
+  /** v3: xiaowei multi-user bearer session; undefined on v2 blobs. */
   sessionToken?: string
   userId?: string
   /** `null` is preserved as a real value (user cleared their displayName). */
@@ -44,6 +54,7 @@ interface PersistedCredentials {
 
 export interface Credentials {
   baseUrl: string
+  lastLocation?: 'local' | 'cloud'
   /** Bearer token issued by `account.signup` / `account.signin`; undefined when signed-out. */
   sessionToken?: string
   userId?: string
@@ -57,46 +68,102 @@ export class CredentialStore {
   private cache: Credentials
 
   constructor(private readonly defaultBaseUrl: string) {
-    this.cache = { baseUrl: defaultBaseUrl }
+    this.cache = { baseUrl: defaultBaseUrl, lastLocation: 'cloud' }
   }
 
   private filePath(): string {
     return path.join(app.getPath('userData'), CREDENTIAL_FILENAME)
   }
 
+  private connectionFilePath(): string {
+    return path.join(app.getPath('userData'), CONNECTION_FILENAME)
+  }
+
   async load(): Promise<Credentials> {
+    let migratedLegacyConnection = false
     try {
       const raw = await fsp.readFile(this.filePath())
       if (!safeStorage.isEncryptionAvailable()) {
-        this.cache = { baseUrl: this.defaultBaseUrl }
-        return this.cache
+        this.cache = { baseUrl: this.defaultBaseUrl, lastLocation: 'cloud' }
+      } else {
+        const plain = safeStorage.decryptString(raw)
+        const parsed = JSON.parse(plain) as PersistedCredentials
+        if (typeof parsed.baseUrl === 'string' && parsed.baseUrl.length > 0) {
+          // v3 fields are optional — a v2 blob keeps working without an
+          // explicit upgrade write. expiresAt round-trips as unix-millis in
+          // memory (string on disk, number after parse). displayName stays
+          // as `null` when explicitly cleared so a sign-out-then-restore
+          // round-trip preserves the user's choice.
+          const expiresAt = parsed.expiresAt !== undefined
+            ? Number.parseInt(parsed.expiresAt, 10)
+            : undefined
+          const lastLocation = parsed.environment === 'local' ? 'local' as const : 'cloud' as const
+          migratedLegacyConnection = parsed.environment === undefined
+          this.cache = {
+            baseUrl: parsed.baseUrl,
+            lastLocation,
+            sessionToken: parsed.sessionToken,
+            userId: parsed.userId,
+            displayName: parsed.displayName,
+            expiresAt: Number.isFinite(expiresAt) ? expiresAt : undefined,
+          }
+        }
       }
-      const plain = safeStorage.decryptString(raw)
-      const parsed = JSON.parse(plain) as PersistedCredentials
-      if (typeof parsed?.baseUrl !== 'string' || parsed.baseUrl.length === 0) {
-        this.cache = { baseUrl: this.defaultBaseUrl }
-        return this.cache
-      }
-      // v3 fields are optional — a v2 blob keeps working without an
-      // explicit upgrade write. expiresAt round-trips as unix-millis in
-      // memory (string on disk, number after parse). displayName stays
-      // as `null` when explicitly cleared so a sign-out-then-restore
-      // round-trip preserves the user's choice.
-      const expiresAt = parsed.expiresAt !== undefined
-        ? Number.parseInt(parsed.expiresAt, 10)
-        : undefined
-      this.cache = {
-        baseUrl: parsed.baseUrl,
-        sessionToken: parsed.sessionToken,
-        userId: parsed.userId,
-        displayName: parsed.displayName,
-        expiresAt: Number.isFinite(expiresAt) ? expiresAt : undefined,
-      }
-      return this.cache
     } catch {
-      this.cache = { baseUrl: this.defaultBaseUrl }
-      return this.cache
+      this.cache = { baseUrl: this.defaultBaseUrl, lastLocation: 'cloud' }
     }
+    let connectionLoaded = false
+    try {
+      const raw = await fsp.readFile(this.connectionFilePath(), 'utf8')
+      const parsed = JSON.parse(raw) as {
+        version?: number
+        baseUrl?: string
+        lastLocation?: 'local' | 'cloud'
+        environment?: 'local' | 'cloud'
+      }
+      const lastLocation = parsed.version === CONNECTION_VERSION
+        && (parsed.lastLocation === 'local' || parsed.lastLocation === 'cloud')
+        ? parsed.lastLocation
+        : parsed.version === 1 && (parsed.environment === 'local' || parsed.environment === 'cloud')
+          ? parsed.environment
+          : undefined
+      if (typeof parsed.baseUrl === 'string' && parsed.baseUrl.length > 0 && lastLocation !== undefined) {
+        connectionLoaded = true
+        this.cache = { ...this.cache, baseUrl: parsed.baseUrl, lastLocation }
+      }
+    } catch {
+      // A missing or malformed non-secret preference file leaves migrated
+      // credential values, or the local default, unchanged.
+    }
+    if (migratedLegacyConnection && !connectionLoaded) {
+      // v2/v3 credential blobs were created by the cloud Xiaowei client. Make
+      // that migration durable so a fresh launch never reinterprets them as
+      // the new local default. This file contains no secret material.
+      await this.saveConnection({ baseUrl: this.cache.baseUrl, lastLocation: 'cloud' })
+    }
+    return this.cache
+  }
+
+  /** Persist non-secret connection preferences without accessing OS key storage. */
+  async saveConnection(input: Pick<Credentials, 'baseUrl' | 'lastLocation'> & { environment?: 'local' | 'cloud' }): Promise<void> {
+    const lastLocation = input.lastLocation ?? input.environment ?? this.cache.lastLocation ?? 'cloud'
+    const payload: PersistedConnection = {
+      version: CONNECTION_VERSION,
+      baseUrl: input.baseUrl,
+      lastLocation,
+    }
+    const target = this.connectionFilePath()
+    const temporary = `${target}.${process.pid}.${Date.now()}.tmp`
+    await fsp.mkdir(path.dirname(target), { recursive: true })
+    try {
+      await fsp.writeFile(temporary, `${JSON.stringify(payload)}\n`, { mode: 0o600 })
+      await fsp.rename(temporary, target)
+      await fsp.chmod(target, 0o600)
+    } catch (error) {
+      await fsp.rm(temporary, { force: true }).catch(() => undefined)
+      throw error
+    }
+    this.cache = { ...this.cache, baseUrl: input.baseUrl, lastLocation }
   }
 
   /**
@@ -123,6 +190,7 @@ export class CredentialStore {
     await fsp.writeFile(target, encrypted, { mode: 0o600 })
     await fsp.chmod(target, 0o600)
     this.cache = { ...input }
+    await this.saveConnection(input)
   }
 
   snapshot(): Credentials {

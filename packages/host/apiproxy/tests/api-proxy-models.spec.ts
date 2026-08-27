@@ -16,7 +16,7 @@ import type {
   LlmResolvedModelInfo, StreamChunk,
   UserMessage,
 } from '@deepseek-ai/dsh-llm'
-import SessionStore from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionOwnerId } from '@deepseek-ai/dsh-session'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
@@ -77,7 +77,7 @@ async function harness(logged?: {
   provider: string
   model: string
   reasoningEffort?: ReasoningEffortId
-}): Promise<{
+}, ownerId?: string): Promise<{
   ctx: Context
   agent: Agent
   sessionId: SessionId
@@ -101,7 +101,9 @@ async function harness(logged?: {
     { provider: 'duplicate', id: 'same', name: 'Same' },
     { provider: 'duplicate', id: 'same', name: 'Same Again' },
   ]))
-  const session = ctx.sessions.create()
+  const session = ctx.sessions.create(undefined, ownerId === undefined
+    ? undefined
+    : { meta: { ownerId: SessionOwnerId(ownerId) } })
   if (logged !== undefined) {
     session.append('request/header', { header: { config: logged }, reason: 'initial' })
   }
@@ -196,6 +198,56 @@ describe('Web session model selection', () => {
       error: { code: 'attachment-error', details: { reason: 'TOO_MANY_IMAGES' } },
     })
     expect(saveImage).toHaveBeenCalledTimes(2)
+    await ctx.fiber.dispose()
+  })
+
+  it('persists an Office upload and records only its durable reference and server summary', async () => {
+    const { ctx, agent, sessionId } = await harness()
+    const saveDocument = vi.fn((input: { data: Uint8Array; name?: string }) => Promise.resolve({
+      attachmentId: `sha256:${'c'.repeat(64)}`,
+      mediaType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' as const,
+      bytes: input.data.byteLength,
+      name: input.name,
+      kind: 'xlsx' as const,
+      summary: 'Sheet 1: 地区\t销售额',
+    }))
+    const attachments = {
+      imageLimits: { maxImageBytes: 1, maxImagesPerMessage: 1, maxMessageImageBytes: 1, maxImagePixels: 1, maxImageDimension: 1, mediaTypes: ['image/png'] },
+      documentLimits: {
+        maxDocumentBytes: 1024,
+        maxDocumentsPerMessage: 2,
+        maxMessageDocumentBytes: 2048,
+        mediaTypes: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+      },
+      saveDocument,
+    }
+    ctx.provide('attachments', Object.setPrototypeOf(attachments, AttachmentStore.prototype) as never)
+    const followup = vi.fn()
+    Object.assign(agent, { followup })
+    const api = createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }), cwd: '/tmp' })
+
+    const result = await api.sessions.prompt(request({
+      sessionId,
+      mode: 'queue' as const,
+      content: [{
+        type: 'file' as const,
+        mediaType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' as const,
+        kind: 'xlsx' as const,
+        name: 'sales.xlsx',
+        data: 'UEsDBA==',
+        summary: 'untrusted client summary',
+      }],
+    }))
+
+    expect(result.result.ok).toBe(true)
+    expect(saveDocument).toHaveBeenCalledWith(expect.objectContaining({ name: 'sales.xlsx', summary: '' }))
+    const message = followup.mock.calls[0]?.[0] as UserMessage
+    expect(message.source).toMatchObject({ files: [expect.objectContaining({ kind: 'xlsx', summary: 'Sheet 1: 地区\t销售额' })] })
+    expect(message.content).toHaveLength(1)
+    const content = message.content[0]
+    expect(content?.type).toBe('text')
+    if (content?.type !== 'text') throw new TypeError('expected text follow-up content')
+    expect(content.text).toContain('Use sheet_analyze')
     await ctx.fiber.dispose()
   })
 
@@ -445,6 +497,60 @@ describe('Web session model selection', () => {
     expect(stillAccepted.selected).toEqual({ provider: 'deepseek-official', model: 'deepseek-chat', reasoningEffort: 'high' })
     expect(expectValue(await api.sessions.models(request({ sessionId }))).current)
       .toEqual({ provider: 'deepseek-official', model: 'deepseek-chat', reasoningEffort: 'high' })
+    await ctx.fiber.dispose()
+  })
+
+  it('scopes custom-model directory, selection, and prompt admission to the session owner', async () => {
+    const { ctx, sessionId } = await harness(undefined, 'user-a')
+    ctx.llm.registerAdapter(['xiaowei-custom'], new CatalogAdapter('Custom models', []))
+    let revoked: number | null = null
+    const listCustom = vi.fn(async ({ userId }: { userId: string }) => [{
+      customModelId: 'cm_0123456789abcdef',
+      userId,
+      label: 'Private gateway',
+      api: 'openai-responses' as const,
+      baseURL: 'https://api.example.com/v1/',
+      upstreamModel: 'private-model',
+      created: 1,
+      revoked,
+    }])
+    ctx.provide('userModelKeys', { listCustom } as never)
+    const saveDefaultModelSelection = vi.fn()
+    const api = createApiProxy(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      saveDefaultModelSelection,
+      cwd: '/tmp',
+    })
+
+    const directory = expectValue(await api.sessions.models(request({ sessionId })))
+    expect(directory.groups).toContainEqual({
+      id: 'xiaowei-custom',
+      name: 'Custom models',
+      models: [{ id: 'cm_0123456789abcdef', name: 'Private gateway' }],
+    })
+    expect(listCustom).toHaveBeenCalledWith({ userId: 'user-a' })
+
+    const denied = await api.sessions.selectModel(request({
+      sessionId,
+      provider: 'xiaowei-custom',
+      model: 'cm_ffffffffffffffff',
+    }))
+    expect(denied.result).toMatchObject({ ok: false, error: { code: 'model-unavailable' } })
+    expectValue(await api.sessions.selectModel(request({
+      sessionId,
+      provider: 'xiaowei-custom',
+      model: 'cm_0123456789abcdef',
+    })))
+    expect(saveDefaultModelSelection).not.toHaveBeenCalled()
+
+    revoked = Date.now()
+    expect(expectValue(await api.sessions.models(request({ sessionId }))).routable).toBe(false)
+    const refused = await api.sessions.prompt(request({
+      sessionId,
+      mode: 'queue' as const,
+      content: [{ type: 'text' as const, text: 'must not run' }],
+    }))
+    expect(refused.result).toMatchObject({ ok: false, error: { code: 'model-unavailable' } })
     await ctx.fiber.dispose()
   })
 

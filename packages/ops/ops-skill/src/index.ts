@@ -52,7 +52,7 @@ function findClosingFrontmatter(raw: string, start: number): { start: number; en
     const next = raw.indexOf('\n', lineStart)
     const line = next < 0 ? raw.slice(lineStart) : raw.slice(lineStart, next)
     if (line.replace(/\r$/, '') === '---') {
-      return { start, end: next < 0 ? raw.length : next + 1 }
+      return { start: lineStart, end: next < 0 ? raw.length : next + 1 }
     }
     if (next < 0) return undefined
     lineStart = next + 1

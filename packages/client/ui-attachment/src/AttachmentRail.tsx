@@ -13,7 +13,9 @@ export interface AttachmentRailItem {
   /** Stable identity for the React key. */
   id: string
   /** Object or data URL rendered as the thumbnail. */
-  previewUrl: string
+  previewUrl?: string
+  /** Draft kind controls whether the rail renders a thumbnail or a file tile. */
+  kind?: 'image' | 'file'
   /** Image alt text (display name with the owner's fallback applied). */
   alt: string
   /** Accessible label of the item's remove control. */
@@ -172,7 +174,12 @@ export function AttachmentRail<T extends AttachmentRailItem>({ items, labels, on
               title={labels.open}
               onClick={() => { onOpen(item) }}
             >
-              <img src={item.previewUrl} alt={item.alt} />
+              {item.kind === 'file'
+                ? <span className={css.fileTile} aria-label={item.alt}>
+                  <span className={css.fileType}>FILE</span>
+                  <span className={css.fileName}>{item.alt}</span>
+                </span>
+                : <img src={item.previewUrl} alt={item.alt} />}
             </button>
             <button
               type="button"

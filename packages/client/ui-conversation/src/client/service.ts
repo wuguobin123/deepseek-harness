@@ -14,7 +14,7 @@ import type { Context } from '@deepseek-ai/cordis'
 // method) instead of the standalone helper.
 import type { ISessions, SessionFace, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import type { SubmitImageAttachment, SubmitOutcome } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
-import type { ImageAttachmentRef, ImageMediaType } from '@deepseek-ai/dsh-attachment'
+import type { ImageAttachmentRef, ImageMediaType, DocumentMediaType } from '@deepseek-ai/dsh-attachment'
 import type { ComposerAttachment } from './contract/slots.ts'
 import type { QueueAction, QueueItemId } from './contract/queue.ts'
 import type { ComposerBlocks } from './input/blocks.ts'
@@ -57,6 +57,11 @@ export interface IConversation {
    * @returns completion of the page pull.
    */
   loadOlder(): Promise<void>
+  /**
+   * Retry a failed initial history pull for the scoped session.
+   * @returns completion of the rebuilt history window.
+   */
+  retryHistory(): Promise<void>
 }
 
 /** Create one browser-only draft descriptor; only its id enters input state. */
@@ -67,6 +72,12 @@ function browserDraftAttachment(file: File): ComposerAttachment {
     previewUrl: URL.createObjectURL(file),
     file,
   }
+}
+const DOCUMENT_MEDIA: Record<string, { mediaType: DocumentMediaType; kind: 'pdf' | 'docx' | 'xlsx' | 'pptx' }> = {
+  '.pdf': { mediaType: 'application/pdf', kind: 'pdf' },
+  '.docx': { mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', kind: 'docx' },
+  '.xlsx': { mediaType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', kind: 'xlsx' },
+  '.pptx': { mediaType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', kind: 'pptx' },
 }
 
 interface ImageUrlEntry {
@@ -153,7 +164,12 @@ export class ConversationController extends Service implements IConversation {
     if (attachments.length !== imageIds.length) {
       throw new Error('conversation.sendSession: one or more draft images are no longer available')
     }
-    const uploaded = await this.serializeImages(attachments.map(attachment => attachment.file))
+    const uploaded = await Promise.all(attachments.map(async (attachment) => {
+      if (attachment.kind === 'image') return { type: 'image' as const, ...await this.encodeImage(attachment.file) }
+      const [file] = await this.serializeDraftFiles([attachment.id])
+      if (file === undefined) throw new Error('missing serialized document draft')
+      return file
+    }))
     const content = [...uploaded, ...(text === '' ? [] : [{ type: 'text' as const, text }])]
     const result = await session.prompt(content, mode, signal)
     if (!result.ok) return { kind: 'error' }
@@ -174,6 +190,34 @@ export class ConversationController extends Service implements IConversation {
       this.createdImageUrls.add(attachment.previewUrl)
       return attachment
     })
+  }
+
+  /**
+   * Register PDF and Office files as draft chips; bytes cross the Host only on send.
+   * @param files - browser files selected or dropped in display order.
+   * @returns temporary draft descriptors in the same order.
+   */
+  createDraftFiles(files: readonly File[]): readonly ComposerAttachment[] {
+    return files.map((file) => {
+      const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
+      if (DOCUMENT_MEDIA[ext] === undefined) throw new Error(`unsupported document: ${file.name}`)
+      const attachment: ComposerAttachment = { kind: 'file', id: crypto.randomUUID() as DraftAttachmentId, file, previewUrl: '' }
+      this.draftAttachments.set(attachment.id, attachment); return attachment
+    })
+  }
+
+  /**
+   * Serialize document draft chips to prompt wire values.
+   * @param fileIds - ordered browser-draft identifiers.
+   * @returns base64 file parts in identifier order.
+   */
+  async serializeDraftFiles(fileIds: readonly DraftAttachmentId[]): Promise<Parameters<SessionFace['prompt']>[0]> {
+    return Promise.all(fileIds.map(async (id) => {
+      const attachment = this.draftAttachments.get(id); if (attachment?.kind !== 'file') throw new Error('missing document draft')
+      const ext = attachment.file.name.slice(attachment.file.name.lastIndexOf('.')).toLowerCase(); const descriptor = DOCUMENT_MEDIA[ext]
+      if (descriptor === undefined) throw new Error(`unsupported document: ${attachment.file.name}`)
+      return { type: 'file' as const, mediaType: descriptor.mediaType, kind: descriptor.kind, name: attachment.file.name, data: bytesToBase64(new Uint8Array(await attachment.file.arrayBuffer())) }
+    }))
   }
 
   /**
@@ -307,6 +351,11 @@ export class ConversationController extends Service implements IConversation {
     await this.scopedSession('loadOlder').loadOlder()
   }
 
+  /** Retry a failed initial history pull for the scoped Session. */
+  async retryHistory(): Promise<void> {
+    await this.scopedSession('retryHistory').retryOpen()
+  }
+
   /** Resolve the caller scope's session face or throw on root contexts. */
   private scopedSession(op: string): SessionFace {
     const id = this.scopeId(op)
@@ -330,11 +379,6 @@ export class ConversationController extends Service implements IConversation {
     const sessions = this.ctx.get('sessions')
     if (sessions === undefined) throw new Error('conversation: sessions service unavailable')
     return sessions
-  }
-
-  /** Convert browser files to canonical base64 prompt parts. */
-  private serializeImages(images: readonly File[]): Promise<Parameters<SessionFace['prompt']>[0]> {
-    return Promise.all(images.map(async file => ({ type: 'image' as const, ...await this.encodeImage(file) })))
   }
 
   /** Canonical base64 wire form of one browser image file. */

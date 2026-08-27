@@ -137,7 +137,18 @@ export interface ReadFileLine {
  * `ToolDefinition.presentResult`; omitting the method keeps the pending
  * title and renders the raw result content.
  */
-export type ToolResultView = GenericResultView | TerminalResultView | DiffResultView | SearchResultView | ReadResultView | WebResultView
+export type ToolResultView =
+  | GenericResultView
+  | TerminalResultView
+  | DiffResultView
+  | SearchResultView
+  | ReadResultView
+  | WebResultView
+  | HtmlResultView
+  | SlidesResultView
+  | DocResultView
+  | SheetResultView
+  | ChartResultView
 
 /**
  * The default completed card: an optional replacement title and reformatted
@@ -386,4 +397,46 @@ export interface WebFetchResultView {
    * truncation the model-facing text also reflects).
    */
   truncated: boolean
+}
+
+/**
+ * Shared result fields for durable xiaowei products. The card carries a stable
+ * artifact reference; renderers fetch the bytes through the artifact API.
+ */
+interface ArtifactBackedResultView {
+  /** Replacement title for the completed call. Omit to keep the pending-state title. */
+  title?: string
+  /** Durable artifact id. */
+  artifactId: string
+  /** Rendered byte count, for a size hint before the renderer fetches bytes. */
+  bytes: number
+  /** Media type of the artifact bytes. */
+  mediaType: string
+}
+
+/** A completed self-contained HTML page produced by `html_build`. */
+export interface HtmlResultView extends ArtifactBackedResultView {
+  card: 'html'
+}
+
+/** A completed self-contained Reveal.js deck produced by `slides_build`. */
+export interface SlidesResultView extends ArtifactBackedResultView {
+  card: 'slides'
+}
+
+/** A completed document product produced by `doc_build`. */
+export interface DocResultView extends ArtifactBackedResultView {
+  card: 'doc'
+}
+
+/** A completed spreadsheet product produced by `sheet_build`. */
+export interface SheetResultView extends ArtifactBackedResultView {
+  card: 'sheet'
+}
+
+/** A completed chart product produced by `mermaid_build` or `svg_build`. */
+export interface ChartResultView extends ArtifactBackedResultView {
+  card: 'chart'
+  /** Original generator, so the renderer need not inspect artifact bytes. */
+  generator: 'mermaid' | 'svg'
 }

@@ -256,6 +256,15 @@ describe('WorkspaceRuntime', () => {
     api.onCreate = () => Promise.resolve(ok({ sessionId: sid('s-fresh') }))
     await expect(workspaces.connectWorkspace(wid('beta'))).resolves.toBe('s-fresh')
     expect(api.callsOf('session.create')).toEqual([{ workspaceId: 'beta' }])
+    expect(sessions.list.getSnapshot().byId[sid('s-fresh')]).toMatchObject({
+      blank: true,
+    })
+    expect(workspaces.list.getSnapshot().items.find(item => item.workspaceId === wid('beta'))?.sessionIds)
+      .toEqual([sid('s-fresh')])
+    // The next pick reuses the local Host-confirmed echo instead of minting
+    // another blank session while the workspace changed frame is in flight.
+    await expect(workspaces.connectWorkspace(wid('beta'))).resolves.toBe('s-fresh')
+    expect(api.callsOf('session.create')).toEqual([{ workspaceId: 'beta' }])
     // Same guarantee on the create arm (draft hand-off writes the machine pre-open).
     expect(sessions.binding(sid('s-fresh'))).toBeDefined()
 
@@ -303,9 +312,15 @@ describe('WorkspaceRuntime', () => {
     api.onWorkspaceCreate = () => Promise.resolve(ok({
       workspace: { ...workspace('picked'), path: '/w/alpha', title: 'alpha' }, created: true,
     }))
-    await expect(workspaces.create({ path: '/w/alpha' })).resolves.toMatchObject({ workspaceId: 'picked' })
+    const created = await workspaces.create({ path: '/w/alpha' })
+    expect(created).toMatchObject({ workspaceId: 'picked' })
     expect(workspaces.list.getSnapshot().items[0]).toMatchObject({ path: '/w/alpha', title: 'alpha' })
+    // The picker immediately connects the workspace returned by this call;
+    // the list projection cannot require a later Host frame before that
+    // selection can create its blank session.
+    await expect(workspaces.connectWorkspace(created.workspaceId)).resolves.toBe('fk-new')
     expect(api.callsOf('workspace.create')).toEqual([{ path: '/w/alpha' }])
+    expect(api.callsOf('session.create')).toEqual([{ workspaceId: 'picked' }])
     api.onWorkspaceCreate = () => Promise.resolve(err({
       code: 'workspace-invalid-path', message: 'missing', details: { path: '/missing' },
     }))

@@ -19,9 +19,10 @@ export { WorkspaceMoveInvalidError } from './entity.ts'
 import { realpathNormalize } from './paths.ts'
 import { workspaceDomainSpec } from './spec.ts'
 import type { WorkspaceDomainState, WorkspaceRecord } from './spec.ts'
-import type { Workspace, WorkspaceId as WorkspaceIdBrand } from './types.ts'
+import type { Workspace, WorkspaceAccess, WorkspaceId as WorkspaceIdBrand } from './types.ts'
 
 export type { Workspace } from './types.ts'
+export type { WorkspaceAccess } from './types.ts'
 export { workspaceDomainState, workspaceRecord, workspaceDomainSpec } from './spec.ts'
 export type { WorkspaceDomainState, WorkspaceRecord } from './spec.ts'
 export { realpathNormalize } from './paths.ts'
@@ -72,12 +73,23 @@ declare module '@deepseek-ai/cordis' {
 
 interface BootstrapGroup {
   readonly path: string
+  readonly access: WorkspaceAccess
   readonly headers: SessionHeader[]
   readonly newestAt: number
 }
 
 const sameIds = (left: readonly WorkspaceId[], right: readonly WorkspaceId[]): boolean =>
   left.length === right.length && left.every((id, index) => id === right[index])
+
+const sameAccess = (left: WorkspaceAccess, right: WorkspaceAccess): boolean => {
+  if (left.kind !== right.kind) return false
+  return left.kind === 'local' || left.userId === (right as Extract<WorkspaceAccess, { kind: 'account' }>).userId
+}
+
+const accessKey = (access: WorkspaceAccess): string =>
+  access.kind === 'local' ? 'local' : `account:${access.userId}`
+
+const pathKey = (access: WorkspaceAccess, path: string): string => `${accessKey(access)}\u0000${path}`
 
 const compareHeaders = (left: SessionHeader, right: SessionHeader): number =>
   right.createdAt - left.createdAt || String(left.id).localeCompare(String(right.id))
@@ -98,12 +110,14 @@ export class WorkspaceRegistry extends Service {
   private readonly entities = new Map<WorkspaceId, WorkspaceEntity>()
   private readonly headers = new Map<SessionId, SessionHeader>()
   private readonly sessionPaths = new Map<SessionId, string>()
+  private readonly sessionOwners = new Map<SessionId, string | undefined>()
   private readonly invalidSessionPaths = new Map<SessionId, string>()
   private operationTail: Promise<void> = Promise.resolve()
 
   private readonly host: WorkspaceEntityHost = {
     table: () => this.requireTable(),
     sessionPath: id => this.sessionPaths.get(id),
+    sessionOwner: id => this.sessionOwners.get(id),
     readSessionHeader: id => this.readSessionHeader(id),
     rememberSessionPath: (id, path) => {
       this.sessionPaths.set(id, path)
@@ -148,6 +162,7 @@ export class WorkspaceRegistry extends Service {
    * Different canonical paths may share a display title.
    * @param path - Existing directory to own, in any path spelling.
    * @param title - Display title used only when a new record is created.
+   * @param access - Local or account owner assigned to the workspace.
    * @returns the existing or newly durable workspace.
    */
   // TODO: `title` lost its last production caller when the gateway's
@@ -155,37 +170,50 @@ export class WorkspaceRegistry extends Service {
   // (.agents/notes/implemented/simplification/2026-07-31-one-route-to-add-a-workspace.md);
   // drop the parameter with its @param clause and the `create(path, title?)`
   // lines in this package's README pair.
-  async create(path: string, title?: string): Promise<Workspace> {
+  async create(path: string, title?: string, access: WorkspaceAccess = { kind: 'local' }): Promise<Workspace> {
     const canonical = await realpathNormalize(path)
     if (!(await stat(canonical)).isDirectory()) {
       throw new Error(`cannot create a workspace at '${canonical}': path is not a directory`)
     }
-    return await this.enqueueOperation(() => this.createCanonical(canonical, title))
+    return await this.enqueueOperation(() => this.createCanonical(canonical, title, access))
   }
 
   /**
    * Look up a workspace by id.
    * @param id - Workspace id.
+   * @param access - Local or account projection to apply.
    * @returns the workspace, or `undefined` when unknown.
    */
-  get(id: WorkspaceId): Workspace | undefined {
-    return this.entities.get(id)
+  get(id: WorkspaceId, access: WorkspaceAccess = { kind: 'local' }): Workspace | undefined {
+    const entity = this.entities.get(id)
+    return entity === undefined || !sameAccess(entity.owner, access) ? undefined : entity
+  }
+
+  /**
+   * Check durable/cache existence without projecting a workspace to a caller.
+   * This is used by the domain invariant, which must not assume local access.
+   * @param id - Workspace id to check.
+   * @returns whether the registry contains the id.
+   */
+  has(id: WorkspaceId): boolean {
+    return this.entities.has(id)
   }
 
   /**
    * Synchronous workspace projection in durable registry order. Every
    * entity's `sessionIds` getter is already filtered by the startup/live
    * canonical-cwd header index; this method performs no persistence reads.
+   * @param access - Local or account projection to apply.
    * @returns a fresh ordered array of workspace entities.
    */
-  list(): Workspace[] {
+  list(access: WorkspaceAccess = { kind: 'local' }): Workspace[] {
     return this.requireState().workspaceIds.map((id) => {
       const entity = this.entities.get(id)
       if (entity === undefined) {
         throw new Error(`workspace registry order references missing workspace '${id}'`)
       }
       return entity
-    })
+    }).filter(entity => sameAccess(entity.owner, access))
   }
 
   /**
@@ -194,10 +222,11 @@ export class WorkspaceRegistry extends Service {
    * failed table write restores the prior order and keeps the entity
    * published. Unknown ids are an idempotent no-op for domain callers.
    * @param id - Workspace registration to remove.
+   * @param access - Local or account owner allowed to remove the workspace.
    * @returns `true` when a record was deleted, `false` when it was unknown.
    */
-  delete(id: WorkspaceId): Promise<boolean> {
-    return this.enqueueOperation(() => this.deleteKnown(id))
+  delete(id: WorkspaceId, access: WorkspaceAccess = { kind: 'local' }): Promise<boolean> {
+    return this.enqueueOperation(() => this.deleteKnown(id, access))
   }
 
   /**
@@ -205,22 +234,28 @@ export class WorkspaceRegistry extends Service {
    * With an anchor it lands before that workspace; without one it appends.
    * @param id - Workspace to move.
    * @param beforeId - Workspace anchor; omitted appends.
+   * @param access - Local or account owner whose display order is changed.
    * @returns the complete committed workspace order.
    */
-  insertBefore(id: WorkspaceId, beforeId?: WorkspaceId): Promise<readonly WorkspaceId[]> {
+  insertBefore(id: WorkspaceId, beforeId?: WorkspaceId, access: WorkspaceAccess = { kind: 'local' }): Promise<readonly WorkspaceId[]> {
     return this.enqueueOperation(async () => {
       const state = this.requireState()
-      if (!state.workspaceIds.includes(id)) throw new WorkspaceOrderInvalidError(id)
-      if (beforeId !== undefined && !state.workspaceIds.includes(beforeId)) {
+      if (this.get(id, access) === undefined) throw new WorkspaceOrderInvalidError(id)
+      if (beforeId !== undefined && this.get(beforeId, access) === undefined) {
         throw new WorkspaceOrderInvalidError(beforeId)
       }
-      if (beforeId === id) return state.workspaceIds
-      const without = state.workspaceIds.filter(workspaceId => workspaceId !== id)
+      const owned = state.workspaceIds.filter(workspaceId => this.get(workspaceId, access) !== undefined)
+      if (beforeId === id) return owned
+      const without = owned.filter(workspaceId => workspaceId !== id)
       const at = beforeId === undefined ? without.length : without.indexOf(beforeId)
-      const workspaceIds = [...without.slice(0, at), id, ...without.slice(at)]
-      if (sameIds(workspaceIds, state.workspaceIds)) return state.workspaceIds
-      await this.setState({ ...state, workspaceIds })
-      return workspaceIds
+      const reordered = [...without.slice(0, at), id, ...without.slice(at)]
+      if (!sameIds(reordered, owned)) {
+        let cursor = 0
+        const workspaceIds = state.workspaceIds.map(workspaceId =>
+          this.get(workspaceId, access) === undefined ? workspaceId : reordered[cursor++] as WorkspaceId)
+        await this.setState({ ...state, workspaceIds })
+      }
+      return reordered
     })
   }
 
@@ -232,6 +267,18 @@ export class WorkspaceRegistry extends Service {
    */
   get archivedSessionIds(): readonly SessionId[] {
     return this.requireState().archivedSessionIds
+  }
+
+  /**
+   * Return archived ids whose durable session header belongs to the access owner.
+   * @param access - Local or account projection to apply.
+   * @returns archived ids visible to that access.
+   */
+  archivedSessionIdsFor(access: WorkspaceAccess): readonly SessionId[] {
+    return this.requireState().archivedSessionIds.filter((id) => {
+      const ownerId = this.sessionOwners.get(id)
+      return access.kind === 'local' ? ownerId === undefined : ownerId === access.userId
+    })
   }
 
   /**
@@ -272,19 +319,20 @@ export class WorkspaceRegistry extends Service {
    * workspace. A missing path rejects during `realpath`; an existing unowned
    * directory returns `undefined`.
    * @param path - Existing directory path in any spelling.
+   * @param access - Local or account projection to apply.
    * @returns the workspace owning the canonical path, when one exists.
    */
-  async resolveByPath(path: string): Promise<Workspace | undefined> {
+  async resolveByPath(path: string, access: WorkspaceAccess = { kind: 'local' }): Promise<Workspace | undefined> {
     const canonical = await realpathNormalize(path)
     for (const entity of this.entities.values()) {
-      if (entity.path === canonical) return entity
+      if (entity.path === canonical && sameAccess(entity.owner, access)) return entity
     }
     return undefined
   }
 
-  private async createCanonical(canonical: string, title?: string): Promise<WorkspaceEntity> {
+  private async createCanonical(canonical: string, title: string | undefined, access: WorkspaceAccess): Promise<WorkspaceEntity> {
     for (const entity of this.entities.values()) {
-      if (entity.path === canonical) return entity
+      if (entity.path === canonical && sameAccess(entity.owner, access)) return entity
     }
 
     const workspaceName = title ?? basename(canonical)
@@ -293,6 +341,7 @@ export class WorkspaceRegistry extends Service {
     const id = WorkspaceId(randomUUID())
     const now = new Date().toISOString()
     const record: WorkspaceRecord = {
+      owner: access,
       path: canonical,
       title: workspaceName,
       sessionIds: [],
@@ -355,9 +404,9 @@ export class WorkspaceRegistry extends Service {
     return entity
   }
 
-  private async deleteKnown(id: WorkspaceId): Promise<boolean> {
+  private async deleteKnown(id: WorkspaceId, access: WorkspaceAccess): Promise<boolean> {
     const entity = this.entities.get(id)
-    if (entity === undefined) return false
+    if (entity === undefined || !sameAccess(entity.owner, access)) return false
     const state = this.requireState()
     const nextState = {
       initialized: true,
@@ -426,30 +475,36 @@ export class WorkspaceRegistry extends Service {
   private async bootstrap(headers: readonly SessionHeader[]): Promise<void> {
     const table = this.requireTable()
     const state = this.requireState()
-    const groupsByPath = new Map<string, SessionHeader[]>()
+    const groupsByPath = new Map<string, { path: string; access: WorkspaceAccess; headers: SessionHeader[] }>()
     for (const header of headers) {
       const path = this.sessionPaths.get(header.id)
       if (path === undefined) continue
-      const group = groupsByPath.get(path)
-      if (group === undefined) groupsByPath.set(path, [header])
-      else group.push(header)
+      const access: WorkspaceAccess = header.ownerId === undefined
+        ? { kind: 'local' }
+        : { kind: 'account', userId: header.ownerId }
+      const key = pathKey(access, path)
+      const group = groupsByPath.get(key)
+      if (group === undefined) groupsByPath.set(key, { path, access, headers: [header] })
+      else group.headers.push(header)
     }
-    const groups: BootstrapGroup[] = [...groupsByPath].map(([path, groupHeaders]) => {
+    const groups: BootstrapGroup[] = [...groupsByPath].map(([, group]) => {
+      const { path } = group
+      const groupHeaders = group.headers
       groupHeaders.sort(compareHeaders)
       const newest = groupHeaders[0] as SessionHeader
-      return { path, headers: groupHeaders, newestAt: newest.createdAt }
+      return { path, access: group.access, headers: groupHeaders, newestAt: newest.createdAt }
     }).sort((left, right) =>
       right.newestAt - left.newestAt || left.path.localeCompare(right.path))
 
     const byPath = new Map<string, WorkspaceId>()
     const accounted = new Map<SessionId, WorkspaceId>()
     for (const [id, record] of table.entries()) {
-      byPath.set(record.path, id)
+      byPath.set(pathKey(record.owner, record.path), id)
       for (const sessionId of record.sessionIds) accounted.set(sessionId, id)
     }
 
     for (const group of groups) {
-      let id = byPath.get(group.path)
+      let id = byPath.get(pathKey(group.access, group.path))
       if (id === undefined) {
         const sessionIds = group.headers
           .map(header => header.id)
@@ -458,6 +513,7 @@ export class WorkspaceRegistry extends Service {
         id = WorkspaceId(randomUUID())
         const createdAt = new Date(group.newestAt).toISOString()
         const record: WorkspaceRecord = {
+          owner: group.access,
           path: group.path,
           title: basename(group.path),
           sessionIds,
@@ -465,7 +521,7 @@ export class WorkspaceRegistry extends Service {
           updatedAt: createdAt,
         }
         await table.put(id, record)
-        byPath.set(group.path, id)
+        byPath.set(pathKey(group.access, group.path), id)
         for (const sessionId of sessionIds) accounted.set(sessionId, id)
         continue
       }
@@ -488,12 +544,12 @@ export class WorkspaceRegistry extends Service {
       for (const sessionId of historical) accounted.set(sessionId, id)
     }
 
-    const groupRank = new Map(groups.map(group => [group.path, group.newestAt]))
+    const groupRank = new Map(groups.map(group => [pathKey(group.access, group.path), group.newestAt]))
     const priorRank = new Map(state.workspaceIds.map((id, index) => [id, index]))
     const workspaceIds = [...table.entries()]
       .sort(([leftId, left], [rightId, right]) => {
-        const leftTime = groupRank.get(left.path) ?? Date.parse(left.createdAt)
-        const rightTime = groupRank.get(right.path) ?? Date.parse(right.createdAt)
+        const leftTime = groupRank.get(pathKey(left.owner, left.path)) ?? Date.parse(left.createdAt)
+        const rightTime = groupRank.get(pathKey(right.owner, right.path)) ?? Date.parse(right.createdAt)
         return rightTime - leftTime
           || (priorRank.get(leftId) ?? Number.MAX_SAFE_INTEGER)
             - (priorRank.get(rightId) ?? Number.MAX_SAFE_INTEGER)
@@ -529,14 +585,14 @@ export class WorkspaceRegistry extends Service {
     const paths = new Map<string, WorkspaceId>()
     const accounted = new Map<SessionId, WorkspaceId>()
     for (const [id, record] of table.entries()) {
-      const pathHolder = paths.get(record.path)
+      const pathHolder = paths.get(pathKey(record.owner, record.path))
       if (pathHolder !== undefined) {
         throw new Error(
           `workspace domain is inconsistent: path '${record.path}' is claimed `
           + `by both workspace '${pathHolder}' and workspace '${id}'`,
         )
       }
-      paths.set(record.path, id)
+      paths.set(pathKey(record.owner, record.path), id)
       for (const sessionId of record.sessionIds) {
         const holder = accounted.get(sessionId)
         if (holder !== undefined) {
@@ -561,6 +617,7 @@ export class WorkspaceRegistry extends Service {
   private async replaceHeaderIndex(headers: readonly SessionHeader[]): Promise<void> {
     this.headers.clear()
     this.sessionPaths.clear()
+    this.sessionOwners.clear()
     this.invalidSessionPaths.clear()
     await this.indexHeaders(headers)
   }
@@ -571,6 +628,7 @@ export class WorkspaceRegistry extends Service {
 
   private async indexHeader(header: SessionHeader): Promise<void> {
     this.headers.set(header.id, header)
+    this.sessionOwners.set(header.id, header.ownerId === undefined ? undefined : String(header.ownerId))
     this.sessionPaths.delete(header.id)
     if (header.cwd === undefined) {
       this.invalidSessionPaths.set(header.id, 'header has no cwd')
@@ -615,7 +673,7 @@ export class WorkspaceRegistry extends Service {
   private async readSessionHeader(id: SessionId): Promise<SessionHeader> {
     const live = this.ctx.get('sessions')?.get(id)
     if (live !== undefined) {
-      this.headers.set(id, live.header)
+      await this.indexHeader(live.header)
       return live.header
     }
     const cached = this.headers.get(id)

@@ -54,7 +54,7 @@ describe('SkillRow', () => {
   it('renders a compact Bash-shaped summary and discloses the exact instructions', () => {
     const inspect = vi.fn()
     const view = render(<SkillRow {...props(settled(), inspect)} />)
-    const row = screen.getByRole('button', { name: 'Skilldsh-manage-issues' })
+    const row = screen.getByRole('button', { name: '技能dsh-manage-issues' })
     expect(row.getAttribute('aria-expanded')).toBe('false')
     expect(view.container.querySelector('[data-tool="skill"]')?.getAttribute('data-state')).toBe('ok')
     expect(view.container.querySelector('[data-tool="skill"] svg')?.getAttribute('width')).toBe('14')
@@ -65,7 +65,7 @@ describe('SkillRow', () => {
     const card = screen.getByLabelText('说明')
     expect(card.textContent).toBe('说明Follow the issue workflow.\nKeep project fields in sync.')
     expect(view.container.textContent).not.toContain('{"name":"dsh-manage-issues"}')
-    fireEvent.click(screen.getByRole('button', { name: 'Inspect' }))
+    fireEvent.click(screen.getByRole('button', { name: '检查' }))
     expect(inspect).toHaveBeenCalledTimes(1)
 
     fireEvent.click(row)
@@ -87,7 +87,7 @@ describe('SkillRow', () => {
     const view = render(<SkillRow {...props(running())} />)
     const row = view.container.querySelector('[data-tool="skill"] > div')!
     expect(row.getAttribute('role')).toBeNull()
-    expect(view.container.textContent).toContain('正在加载 skill')
+    expect(view.container.textContent).toContain('正在加载技能')
     expect(view.container.textContent).toContain('dsh-manage-issues')
     expect(view.container.querySelector('svg [fill="currentColor"]')).not.toBeNull()
   })
@@ -98,7 +98,7 @@ describe('SkillRow', () => {
       isError: true,
       error: { name: 'SkillError', code: 'missing' },
     }))} />)
-    const row = screen.getByRole('button', { name: 'skill 加载失败SkillSkillError: missing resource' })
+    const row = screen.getByRole('button', { name: '技能加载失败技能SkillError: missing resource' })
     expect(view.container.querySelector('[data-tool="skill"]')?.getAttribute('data-state')).toBe('error')
     expect(row.textContent).not.toContain('Check SKILL.md.')
     fireEvent.click(row)
@@ -111,7 +111,7 @@ describe('SkillRow', () => {
     const stoppedView = render(<SkillRow {...props(settled({
       error: { name: 'InterruptedError', code: 'interrupted' },
     }))} />)
-    expect(stoppedView.container.textContent).toContain('skill 加载已中止')
+    expect(stoppedView.container.textContent).toContain('技能加载已中止')
     expect(stoppedView.container.querySelector('[data-state="warning"]')).not.toBeNull()
     cleanup()
 
@@ -127,7 +127,7 @@ describe('SkillRow', () => {
       isError: true,
       error: { name: 'SkillError', code: 'missing' },
     }))} />)
-    const errorRow = screen.getByRole('button', { name: 'skill 加载失败SkillSkillError: missing' })
+    const errorRow = screen.getByRole('button', { name: '技能加载失败技能SkillError: missing' })
     fireEvent.click(errorRow)
     expect(screen.getAllByText('SkillError: missing')).toHaveLength(2)
   })

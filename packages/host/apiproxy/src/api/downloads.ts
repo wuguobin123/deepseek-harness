@@ -6,6 +6,7 @@
  */
 
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { RpcPrincipal } from './rpc.ts'
 
 /** Host-only download surfaces (no wire envelope; absent from IApiClient). */
 export interface DownloadsApi {
@@ -21,5 +22,6 @@ export interface DownloadsApi {
   sessionLog(
     request: { sessionId: SessionId; includeDescendants?: boolean },
     signal: AbortSignal,
+    principal?: RpcPrincipal,
   ): Promise<Response>
 }

@@ -30,7 +30,7 @@ afterEach(() => {
 })
 
 function buildFetch(): typeof fetch {
-  return (async (input: Request | string | URL, init?: RequestInit): Promise<Response> => {
+  return async (input: Request | string | URL, init?: RequestInit): Promise<Response> => {
     const requestInit: RequestInit = init ?? (typeof input === 'object' && input !== null && !(input instanceof Request) ? (input as RequestInit) : {})
     let url: string
     if (typeof input === 'string') {
@@ -38,8 +38,7 @@ function buildFetch(): typeof fetch {
     } else if (input instanceof URL) {
       url = input.toString()
     } else {
-      // api-client passes a string URL + init; we never expect a Request here.
-      url = String(input)
+      url = input.url
     }
     const text = typeof requestInit.body === 'string' ? requestInit.body : ''
     let parsed: unknown = null
@@ -52,7 +51,7 @@ function buildFetch(): typeof fetch {
       ? { ...(nextBody as Record<string, unknown>), rpcId }
       : nextBody
     return new Response(JSON.stringify(body), { status: nextStatus, headers: { 'content-type': 'application/json' } })
-  }) as unknown as typeof fetch
+  }
 }
 
 function findBearerHeader(call: CapturedCall): string | undefined {
@@ -71,7 +70,7 @@ describe('ApiClient setToken', () => {
     }
     await client.call('host.describe', {})
     expect(calls).toHaveLength(1)
-    expect(findBearerHeader(calls[0]!)).toBeUndefined()
+    expect(findBearerHeader(calls[0])).toBeUndefined()
   })
 
   it('attaches Authorization: Bearer <token> after setToken', async () => {
@@ -83,7 +82,7 @@ describe('ApiClient setToken', () => {
       result: { ok: true, value: { ok: true } },
     }
     await client.call('host.describe', {})
-    expect(findBearerHeader(calls[0]!)).toBe('Bearer tkn-1')
+    expect(findBearerHeader(calls[0])).toBe('Bearer tkn-1')
   })
 
   it('drops the header after setToken(null)', async () => {
@@ -96,7 +95,7 @@ describe('ApiClient setToken', () => {
       result: { ok: true, value: { ok: true } },
     }
     await client.call('host.describe', {})
-    expect(findBearerHeader(calls[0]!)).toBeUndefined()
+    expect(findBearerHeader(calls[0])).toBeUndefined()
   })
 
   it('surfaces RPC errors with the wire code on the ApiClientError', async () => {
@@ -132,8 +131,8 @@ describe('ApiClient respond()', () => {
       result: { ok: true, value: { approved: true } },
     })
     expect(calls).toHaveLength(1)
-    expect(calls[0]!.url).toMatch(/\/api\/respond$/)
-    expect(findBearerHeader(calls[0]!)).toBe('Bearer tkn-respond')
+    expect(calls[0].url).toMatch(/\/api\/respond$/)
+    expect(findBearerHeader(calls[0])).toBe('Bearer tkn-respond')
   })
 
   it('omits the Authorization header after setToken(null)', async () => {
@@ -145,7 +144,7 @@ describe('ApiClient respond()', () => {
       rpcId: 'rpc-respond',
       result: { ok: true, value: { approved: true } },
     })
-    expect(findBearerHeader(calls[0]!)).toBeUndefined()
+    expect(findBearerHeader(calls[0])).toBeUndefined()
   })
 })
 
@@ -155,5 +154,59 @@ describe('ApiClient baseUrl', () => {
     expect(client.getBaseUrl()).toBe('http://localhost:18000')
     client.setBaseUrl('http://other.example/')
     expect(client.getBaseUrl()).toBe('http://other.example')
+  })
+})
+
+async function collect<T>(source: AsyncIterable<T>): Promise<T[]> {
+  const values: T[] = []
+  for await (const value of source) values.push(value)
+  return values
+}
+
+describe('ApiClient account inference', () => {
+  const request = { version: 1 as const, model: 'MiniMax-M3', messages: [{ role: 'user' as const, content: 'hello' }] }
+
+  it('keeps the bearer in Electron and yields a validated terminal NDJSON stream', async () => {
+    let authorization: string | null = null
+    const frames = [
+      { version: 1, type: 'chunk', chunk: { type: 'block-start', index: 0, blockType: 'text' } },
+      { version: 1, type: 'chunk', chunk: { type: 'text-delta', index: 0, text: 'ok' } },
+      { version: 1, type: 'chunk', chunk: { type: 'block-end', index: 0, block: { type: 'text', text: 'ok' } } },
+      { version: 1, type: 'chunk', chunk: { type: 'usage', usage: { inputTokens: 1, outputTokens: 1 } } },
+      { version: 1, type: 'chunk', chunk: { type: 'finish', reason: { kind: 'stop' } } },
+      { version: 1, type: 'done' },
+    ]
+    const client = new ApiClient({
+      baseUrl: 'http://cloud.test',
+      fetchImpl: async (_input, init) => {
+        authorization = new Headers(init?.headers).get('authorization')
+        return new Response(`${frames.map(frame => JSON.stringify(frame)).join('\n')}\n`, {
+          headers: { 'content-type': 'application/x-ndjson' },
+        })
+      },
+    })
+    client.setToken('account-token')
+    const chunks = await collect(client.streamAccountInference(request, new AbortController().signal))
+    expect(authorization).toBe('Bearer account-token')
+    expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'stop' } })
+  })
+
+  it('refuses account inference before a bearer is installed', async () => {
+    const client = new ApiClient({ baseUrl: 'http://cloud.test', fetchImpl: buildFetch() })
+    await expect(collect(client.streamAccountInference(request, new AbortController().signal)))
+      .rejects.toMatchObject({ code: 'ACCOUNT_AUTH_REQUIRED' })
+    expect(calls).toHaveLength(0)
+  })
+
+  it('rejects a stream that sends done before a finish chunk', async () => {
+    const client = new ApiClient({
+      baseUrl: 'http://cloud.test',
+      fetchImpl: async () => new Response('{"version":1,"type":"done"}\n', {
+        headers: { 'content-type': 'application/x-ndjson' },
+      }),
+    })
+    client.setToken('account-token')
+    await expect(collect(client.streamAccountInference(request, new AbortController().signal)))
+      .rejects.toMatchObject({ code: 'BAD_RESPONSE' })
   })
 })

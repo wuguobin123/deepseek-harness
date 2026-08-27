@@ -19,6 +19,10 @@ function fakeParent(): Agent {
   return { id: SessionId('workflow-parent'), options: {} } as unknown as Agent
 }
 
+function ownedParent(ownerId: string): Agent {
+  return { id: SessionId('workflow-owned-parent'), options: {}, session: { header: { ownerId } } } as unknown as Agent
+}
+
 // Allow cold worker startup on contended CI runners.
 vi.setConfig({ testTimeout: 30_000 })
 
@@ -633,6 +637,23 @@ describe('dsh-workflow-worker-thread', () => {
   })
 
   describe('lifecycle: parse errors, cancellation, termination, disposal', () => {
+    it('rejects account-owned parents before parsing, worker creation, or lifecycle publication', async () => {
+      const { ctx, provider } = await setup()
+      const starts: unknown[] = []
+      ctx.on('workflow/start', (info) => { starts.push(info) })
+
+      expect(() => ctx.workflowEngine.start({
+        ...scripted('return ((('),
+        parent: ownedParent('account-a'),
+      })).toThrow(expect.objectContaining({
+        name: 'WorkflowError',
+        code: 'ACCOUNT_HOST_EXECUTION_DENIED',
+        message: 'account session cannot run host worker workflow until an account-confined provider is composed',
+      }))
+      expect(starts).toEqual([])
+      expect(provider.runs).toEqual([])
+    })
+
     it('start() throws synchronously for invalid meta data or an unparseable body (host-side pre-checks)', async () => {
       const { ctx, parent } = await setup()
       // Meta is DATA — shape violations reject loud, every one named.

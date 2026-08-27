@@ -84,8 +84,20 @@ describe('DeepSeekHarness', () => {
           },
         },
       },
+      {
+        method: 'session.event',
+        params: {
+          sessionId: 'owned',
+          event: {
+            type: 'account-plugins/selected',
+            seq: 1,
+            time: 1,
+            data: { pluginIds: ['precise-editor'] },
+          },
+        },
+      },
       { method: 'session.status', params: { sessionId: 'owned', status: 'idle' } },
-    ] as HarnessNotification[]
+    ] as unknown as HarnessNotification[]
     let closed = false
     const harness = {
       start: () => Promise.resolve(),
@@ -107,8 +119,14 @@ describe('DeepSeekHarness', () => {
     const result = await new HarnessSession(harness, 'owned').run('go')
 
     expect(result.notifications.map(notification => notification.method))
-      .toEqual(['session.event', 'session.status'])
-    expect(result.events.map(event => event.type)).toEqual(['agent/inbox/spliced'])
+      .toEqual(['session.event', 'session.event', 'session.status'])
+    expect(result.events.map(event => event.type)).toEqual([
+      'agent/inbox/spliced', 'account-plugins/selected',
+    ])
+    expect(result.events[1]).toMatchObject({
+      type: 'account-plugins/selected',
+      data: { pluginIds: ['precise-editor'] },
+    })
     expect(closed).toBe(true)
   })
 

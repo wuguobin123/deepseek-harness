@@ -1,6 +1,8 @@
 # Patch overlay reserved for `@deepseek-ai/dsh-ops-platform`. The plugin is a
 # no-op skeleton until the first capability manifest is needed; uncomment
-# the row below when that happens.
+# the empty sequence below with the row when that happens.
 #
 # - id: ops-platform
 #   name: '@deepseek-ai/dsh-ops-platform'
+
+[]

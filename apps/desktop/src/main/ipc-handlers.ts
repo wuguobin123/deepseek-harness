@@ -7,22 +7,26 @@
  *  - `SubscribeMux` / `UnsubscribeMux` → open / tear down the SSE carrier
  *    GET /api/events.mux and fan frames out as `MuxEvent` IPC events.
  *  - `SubscribeHost` / `UnsubscribeHost` → the same for GET /api/events.host.
- *  - `GetSession` / `UpdateSession` → settings persistence (baseUrl only).
+ *  - `GetSession` / `UpdateSession` → base URL and execution-environment persistence.
  *  - `GetAppUpdateState` / `CheckAppUpdate` / `OpenAppUpdateDownload` →
  *    forwarded to the (stubbed) UpdateChecker; the IPC channel remains so
  *    the renderer can keep its "check for updates" affordance.
  *  - `GetAuthState` / `RequestEmailCode` / `SignUp` / `SignIn` / `SignOut`
- *    → bearer session lifecycle for the workbuddy multi-user backend;
+ *    → bearer session lifecycle for the xiaowei multi-user backend;
  *    persist the resulting token, install it on `ApiClient`, and broadcast
  *    the new `AuthState` over `IpcChannels.AuthStateEvent`.
  *
  * The renderer never holds raw `ipcRenderer`; the preload exposes only
  * `WORKBENCH_API_KEYS`.
  */
-import { BrowserWindow, ipcMain, type WebContents } from 'electron'
+import { BrowserWindow, dialog, ipcMain, type OpenDialogOptions, type WebContents } from 'electron'
+import { randomUUID } from 'node:crypto'
+import { realpath } from 'node:fs/promises'
 import { z } from 'zod'
 import {
+  ArtifactActionInputSchema,
   ClientResponseSchema,
+  DirectoryImportActionSchema,
   IpcChannels,
   MuxFrameSchema,
   HostFrameSchema,
@@ -37,19 +41,27 @@ import {
 } from '../shared/contracts'
 import { ApiClient } from './api-client'
 import { CredentialStore } from './credential-store'
+import type { ArtifactFileActions } from './artifact-files'
 import type { UpdateChecker } from './update-checker'
+import { readLocalDirectory } from './directory-import'
+import type { RoutedClient } from './connection-router'
 
 interface HandlersDeps {
   apiClient: ApiClient
+  router?: RoutedClient
   credentialStore: CredentialStore
   baseUrl: () => string
   updateChecker: () => UpdateChecker
+  artifactFiles: ArtifactFileActions
+  mainWindow: () => BrowserWindow | null
   /**
    * Hook called whenever the auth state changes — `index.ts` wires this
    * to `mainWindow.webContents.send(IpcChannels.AuthStateEvent, state)`.
    * Receivers (the renderer `useAuthStore`) re-read state on every fan-out.
    */
   broadcastAuthState: (state: AuthState) => void
+  /** Stop device model streams before the bearer, account, or cloud authority changes. */
+  cancelLocalInferenceStreams?: (code?: string, message?: string) => Promise<void>
 }
 
 const RequestInputSchema = z.object({
@@ -71,6 +83,18 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
   let mux: ActiveStream | null = null
   let host: ActiveStream | null = null
 
+  /** Stop both carriers before changing credentials; no old-account frame may
+   * reach a newly authenticated renderer generation. */
+  async function stopStreams(): Promise<void> {
+    const active = [mux, host]
+    mux = null
+    host = null
+    for (const stream of active) {
+      stream?.controller.abort()
+    }
+    await Promise.all(active.map(stream => stream === null ? Promise.resolve() : stream.task.catch(() => undefined)))
+  }
+
   async function handleRequest(
     _event: Electron.IpcMainInvokeEvent,
     raw: unknown,
@@ -83,7 +107,7 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
       }
     }
     try {
-      const value = await deps.apiClient.call(parsed.data.method, parsed.data.payload)
+      const value = await (deps.router ?? deps.apiClient).call(parsed.data.method, parsed.data.payload)
       return { ok: true, value }
     } catch (err) {
       const code = (err as { code?: string }).code ?? 'unknown'
@@ -92,17 +116,76 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
     }
   }
 
+  async function handleImportDirectory(_event?: Electron.IpcMainInvokeEvent, raw?: unknown): Promise<
+    { ok: true; value: unknown } | { ok: false; error: { code: string; message: string } }
+  > {
+    const action = DirectoryImportActionSchema.safeParse(raw)
+    if (!action.success) {
+      return { ok: false, error: { code: 'INVALID_INPUT', message: action.error.message } }
+    }
+    const location = action.data.location
+    if (location === 'local') {
+      const options: OpenDialogOptions = {
+        title: '选择本机工作区',
+        buttonLabel: '使用此目录',
+        message: '目录会作为本机实时工作区使用，不会上传目录副本。',
+        properties: ['openDirectory'],
+      }
+      const window = deps.mainWindow()
+      const picked = window === null
+        ? await dialog.showOpenDialog(options)
+        : await dialog.showOpenDialog(window, options)
+      const pickedPath = picked.filePaths.at(0)
+      if (picked.canceled || pickedPath === undefined) return { ok: true, value: { status: 'cancelled' } }
+      try {
+        const path = await realpath(pickedPath)
+        return { ok: true, value: await (deps.router ?? deps.apiClient).call('workspace.create', { path, location: 'local' }) }
+      } catch (error) {
+        return {
+          ok: false,
+          error: {
+            code: 'LOCAL_WORKSPACE_FAILED',
+            message: error instanceof Error ? error.message : String(error),
+          },
+        }
+      }
+    }
+    const options: OpenDialogOptions = {
+      title: '导入本机目录副本',
+      buttonLabel: '导入副本',
+      message: '目录会复制到当前账号的私有工作区，后续本机修改不会自动同步。',
+      properties: ['openDirectory'],
+    }
+    const window = deps.mainWindow()
+    const picked = window === null
+      ? await dialog.showOpenDialog(options)
+      : await dialog.showOpenDialog(window, options)
+    const pickedPath = picked.filePaths.at(0)
+    if (picked.canceled || pickedPath === undefined) return { ok: true, value: { status: 'cancelled' } }
+    try {
+      const copy = await readLocalDirectory(pickedPath)
+      const importId = randomUUID()
+      return { ok: true, value: await deps.apiClient.call('workspace.importDirectory', { importId, ...copy }) }
+    } catch (error) {
+      return {
+        ok: false,
+        error: { code: 'IMPORT_FAILED', message: error instanceof Error ? error.message : String(error) },
+      }
+    }
+  }
+
   async function handleRespond(_event: Electron.IpcMainInvokeEvent, raw: unknown): Promise<void> {
     const parsed = ClientResponseSchema.safeParse(raw)
     if (!parsed.success) {
       throw new Error(`invalid ClientResponse envelope: ${parsed.error.message}`)
     }
-    await deps.apiClient.respond(parsed.data)
+    await (deps.router ?? deps.apiClient).respond(parsed.data)
   }
 
-  async function handleGetSession(): Promise<{ baseUrl: string }> {
+  function handleGetSession(): { baseUrl: string } {
     const snapshot = deps.credentialStore.snapshot()
-    return SessionStateSchema.parse({ baseUrl: snapshot.baseUrl })
+    const lastLocation = snapshot.lastLocation ?? 'cloud'
+    return SessionStateSchema.parse({ baseUrl: snapshot.baseUrl, environment: lastLocation, lastLocation })
   }
 
   async function handleUpdateSession(
@@ -114,8 +197,17 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
       return { ok: false, error: { code: 'bad-request', message: parsed.error.message } }
     }
     try {
-      await deps.credentialStore.save({ baseUrl: parsed.data.baseUrl })
+      const existing = deps.credentialStore.snapshot()
+      const requestedLocation = parsed.data.lastLocation ?? parsed.data.environment ?? existing.lastLocation ?? 'cloud'
+      await deps.credentialStore.saveConnection({
+        baseUrl: parsed.data.baseUrl,
+        lastLocation: requestedLocation,
+      })
+      await deps.cancelLocalInferenceStreams?.('CLOUD_AUTHORITY_CHANGED', '云端服务地址已变更，请重试')
       deps.apiClient.setBaseUrl(parsed.data.baseUrl)
+      // Federation keeps both Hosts mounted in one renderer. The preference
+      // records the last selected location for migration only; changing it
+      // must not tear down the complete product UI.
       return { ok: true, value: { baseUrl: parsed.data.baseUrl } }
     } catch (err) {
       return {
@@ -141,6 +233,17 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
     }
     const controller = new AbortController()
     const task = (async () => {
+      const sendStreamError = (message: string): void => {
+        if (controller.signal.aborted || wc.isDestroyed()) return
+        wc.send(eventName, {
+          rpcId: 'desktop-stream-error',
+          method: 'stream/error',
+          payload: {
+            type: 'stream/error',
+            error: { code: 'internal', message, details: {} },
+          },
+        })
+      }
       try {
         for await (const envelope of open(controller.signal)) {
           const parsed = schema.safeParse((envelope as { payload: unknown }).payload)
@@ -152,20 +255,9 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
             payload: parsed.data,
           })
         }
+        sendStreamError('Desktop event stream closed')
       } catch (err) {
-        if (controller.signal.aborted) return
-        if (wc.isDestroyed()) return
-        wc.send(eventName, {
-          rpcId: '',
-          method: 'stream/error',
-          payload: {
-            type: 'stream/error',
-            error: {
-              code: (err as { code?: string }).code ?? 'internal',
-              message: err instanceof Error ? err.message : String(err),
-            },
-          },
-        })
+        sendStreamError(err instanceof Error ? err.message : String(err))
       }
     })()
     return { controller, task }
@@ -179,7 +271,7 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
       mux = await startStream(
         wc,
         IpcChannels.MuxEvent,
-        signal => deps.apiClient.streamMux(signal) as AsyncIterable<unknown>,
+        signal => (deps.router ?? deps.apiClient).streamMux(signal),
         MuxFrameSchema,
         mux,
       )
@@ -212,7 +304,7 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
       host = await startStream(
         wc,
         IpcChannels.HostEvent,
-        signal => deps.apiClient.streamHost(signal) as AsyncIterable<unknown>,
+        signal => (deps.router ?? deps.apiClient).streamHost(signal),
         HostFrameSchema,
         host,
       )
@@ -245,23 +337,52 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
     return deps.updateChecker().check()
   }
 
-  async function handleOpenAppUpdateDownload(): Promise<{ ok: false; error: { code: string; message: string } }> {
+  async function handleOpenAppUpdateDownload(): Promise<{ ok: true } | { ok: false; error: string }> {
     try {
       await deps.updateChecker().openDownload()
-      return { ok: false, error: { code: 'no-update', message: 'no update available' } }
+      return { ok: true }
     } catch (err) {
       return {
         ok: false,
-        error: {
-          code: (err as { code?: string }).code ?? 'unknown',
-          message: err instanceof Error ? err.message : String(err),
-        },
+        error: err instanceof Error ? err.message : String(err),
+      }
+    }
+  }
+
+  async function handleSaveArtifact(
+    _event: Electron.IpcMainInvokeEvent,
+    raw: unknown,
+  ): Promise<{ ok: true; value: Awaited<ReturnType<ArtifactFileActions['save']>> } | { ok: false; error: { code: string; message: string } }> {
+    const parsed = ArtifactActionInputSchema.safeParse(raw)
+    if (!parsed.success) return { ok: false, error: { code: 'INVALID_INPUT', message: parsed.error.message } }
+    try {
+      return { ok: true, value: await deps.artifactFiles.save(parsed.data.artifactId) }
+    } catch (error) {
+      return {
+        ok: false,
+        error: { code: 'ARTIFACT_SAVE_FAILED', message: error instanceof Error ? error.message : String(error) },
+      }
+    }
+  }
+
+  async function handleOpenArtifactInBrowser(
+    _event: Electron.IpcMainInvokeEvent,
+    raw: unknown,
+  ): Promise<{ ok: true; value: { opened: true } } | { ok: false; error: { code: string; message: string } }> {
+    const parsed = ArtifactActionInputSchema.safeParse(raw)
+    if (!parsed.success) return { ok: false, error: { code: 'INVALID_INPUT', message: parsed.error.message } }
+    try {
+      return { ok: true, value: await deps.artifactFiles.openHtmlInBrowser(parsed.data.artifactId) }
+    } catch (error) {
+      return {
+        ok: false,
+        error: { code: 'ARTIFACT_OPEN_FAILED', message: error instanceof Error ? error.message : String(error) },
       }
     }
   }
 
   // -------------------------------------------------------------------------
-  // Auth — workbuddy multi-user bearer session lifecycle
+  // Auth — xiaowei multi-user bearer session lifecycle
   // -------------------------------------------------------------------------
 
   /** Persist a fresh session, install the bearer token, fan the new state out. */
@@ -272,8 +393,11 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
     displayName: string | null
     expiresAt: number
   }): Promise<AuthState> {
+    await stopStreams()
+    await deps.cancelLocalInferenceStreams?.('ACCOUNT_SESSION_CHANGED', '账号已切换，请重试')
     await deps.credentialStore.save({
       baseUrl: input.baseUrl,
+      lastLocation: deps.credentialStore.snapshot().lastLocation,
       sessionToken: input.sessionToken,
       userId: input.userId,
       displayName: input.displayName,
@@ -287,15 +411,18 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
 
   /** Clear the persisted session, drop the bearer token, broadcast signed-out state. */
   async function clearSession(): Promise<AuthState> {
+    await stopStreams()
+    await deps.cancelLocalInferenceStreams?.('ACCOUNT_SIGNED_OUT', '账号已退出登录')
     const baseUrl = deps.credentialStore.snapshot().baseUrl
-    await deps.credentialStore.save({ baseUrl })
+    const existing = deps.credentialStore.snapshot()
+    await deps.credentialStore.save({ baseUrl, lastLocation: existing.lastLocation })
     deps.apiClient.setToken(null)
     const next: AuthState = { signedIn: false }
     deps.broadcastAuthState(next)
     return next
   }
 
-  async function handleGetAuthState(): Promise<AuthState> {
+  function handleGetAuthState(): AuthState {
     return deps.credentialStore.authState()
   }
 
@@ -416,6 +543,7 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
 
   function install(): void {
     ipcMain.handle(IpcChannels.Request, handleRequest)
+    ipcMain.handle(IpcChannels.ImportDirectory, handleImportDirectory)
     ipcMain.handle(IpcChannels.Respond, handleRespond)
     ipcMain.handle(IpcChannels.GetSession, handleGetSession)
     ipcMain.handle(IpcChannels.UpdateSession, handleUpdateSession)
@@ -426,6 +554,8 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
     ipcMain.handle(IpcChannels.GetAppUpdateState, handleGetAppUpdateState)
     ipcMain.handle(IpcChannels.CheckAppUpdate, handleCheckAppUpdate)
     ipcMain.handle(IpcChannels.OpenAppUpdateDownload, handleOpenAppUpdateDownload)
+    ipcMain.handle(IpcChannels.SaveArtifact, handleSaveArtifact)
+    ipcMain.handle(IpcChannels.OpenArtifactInBrowser, handleOpenArtifactInBrowser)
     ipcMain.handle(IpcChannels.GetAuthState, handleGetAuthState)
     ipcMain.handle(IpcChannels.RequestEmailCode, handleRequestEmailCode)
     ipcMain.handle(IpcChannels.SignUp, handleSignUp)
@@ -435,6 +565,7 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
 
   function uninstall(): void {
     ipcMain.removeHandler(IpcChannels.Request)
+    ipcMain.removeHandler(IpcChannels.ImportDirectory)
     ipcMain.removeHandler(IpcChannels.Respond)
     ipcMain.removeHandler(IpcChannels.GetSession)
     ipcMain.removeHandler(IpcChannels.UpdateSession)
@@ -445,6 +576,8 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
     ipcMain.removeHandler(IpcChannels.GetAppUpdateState)
     ipcMain.removeHandler(IpcChannels.CheckAppUpdate)
     ipcMain.removeHandler(IpcChannels.OpenAppUpdateDownload)
+    ipcMain.removeHandler(IpcChannels.SaveArtifact)
+    ipcMain.removeHandler(IpcChannels.OpenArtifactInBrowser)
     ipcMain.removeHandler(IpcChannels.GetAuthState)
     ipcMain.removeHandler(IpcChannels.RequestEmailCode)
     ipcMain.removeHandler(IpcChannels.SignUp)
@@ -476,7 +609,7 @@ export function installSecurityGuards(win: BrowserWindow): void {
   win.webContents.on('will-navigate', (event, url) => {
     if (!url.startsWith('file://')) event.preventDefault()
   })
-  win.webContents.on('will-attach-webview', event => event.preventDefault())
+  win.webContents.on('will-attach-webview', (event) =>{  event.preventDefault() })
 }
 
 // MuxFrame / HostFrame type re-exports for downstream consumers.

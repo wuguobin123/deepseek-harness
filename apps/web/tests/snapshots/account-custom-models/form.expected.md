@@ -1,0 +1,36 @@
+- dialog "设置":
+  - navigation:
+    - text: 设置
+    - button "通用设置":
+      - img
+      - text: 通用设置
+    - button "模型":
+      - img
+      - text: 模型
+    - button "插件":
+      - img
+      - text: 插件
+  - button "关闭":
+    - img
+    - text: 关闭
+  - heading "模型" [level=2]
+  - paragraph: 管理当前账户的私有兼容 API 模型。
+  - paragraph: 当前账户还没有添加自定义模型。
+  - list
+  - text: 显示名称
+  - textbox "显示名称": 研发网关
+  - text: API 地址
+  - textbox "API 地址":
+    - /placeholder: https://api.example.com/v1
+    - text: https://api.example.com/v1
+  - text: API 协议
+  - combobox "API 协议":
+    - option "openai-completions"
+    - option "openai-responses" [selected]
+  - text: 模型 ID
+  - textbox "模型 ID": research-model
+  - text: API 密钥
+  - textbox "API 密钥"
+  - paragraph: API 密钥会在服务端加密保存，保存后不会再次显示。
+  - button "取消"
+  - button "保存" [disabled]

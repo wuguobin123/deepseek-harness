@@ -14,7 +14,7 @@ import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import * as api from '../../api'
 
-function HomePage(): JSX.Element {
+function HomePage(): React.JSX.Element {
   const navigate = useNavigate()
   const [sessions, setSessions] = React.useState<api.SessionListItem[] | null>(null)
   const [error, setError] = React.useState<string | null>(null)
@@ -54,7 +54,7 @@ function HomePage(): JSX.Element {
         <button
           type="button"
           className="primary"
-          onClick={onCreate}
+          onClick={() => { void onCreate() }}
           disabled={creating}
           data-testid="home-new-session"
         >
@@ -81,7 +81,7 @@ function HomePage(): JSX.Element {
               <button
                 type="button"
                 className="session-list__row"
-                onClick={() => navigate(`/assistant/${s.sessionId}`)}
+                onClick={() =>{  navigate(`/assistant/${s.sessionId}`) }}
                 data-testid="home-session-row"
                 data-session-id={s.sessionId}
               >

@@ -17,8 +17,11 @@ import type { SubagentsApi } from './subagents.ts'
 import type { AccountApi } from './account.ts'
 import type { WalletApi } from './wallet.ts'
 import type { ModelKeysApi } from './model-keys.ts'
+import type { CustomModelsApi } from './custom-models.ts'
 import type { ArtifactsApi } from './artifacts.ts'
+import type { UserContextApi } from './user-context.ts'
 import type { RpcResponse } from './rpc.ts'
+import type { AccountPluginsApi } from './account-plugins.ts'
 
 /**
  * Method name → method signature. Signatures are the single source of truth; payload/value
@@ -49,6 +52,7 @@ export interface RpcMethodMap {
   'host.openPath': HostApi['openPath']
   'workspace.list': WorkspaceApi['list']
   'workspace.create': WorkspaceApi['create']
+  'workspace.importDirectory': WorkspaceApi['importDirectory']
   'workspace.rename': WorkspaceApi['rename']
   'workspace.delete': WorkspaceApi['delete']
   'workspace.insertBefore': WorkspaceApi['insertBefore']
@@ -78,9 +82,12 @@ export interface RpcMethodMap {
   'llm.providers': LlmApi['providers']
   'llm.models': LlmApi['models']
   'llm.discoverModels': LlmApi['discoverModels']
-  // ---- workbuddy multi-user account seam ----
+  // ---- xiaowei multi-user account seam ----
   'account.signup': AccountApi['signup']
   'account.emailCode': AccountApi['emailCode']
+  'account.invites.create': AccountApi['invites']['create']
+  'account.invites.list': AccountApi['invites']['list']
+  'account.invites.rotate': AccountApi['invites']['rotate']
   'account.signin': AccountApi['signin']
   'account.signout': AccountApi['signout']
   'account.state': AccountApi['state']
@@ -94,9 +101,19 @@ export interface RpcMethodMap {
   'account.modelKeys.provision': ModelKeysApi['provision']
   'account.modelKeys.list': ModelKeysApi['list']
   'account.modelKeys.revoke': ModelKeysApi['revoke']
+  'account.customModels.create': CustomModelsApi['create']
+  'account.customModels.list': CustomModelsApi['list']
+  'account.customModels.remove': CustomModelsApi['remove']
   'artifact.list': ArtifactsApi['list']
   'artifact.read': ArtifactsApi['read']
   'artifact.remove': ArtifactsApi['remove']
+  'userContext.list': UserContextApi['list']
+  'userContext.get': UserContextApi['get']
+  'userContext.set': UserContextApi['set']
+  'userContext.delete': UserContextApi['delete']
+  'account.plugins.list': AccountPluginsApi['list']
+  'account.plugins.install': AccountPluginsApi['install']
+  'account.plugins.uninstall': AccountPluginsApi['uninstall']
 }
 
 /** Business request payload of method K (reaches through the RpcRequest narrow form to payload). */

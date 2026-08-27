@@ -3,15 +3,24 @@
  * enforces time and size limits, classifies and decodes text, and leaves presentation to
  * `@deepseek-ai/dsh-tool-web`. Requests carry no browser cookies or ambient credentials.
  *
- * Private-network and SSRF protection is not implemented; do not enable this provider where
- * it can reach sensitive internal targets.
  * @module @deepseek-ai/dsh-web-fetch-http/provider
  */
 
 import { WebError } from '@deepseek-ai/dsh-web'
 import type { WebFetchBody, WebFetchProvider, WebFetchRequest, WebFetchResult } from '@deepseek-ai/dsh-web'
 import { deadline, timeoutOf } from '@deepseek-ai/dsh-timeout'
-import { classifyContentType, decoderForCharset, isSameOrigin, parseCharset, validateFetchUrl } from './policy.ts'
+import { classifyContentType, decoderForCharset, isPublicAddress, isSameOrigin, parseCharset, validateFetchUrl } from './policy.ts'
+import { lookup as dnsLookup } from 'node:dns/promises'
+import { isIP, type LookupFunction } from 'node:net'
+import { Agent } from 'undici'
+
+/** Injectable transport seams used by tests without weakening the production policy. */
+export interface HttpFetchDependencies {
+  /** Resolve all A/AAAA answers for a hostname. */
+  resolveAddresses?: (hostname: string) => Promise<ReadonlyArray<{ address: string; family: number }>>
+  /** Execute a request after address validation; production uses undici. */
+  request?: (url: URL, init: RequestInit) => Promise<Response>
+}
 
 /** Resolved provider limits (the plugin's schemastery Config supplies defaults). */
 export interface HttpFetchLimits {
@@ -25,6 +34,8 @@ export interface HttpFetchLimits {
   timeoutMs: number
   /** Maximum number of (same-origin) redirect hops to follow. */
   maxRedirects: number
+  /** Maximum transport attempts for one request after DNS validation. */
+  maxAttempts: number
   /** `User-Agent` header sent on every request. */
   userAgent: string
 }
@@ -36,7 +47,7 @@ export const LOCAL_FETCH_PROVIDER_ID = 'http'
 export class HttpFetchProvider implements WebFetchProvider {
   readonly id = LOCAL_FETCH_PROVIDER_ID
 
-  constructor(private readonly limits: HttpFetchLimits) {}
+  constructor(private readonly limits: HttpFetchLimits, private readonly dependencies: HttpFetchDependencies = {}) {}
 
   /** No credentials to check — an anonymous public fetcher is always usable. */
   available(): boolean {
@@ -54,63 +65,112 @@ export class HttpFetchProvider implements WebFetchProvider {
 
   /** Follow same-origin redirects up to the hop cap, then read the final response. */
   private async followAndRead(initialUrl: string, signal: AbortSignal): Promise<WebFetchResult> {
-    let currentUrl = validateFetchUrl(initialUrl, this.limits.maxUrlLength)
+    const sourceUrl = validateFetchUrl(initialUrl, this.limits.maxUrlLength)
+    const githubTarget = githubContentTarget(sourceUrl)
+    let currentUrl = githubTarget ?? sourceUrl
     let redirectsFollowed = 0
 
     for (;;) {
-      const response = await this.requestOnce(currentUrl, signal)
-
-      if (isRedirectStatus(response.status)) {
-        // Enforce the redirect budget before resolving or validating the next hop.
-        if (redirectsFollowed >= this.limits.maxRedirects) {
-          await response.body?.cancel()
-          throw new WebError(`exceeded the maximum of ${this.limits.maxRedirects} redirects`, 'WEB_REDIRECT_BLOCKED')
-        }
-        const location = response.headers.get('location')
-        if (location === null) {
-          // A redirect status with no Location is not a usable resource. Cancel
-          // the (possibly streaming) body before throwing so no socket leaks.
-          await response.body?.cancel()
-          throw new WebError(`redirect response (HTTP ${response.status}) without a Location header`, 'WEB_PROVIDER_ERROR')
-        }
-        const target = resolveRedirect(location, currentUrl)
-        // Re-validate the target against the same transport hygiene a direct request gets: a
-        // redirect must not be a back door to a credentialed, non-http(s), or over-long URL
-        // that validateFetchUrl would reject.
-        let validatedTarget: URL
-        try {
-          validatedTarget = validateFetchUrl(target.toString(), this.limits.maxUrlLength)
-          if (!isSameOrigin(validatedTarget, currentUrl)) {
-            throw new WebError(
-              `cross-origin redirect to ${validatedTarget.origin} is not followed automatically; retry against that URL directly`,
-              'WEB_REDIRECT_BLOCKED',
-            )
+      const request = await this.requestOnce(currentUrl, signal)
+      const response = request.response
+      try {
+        if (isRedirectStatus(response.status)) {
+          // Enforce the redirect budget before resolving or validating the next hop.
+          if (redirectsFollowed >= this.limits.maxRedirects) {
+            await response.body?.cancel()
+            throw new WebError(`exceeded the maximum of ${this.limits.maxRedirects} redirects`, 'WEB_REDIRECT_BLOCKED')
           }
-        } catch (error: unknown) {
+          const location = response.headers.get('location')
+          if (location === null) {
+            // A redirect status with no Location is not a usable resource. Cancel
+            // the (possibly streaming) body before throwing so no socket leaks.
+            await response.body?.cancel()
+            throw new WebError(`redirect response (HTTP ${response.status}) without a Location header`, 'WEB_PROVIDER_ERROR')
+          }
+          // Re-validate the target against the same transport hygiene a direct request gets: a
+          // redirect must not be a back door to a credentialed, non-http(s), or over-long URL
+          // that validateFetchUrl would reject.
+          let validatedTarget: URL
+          try {
+            const target = resolveRedirect(location, currentUrl)
+            validatedTarget = validateFetchUrl(target.toString(), this.limits.maxUrlLength)
+            if (!isSameOrigin(validatedTarget, currentUrl)) {
+              throw new WebError(
+                `cross-origin redirect to ${validatedTarget.origin} is not followed automatically; retry against that URL directly`,
+                'WEB_REDIRECT_BLOCKED',
+              )
+            }
+          } catch (error: unknown) {
+            await response.body?.cancel()
+            throw error
+          }
           await response.body?.cancel()
-          throw error
+          currentUrl = validatedTarget
+          redirectsFollowed++
+          continue
         }
-        await response.body?.cancel()
-        currentUrl = validatedTarget
-        redirectsFollowed++
-        continue
-      }
 
-      return await this.readBody(response, currentUrl, signal)
+        return await this.readBody(response, githubTarget === undefined ? currentUrl : sourceUrl, signal)
+      } finally {
+        await request.close()
+      }
     }
   }
 
-  private async requestOnce(url: URL, signal: AbortSignal): Promise<Response> {
-    try {
-      return await fetch(url, {
-        method: 'GET',
-        redirect: 'manual',
-        headers: { 'user-agent': this.limits.userAgent, 'accept': 'text/html,application/xhtml+xml,text/*;q=0.9,application/json;q=0.8' },
-        signal,
-      })
-    } catch (error: unknown) {
-      throw translateAbortOrNetwork(error, signal)
+  private async requestOnce(url: URL, signal: AbortSignal): Promise<{ response: Response; close: () => Promise<void> }> {
+    const hostname = url.hostname.replace(/^\[|\]$/g, '')
+    if (this.dependencies.resolveAddresses === undefined && isIpLiteral(hostname) && !isPublicAddress(hostname)) {
+      throw new WebError(`URL resolves to a non-public address: ${hostname}`, 'WEB_BLOCKED_URL')
     }
+    const resolve = this.dependencies.resolveAddresses ?? (async (name: string) => await dnsLookup(name, { all: true, order: 'verbatim' }))
+    let answers: ReadonlyArray<{ address: string; family: number }>
+    try {
+      answers = await resolve(hostname)
+    } catch (error: unknown) {
+      throw new WebError(`web fetch DNS lookup failed for ${hostname}`, 'WEB_PROVIDER_ERROR', { cause: error })
+    }
+    if (answers.length === 0 || answers.some(answer => !isPublicAddress(answer.address))) {
+      throw new WebError(`URL resolves to a non-public address: ${hostname}`, 'WEB_BLOCKED_URL')
+    }
+    const verified = answers.map(({ address }) => ({ address, family: isIP(address) }))
+    /* v8 ignore next -- public-address validation above guarantees IPv4 or IPv6 for every answer. */
+    if (verified.some(answer => answer.family === 0)) {
+      throw new WebError(`DNS returned an invalid address for ${hostname}`, 'WEB_PROVIDER_ERROR')
+    }
+    let lastError: unknown
+    for (let attempt = 0; attempt < this.limits.maxAttempts; attempt++) {
+      try {
+        if (this.dependencies.request !== undefined) {
+          return { response: await this.dependencies.request(url, {
+            method: 'GET',
+            redirect: 'manual',
+            headers: requestHeaders(url, this.limits.userAgent),
+            signal,
+          }), close: async () => {} }
+        }
+        const offset = attempt % verified.length
+        const rotated = [...verified.slice(offset), ...verified.slice(0, offset)]
+        const agent = new Agent({ connect: { lookup: pinnedLookup(rotated) } })
+        try {
+          const response = await fetch(url, {
+            method: 'GET',
+            redirect: 'manual',
+            headers: requestHeaders(url, this.limits.userAgent),
+            signal,
+            dispatcher: agent,
+          } as RequestInit & { dispatcher: Agent })
+          return { response, close: async () => { await agent.close() } }
+        } catch (error: unknown) {
+          await agent.close()
+          throw error
+        }
+      } catch (error: unknown) {
+        const translated = translateAbortOrNetwork(error, signal)
+        if (translated.code !== 'WEB_PROVIDER_ERROR') throw translated
+        lastError = error
+      }
+    }
+    throw translateAbortOrNetwork(lastError, signal)
   }
 
   /** Read, byte-cap, classify, and decode the final response body. */
@@ -207,6 +267,77 @@ export class HttpFetchProvider implements WebFetchProvider {
   }
 }
 
+/** Build a Node-compatible lookup that returns only previously validated addresses. */
+export function pinnedLookup(verified: ReadonlyArray<{ address: string; family: number }>): LookupFunction {
+  return (_hostname, options, callback) => {
+    if (options.all === true) callback(null, [...verified])
+    else {
+      /* v8 ignore next -- requestOnce calls this helper only after rejecting an empty answer set. */
+      const first = verified[0] as { address: string; family: number }
+      callback(null, first.address, first.family)
+    }
+  }
+}
+
+/**
+ * Map GitHub repository and file pages to GitHub's anonymous content endpoints.
+ * These endpoints expose the same public bytes without depending on the HTML
+ * frontend, which is commonly unavailable from restricted server networks.
+ */
+export function githubContentTarget(url: URL): URL | undefined {
+  if (url.protocol !== 'https:') return undefined
+  const segments = url.pathname.split('/').filter(Boolean)
+  if (url.hostname === 'raw.githubusercontent.com') {
+    const owner = segments[0]
+    const repository = segments[1]
+    const ref = segments[2]
+    const path = segments.slice(3).join('/')
+    if (owner === undefined || repository === undefined || ref === undefined || path === ''
+      || !isGithubName(owner) || !isGithubName(repository)) return undefined
+    return githubContentsTarget(owner, repository, ref, path)
+  }
+  if (url.hostname !== 'github.com' && url.hostname !== 'www.github.com') return undefined
+  const owner = segments[0]
+  const repositoryWithSuffix = segments[1]
+  if (owner === undefined || repositoryWithSuffix === undefined
+    || !isGithubName(owner) || !isGithubName(repositoryWithSuffix)) return undefined
+  const repository = repositoryWithSuffix.endsWith('.git') ? repositoryWithSuffix.slice(0, -4) : repositoryWithSuffix
+  if (repository === '') return undefined
+  if (segments.length === 2) {
+    return new URL(`https://api.github.com/repos/${owner}/${repository}/readme`)
+  }
+  const kind = segments[2]
+  const ref = segments[3]
+  const path = segments.slice(4).join('/')
+  if ((kind === 'blob' || kind === 'raw') && ref !== undefined && path !== '') {
+    return githubContentsTarget(owner, repository, ref, path)
+  }
+  return undefined
+}
+
+function githubContentsTarget(owner: string, repository: string, ref: string, path: string): URL {
+  const target = new URL(`https://api.github.com/repos/${owner}/${repository}/contents/${path}`)
+  target.searchParams.set('ref', ref)
+  return target
+}
+
+function isGithubName(value: string): boolean {
+  return /^[A-Za-z0-9_.-]+$/.test(value)
+}
+
+function requestHeaders(url: URL, userAgent: string): Record<string, string> {
+  return {
+    'user-agent': userAgent,
+    'accept': url.hostname === 'api.github.com'
+      ? 'application/vnd.github.raw+json'
+      : 'text/html,application/xhtml+xml,text/*;q=0.9,application/json;q=0.8',
+  }
+}
+
+function isIpLiteral(hostname: string): boolean {
+  return hostname.includes(':') || /^\d+(?:\.\d+){3}$/.test(hostname)
+}
+
 /** HTTP redirect status codes that carry a `Location`. */
 function isRedirectStatus(status: number): boolean {
   return status === 301 || status === 302 || status === 303 || status === 307 || status === 308
@@ -236,5 +367,6 @@ function translateAbortOrNetwork(error: unknown, signal: AbortSignal): WebError 
   const timeout = timeoutOf(signal, 'WEB_FETCH_TIMEOUT')
   if (timeout !== undefined) return new WebError('web fetch timed out', 'WEB_FETCH_TIMEOUT', { cause: timeout })
   if (signal.aborted) return new WebError('web fetch aborted', 'WEB_ABORTED', { cause: error })
+  if (error instanceof Error && error.name === 'AbortError') return new WebError('web fetch aborted', 'WEB_ABORTED', { cause: error })
   return new WebError(`web fetch failed: ${String(error)}`, 'WEB_PROVIDER_ERROR', { cause: error })
 }

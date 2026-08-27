@@ -10,13 +10,16 @@
  */
 import type { WorkbenchApi } from '../preload/index'
 import type {
+  AuthState,
   ClientResponse,
   HostFrame,
   MuxFrame,
+  RequestEmailCodeValue,
   SessionState,
 } from '../shared/contracts'
+import { withArtifactCsp } from '../shared/artifact-html'
 
-const DEFAULT_BASE_URL = (import.meta.env?.VITE_DEFAULT_SERVICE_URL as string | undefined) ?? 'http://127.0.0.1:18000'
+const DEFAULT_BASE_URL = (import.meta.env.VITE_DEFAULT_SERVICE_URL as string | undefined) ?? 'http://127.0.0.1:18000'
 
 function getBaseUrl(): string {
   return (window as unknown as { __DSH_BASE_URL__?: string }).__DSH_BASE_URL__ ?? DEFAULT_BASE_URL
@@ -33,7 +36,12 @@ function baseHeaders(extra?: Record<string, string>): Record<string, string> {
 export function buildDevBridge(): WorkbenchApiWithExtras {
   let baseUrl = getBaseUrl()
 
-  async function request<R>(method: string, payload: unknown): Promise<{ ok: true; value: R } | { ok: false; error: { code: string; message: string } }> {
+  // The caller selects R from the RPC method; payload does not carry the response type.
+  // oxlint-disable-next-line typescript/no-unnecessary-type-parameters
+  async function request<R>(
+    method: string,
+    payload: unknown,
+  ): Promise<{ ok: true; value: R } | { ok: false; error: { code: string; message: string } }> {
     const url = `${baseUrl}/api/${method}`
     let response: Response
     try {
@@ -69,13 +77,23 @@ export function buildDevBridge(): WorkbenchApiWithExtras {
       baseUrl = url
     },
 
-    request<R = unknown>(method: string, payload: unknown): Promise<{ ok: true; value: R } | { ok: false; error: { code: string; message: string } }> {
+    // Implements WorkbenchApi's caller-selected RPC result type.
+    // oxlint-disable-next-line typescript/no-unnecessary-type-parameters
+    request<R = unknown>(
+      method: string,
+      payload: unknown,
+    ): Promise<{ ok: true; value: R } | { ok: false; error: { code: string; message: string } }> {
       return request<R>(method, payload)
     },
 
-    async subscribeMux(listener: (envelope: { rpcId: string; method: string; payload: MuxFrame }) => void): Promise<() => Promise<void>> {
+    importDirectory() {
+      return request('workspace.importDirectory', {})
+    },
+
+    subscribeMux(listener: (envelope: { rpcId: string; method: string; payload: MuxFrame }) => void): Promise<() => Promise<void>> {
       const source = streamSse('/api/events.mux')
-      const handler = (event: MessageEvent) => {
+      const handler = (event: MessageEvent<unknown>) => {
+        if (typeof event.data !== 'string') return
         try {
           const envelope = JSON.parse(event.data) as { rpcId: string; method: string; payload: MuxFrame }
           listener(envelope)
@@ -84,15 +102,17 @@ export function buildDevBridge(): WorkbenchApiWithExtras {
         }
       }
       source.addEventListener('message', handler)
-      return async () => {
+      return Promise.resolve(() => {
         source.removeEventListener('message', handler)
         source.close()
-      }
+        return Promise.resolve()
+      })
     },
 
-    async subscribeHost(listener: (envelope: { rpcId: string; method: string; payload: HostFrame }) => void): Promise<() => Promise<void>> {
+    subscribeHost(listener: (envelope: { rpcId: string; method: string; payload: HostFrame }) => void): Promise<() => Promise<void>> {
       const source = streamSse('/api/events.host')
-      const handler = (event: MessageEvent) => {
+      const handler = (event: MessageEvent<unknown>) => {
+        if (typeof event.data !== 'string') return
         try {
           const envelope = JSON.parse(event.data) as { rpcId: string; method: string; payload: HostFrame }
           listener(envelope)
@@ -101,13 +121,18 @@ export function buildDevBridge(): WorkbenchApiWithExtras {
         }
       }
       source.addEventListener('message', handler)
-      return async () => {
+      return Promise.resolve(() => {
         source.removeEventListener('message', handler)
         source.close()
-      }
+        return Promise.resolve()
+      })
     },
 
-    async respond(rpcId: string, value: unknown, error?: { code: string; message: string; details?: Record<string, unknown> }): Promise<void> {
+    async respond(
+      rpcId: string,
+      value: unknown,
+      error?: { code: string; message: string; details?: Record<string, unknown> },
+    ): Promise<void> {
       const envelope: ClientResponse = error
         ? { type: 'client-response', rpcId, result: { ok: false, error: { code: error.code, message: error.message, details: error.details ?? {} } } }
         : { type: 'client-response', rpcId, result: { ok: true, value } }
@@ -118,30 +143,98 @@ export function buildDevBridge(): WorkbenchApiWithExtras {
       })
     },
 
-    async getSession(): Promise<SessionState> {
-      return { baseUrl, version: '2' }
+    getSession(): Promise<SessionState> {
+      return Promise.resolve({ baseUrl, environment: 'local' as const, lastLocation: 'local' as const, version: '3' })
     },
 
-    async updateSession(input: { baseUrl: string }): Promise<{ ok: true; value: { baseUrl: string } } | { ok: false; error: { code: string; message: string } }> {
+    updateSession(
+      input: { baseUrl: string },
+    ): Promise<{ ok: true; value: { baseUrl: string } } | { ok: false; error: { code: string; message: string } }> {
       baseUrl = input.baseUrl
-      return { ok: true, value: { baseUrl } }
+      return Promise.resolve({ ok: true, value: { baseUrl } })
     },
 
-    async getAppUpdateState() {
-      return { status: 'up-to-date' as const, currentVersion: '0.3.0' }
+    getAppUpdateState() {
+      return Promise.resolve({ status: 'up-to-date' as const, currentVersion: '0.3.0' })
     },
 
-    async checkAppUpdate() {
-      return { status: 'up-to-date' as const, currentVersion: '0.3.0' }
+    checkAppUpdate() {
+      return Promise.resolve({ status: 'up-to-date' as const, currentVersion: '0.3.0' })
     },
 
-    async openAppUpdateDownload() {
-      throw new Error('no update available')
+    openAppUpdateDownload() {
+      return Promise.reject(new Error('no update available'))
     },
 
-    async subscribeAppUpdateState(listener: (state: { status: 'up-to-date'; currentVersion: string }) => void) {
+    async saveArtifact(input: { artifactId: string }) {
+      const result = await request<{
+        view: { name?: string; title?: string; kind: string; mediaType: string }
+        bytesBase64: string
+      }>('artifact.read', input)
+      if (!result.ok) return result
+      const binary = atob(result.value.bytesBase64)
+      const bytes = Uint8Array.from(binary, char => char.charCodeAt(0))
+      const name = result.value.view.name ?? result.value.view.title ?? `${result.value.view.kind}-artifact`
+      const url = URL.createObjectURL(new Blob([bytes], { type: result.value.view.mediaType }))
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = name
+      anchor.click()
+      queueMicrotask(() =>{  URL.revokeObjectURL(url) })
+      return { ok: true as const, value: { status: 'saved' as const } }
+    },
+
+    async openArtifactInBrowser(input: { artifactId: string }) {
+      const preview = window.open('about:blank', '_blank')
+      if (preview === null) {
+        return { ok: false as const, error: { code: 'POPUP_BLOCKED', message: '浏览器阻止了新标签页' } }
+      }
+      const result = await request<{ view: { mediaType: string }; bytesBase64: string }>('artifact.read', input)
+      if (!result.ok) {
+        preview.close()
+        return result
+      }
+      if (result.value.view.mediaType !== 'text/html') {
+        preview.close()
+        return { ok: false as const, error: { code: 'UNSUPPORTED_MEDIA_TYPE', message: '仅 HTML 产物支持浏览器预览' } }
+      }
+      const html = new TextDecoder().decode(Uint8Array.from(atob(result.value.bytesBase64), char => char.charCodeAt(0)))
+      const url = URL.createObjectURL(new Blob([withArtifactCsp(html)], { type: 'text/html;charset=utf-8' }))
+      preview.location.replace(url)
+      setTimeout(() =>{  URL.revokeObjectURL(url) }, 30 * 60 * 1000)
+      return { ok: true as const, value: { opened: true as const } }
+    },
+
+    subscribeAppUpdateState(listener: (state: { status: 'up-to-date'; currentVersion: string }) => void) {
       listener({ status: 'up-to-date', currentVersion: '0.3.0' })
-      return () => undefined
+      return Promise.resolve(() => undefined)
+    },
+
+    async getAuthState(): Promise<AuthState> {
+      const result = await request<AuthState>('account.auth.state', {})
+      return result.ok ? result.value : { signedIn: false }
+    },
+    requestEmailCode(
+      input: { email: string },
+    ): Promise<{ ok: true; value: RequestEmailCodeValue } | { ok: false; error: { code: string; message: string } }> {
+      return request<RequestEmailCodeValue>('account.emailCode', input)
+    },
+    signUp(
+      input: { email: string; password: string; displayName?: string; verificationCode?: string },
+    ): Promise<{ ok: true; value: AuthState } | { ok: false; error: { code: string; message: string } }> {
+      return request<AuthState>('account.signup', input)
+    },
+    signIn(
+      input: { email: string; password: string },
+    ): Promise<{ ok: true; value: AuthState } | { ok: false; error: { code: string; message: string } }> {
+      return request<AuthState>('account.signin', input)
+    },
+    signOut(): Promise<{ ok: true; value: AuthState }> {
+      return request<AuthState>('account.signout', {}) as Promise<{ ok: true; value: AuthState }>
+    },
+    subscribeAuthState(listener: (state: AuthState) => void): Promise<() => void> {
+      listener({ signedIn: false })
+      return Promise.resolve(() => undefined)
     },
   }
 }

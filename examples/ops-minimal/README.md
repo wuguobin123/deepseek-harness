@@ -1,5 +1,7 @@
 # ops-minimal
 
+English | [中文](README.zh.md)
+
 Phase 0 zero-milestone demo. Mounts the `ops-subagent-python` provider, points it at a stub Python entry script (`ops_minimal.subagent_main`), and lets the parent harness drive one `agent.turn` through the JSON-RPC wire.
 
 The Python stub is at [`./ops_minimal/subagent_main.py`](./ops_minimal/subagent_main.py) and contains the full `initialize` / `agent.turn` / `session.event` lifecycle documented in the package README.

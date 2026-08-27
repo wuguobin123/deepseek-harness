@@ -16,8 +16,9 @@
 
 import type { CacheRetention, ChatTemplateKwargValue, ModelThinkingLevel, Provider, ThinkingBudgets, Transport } from '@earendil-works/pi-ai'
 import z from '@deepseek-ai/schemastery'
-import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import { credentialRef, isCredentialRefName } from '@deepseek-ai/dsh-credentials'
 import type { CredentialRef } from '@deepseek-ai/dsh-credentials'
+import type { LaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { resolveRetryPolicy, RetryPolicySchema } from '@deepseek-ai/dsh-llm'
 import type { ResolvedRetryPolicy, RetryPolicyConfig } from '@deepseek-ai/dsh-llm'
@@ -98,6 +99,8 @@ export interface PiAiProviderProfile {
   api?: string
   /** Endpoint for this route's models; defaults to the installed catalog's endpoint. */
   baseURL?: string
+  /** Environment-variable name whose launch-snapshot value supplies {@link baseURL} when it is absent. */
+  baseURLEnv?: string
   /**
    * This route's model catalog. Omission serves the installed catalog for the
    * route unchanged; an explicit list replaces it, each entry defaulting its
@@ -177,7 +180,7 @@ export interface PiAiProviderProfile {
 
 /** Validated profile with its route stamped and every adapter-owned default resolved. */
 export interface ResolvedPiAiProviderProfile
-  extends Omit<PiAiProviderProfile, 'apiKeyEnv' | 'retryPolicy' | 'models' | 'displayName'> {
+  extends Omit<PiAiProviderProfile, 'apiKeyEnv' | 'baseURLEnv' | 'retryPolicy' | 'models' | 'displayName'> {
   /** Harness route key and the `Models` collection key (the configuration dict key). */
   provider: string
   /** Resolved display name for selectors and configuration surfaces. */
@@ -309,6 +312,7 @@ const profile = z.object({
   displayName: z.string(),
   api: z.union(supportedProtocols()),
   baseURL: z.string(),
+  baseURLEnv: z.string(),
   models: z.array(modelProfile),
   modelOverrides: z.dict(modelOverride),
   compat: compatProfile,
@@ -344,10 +348,11 @@ export const Config: z<Config> = z.object({
  * renders and the value an absent section resolves to; wrapping it would break
  * both.
  * @param config - the resolved section to check.
+ * @param environment - immutable launch environment used by endpoint references.
  * @throws Error naming the route and model that cannot be served.
  */
-export function assertServiceable(config: Config): void {
-  resolveProfiles(config.providers)
+export function assertServiceable(config: Config, environment?: LaunchEnvironmentSnapshot): void {
+  resolveProfiles(config.providers, environment)
 }
 
 /** Reject removed pre-release profile fields and name their replacements. */
@@ -374,10 +379,12 @@ function rejectRemovedFields(provider: string, source: PiAiProviderProfile): voi
  * resolves to the empty (dormant) route set here rather than through a hidden
  * fallback, and each route's models and pi-ai provider are materialized once.
  * @param providers - configured provider profiles keyed by route.
+ * @param environment - immutable launch environment used by `baseURLEnv` references.
  * @returns validated profiles in configuration order.
  */
 export function resolveProfiles(
   providers: Readonly<Record<string, PiAiProviderProfile>> | undefined,
+  environment?: LaunchEnvironmentSnapshot,
 ): Map<string, ResolvedPiAiProviderProfile> {
   if (Array.isArray(providers)) {
     throw new Error('llm-pi-ai: providers is now a dict keyed by provider route, not an array of profiles')
@@ -390,6 +397,21 @@ export function resolveProfiles(
     if (source.baseURL !== undefined && source.baseURL.length === 0) {
       throw new Error(`llm-pi-ai: provider "${provider}" has an empty baseURL`)
     }
+    if (source.baseURLEnv !== undefined && !isCredentialRefName(source.baseURLEnv)) {
+      throw new Error(
+        `llm-pi-ai: provider "${provider}" baseURLEnv must name a POSIX environment variable`,
+      )
+    }
+    const baseURL = source.baseURL ?? (() => {
+      if (source.baseURLEnv === undefined) return undefined
+      const value = environment?.get(source.baseURLEnv)?.value
+      if (value === undefined || value.length === 0) {
+        throw new Error(
+          `llm-pi-ai: provider "${provider}" resolves baseURLEnv ${source.baseURLEnv}, which is not set or is empty`,
+        )
+      }
+      return value
+    })()
     if (source.displayName !== undefined && source.displayName.length === 0) {
       throw new Error(`llm-pi-ai: provider "${provider}" has an empty displayName`)
     }
@@ -429,7 +451,7 @@ export function resolveProfiles(
     const catalog = resolveRouteModels({
       provider,
       ...source.api === undefined ? {} : { api: source.api },
-      ...source.baseURL === undefined ? {} : { baseURL: source.baseURL },
+      ...baseURL === undefined ? {} : { baseURL },
       ...source.models === undefined ? {} : { models: source.models },
       ...source.modelOverrides === undefined ? {} : { modelOverrides: source.modelOverrides },
       ...source.compat === undefined ? {} : { compat: source.compat },
@@ -437,12 +459,13 @@ export function resolveProfiles(
       defaultContextWindow: source.defaultContextWindow ?? DEFAULT_CONTEXT_WINDOW,
       defaultMaxTokens: source.defaultMaxTokens ?? DEFAULT_MAX_TOKENS,
     })
-    const { apiKeyEnv, retryPolicy, models: _models, displayName: _displayName, ...rest } = source
+    const { apiKeyEnv, baseURLEnv: _baseURLEnv, retryPolicy, models: _models, displayName: _displayName, ...rest } = source
     resolved.set(provider, {
       ...rest,
       provider,
       displayName,
       ...apiKeyEnv === undefined ? {} : { apiKeyEnv: credentialRef(apiKeyEnv) },
+      ...baseURL === undefined ? {} : { baseURL },
       streamIdleTimeoutMs,
       maxRequestImageBytes,
       requestImagePixelBudget,
@@ -455,7 +478,7 @@ export function resolveProfiles(
         provider,
         displayName,
         ...source.api === undefined ? {} : { api: source.api },
-        ...source.baseURL === undefined ? {} : { baseURL: source.baseURL },
+        ...baseURL === undefined ? {} : { baseURL },
         models: catalog.models,
         namesCredential: apiKeyEnv !== undefined,
       }),

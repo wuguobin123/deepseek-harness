@@ -13,6 +13,20 @@
  */
 import { z } from 'zod'
 
+/** Execution location owned by a federated desktop Host. */
+export const HostLocationSchema = z.enum(['local', 'cloud'])
+export type HostLocation = z.infer<typeof HostLocationSchema>
+
+/** Opaque desktop resource id carrying its owning Host location. */
+export const ResourceIdSchema = z.string().regex(/^dsh:(?:local|cloud):[A-Za-z0-9_-]+$/u)
+export type ResourceId = z.infer<typeof ResourceIdSchema>
+
+/** Explicit native-folder versus account-copy directory action. */
+export const DirectoryImportActionSchema = z.object({
+  location: z.enum(['local', 'cloud']),
+})
+export type DirectoryImportAction = z.infer<typeof DirectoryImportActionSchema>
+
 // ---------------------------------------------------------------------------
 // RPC wire envelope
 // ---------------------------------------------------------------------------
@@ -91,7 +105,12 @@ export const SessionEventSchema = z.object({
 })
 
 export const MuxFrameSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('session/event'), sessionId: z.string(), event: z.unknown() }),
+  z.object({
+    type: z.literal('session/event'),
+    sessionId: z.string(),
+    event: z.unknown(),
+    view: z.unknown().optional(),
+  }),
   z.object({ type: z.literal('session/subscribed'), sessionId: z.string(), lastSeq: z.number() }),
   z.object({ type: z.literal('session/projection'), sessionId: z.string(), key: z.string(), value: z.unknown(), seq: z.number() }),
   z.object({ type: z.literal('session/queue'), sessionId: z.string(), items: z.array(z.unknown()) }),
@@ -155,7 +174,11 @@ export type HostFrame = z.infer<typeof HostFrameSchema>
 
 export const SessionStateSchema = z.object({
   baseUrl: z.string(),
-  version: z.string().default('2'),
+  /** Deprecated compatibility alias for clients built before federation. */
+  environment: z.enum(['local', 'cloud']).optional(),
+  /** Last selected location only; it never controls Host availability. */
+  lastLocation: z.enum(['local', 'cloud']).default('cloud'),
+  version: z.string().default('3'),
 })
 
 export type SessionState = z.infer<typeof SessionStateSchema>
@@ -203,6 +226,7 @@ export const SignUpInputSchema = SignInInputSchema.extend({
    * The backend rejects signup without it when email-verification is enabled.
    */
   verificationCode: z.string().regex(/^\d{6}$/).optional(),
+  invitationCode: z.string().min(1).max(256),
 })
 
 export type SignUpInput = z.infer<typeof SignUpInputSchema>
@@ -210,6 +234,7 @@ export type SignUpInput = z.infer<typeof SignUpInputSchema>
 /** account.emailCode request shape. */
 export const RequestEmailCodeInputSchema = z.object({
   email: z.string().min(1).max(254),
+  invitationCode: z.string().min(1).max(256),
 })
 
 export type RequestEmailCodeInput = z.infer<typeof RequestEmailCodeInputSchema>
@@ -218,12 +243,13 @@ export type RequestEmailCodeInput = z.infer<typeof RequestEmailCodeInputSchema>
 export const RequestEmailCodeValueSchema = z.object({
   expiresInSeconds: z.number().int().positive(),
   retryAfterSeconds: z.number().int().nonnegative(),
+  devCode: z.string().regex(/^\d{6}$/).optional(),
 })
 
 export type RequestEmailCodeValue = z.infer<typeof RequestEmailCodeValueSchema>
 
 // ---------------------------------------------------------------------------
-// Client update check (stub: always up-to-date until dsh-ops exposes a releases endpoint)
+// Client update check
 // ---------------------------------------------------------------------------
 
 export const AppUpdateStateSchema = z.object({
@@ -239,12 +265,27 @@ export const AppUpdateStateSchema = z.object({
 export type AppUpdateState = z.infer<typeof AppUpdateStateSchema>
 
 // ---------------------------------------------------------------------------
+// Native artifact actions
+// ---------------------------------------------------------------------------
+
+/** Renderer input for native artifact actions; paths and bytes never cross IPC. */
+export const ArtifactActionInputSchema = z.object({
+  artifactId: z.union([
+    z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    ResourceIdSchema,
+  ]),
+})
+
+export type ArtifactActionInput = z.infer<typeof ArtifactActionInputSchema>
+
+// ---------------------------------------------------------------------------
 // IPC channels (main ↔ renderer)
 // ---------------------------------------------------------------------------
 
 export const IpcChannels = {
   /** Generic RPC bridge: invoke(method, payload) → ServerResponse. */
   Request: 'workbench:request',
+  ImportDirectory: 'workbench:import-directory',
   /** Open the SSE carrier GET /api/events.mux and fan frames as MuxEvent. */
   SubscribeMux: 'workbench:subscribe-mux',
   UnsubscribeMux: 'workbench:unsubscribe-mux',
@@ -264,7 +305,9 @@ export const IpcChannels = {
   GetAppUpdateState: 'workbench:update:get-state',
   CheckAppUpdate: 'workbench:update:check',
   OpenAppUpdateDownload: 'workbench:update:open-download',
-  // auth: bearer session lifecycle (workbuddy multi-user surface)
+  SaveArtifact: 'workbench:artifact:save',
+  OpenArtifactInBrowser: 'workbench:artifact:open-browser',
+  // auth: bearer session lifecycle (xiaowei multi-user surface)
   GetAuthState: 'workbench:auth:get-state',
   RequestEmailCode: 'workbench:auth:request-email-code',
   SignUp: 'workbench:auth:sign-up',
@@ -281,6 +324,7 @@ export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
 
 export const WORKBENCH_API_KEYS = [
   'request',
+  'importDirectory',
   'subscribeMux',
   'subscribeHost',
   'respond',
@@ -290,6 +334,8 @@ export const WORKBENCH_API_KEYS = [
   'checkAppUpdate',
   'openAppUpdateDownload',
   'subscribeAppUpdateState',
+  'saveArtifact',
+  'openArtifactInBrowser',
   'getAuthState',
   'requestEmailCode',
   'signUp',

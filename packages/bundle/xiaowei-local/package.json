@@ -1,0 +1,44 @@
+{
+  "name": "@deepseek-ai/dsh-xiaowei-local",
+  "description": "Local Xiaowei device capabilities without the cloud or Web renderer",
+  "version": "0.1.1-rc.2",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
+    "directory": "packages/bundle/xiaowei-local"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "cordis.patch.yml",
+    "agent-presets/**/*.yml",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "dependencies": { "@deepseek-ai/dsh-agent-presets": "workspace:^", "@deepseek-ai/dsh-app-boot": "workspace:^", "@deepseek-ai/dsh-skill-filesystem": "workspace:^", "@deepseek-ai/dsh-tool-fs": "workspace:^", "@deepseek-ai/dsh-tool-fs-search": "workspace:^", "@deepseek-ai/dsh-tool-skill": "workspace:^", "@deepseek-ai/dsh-tool-skill-install-local": "workspace:^", "@deepseek-ai/schemastery": "workspace:^", "readdirp": "^5.0.0" },
+  "peerDependencies": { "@deepseek-ai/cordis-plugin-loader": "workspace:^", "@deepseek-ai/cordis": "workspace:^", "@deepseek-ai/dsh-invariants": "workspace:^" },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-invariants": "workspace:^"
+  }
+}

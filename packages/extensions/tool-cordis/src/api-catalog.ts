@@ -82,6 +82,86 @@ export interface TypeApiEntry {
 /** Every harness `ctx.<key>` service, sorted by key. */
 export const SERVICE_API: readonly ServiceApiEntry[] = [
   {
+    key: 'accountPlatform',
+    summary: 'Service marker for the account-platform consumer.',
+    description: 'Service marker for the account-platform consumer.',
+    methods: [],
+  },
+  {
+    key: 'accountPluginFactory',
+    summary: 'Account-scoped plugin install state and server-side catalog.',
+    description: 'Account-scoped plugin install state and server-side catalog.',
+    methods: [
+      {
+        signature: 'abstract list(input: { userId: string }): Promise<AccountPluginView[]>',
+        description: 'Read the public catalog for one account.',
+        parameters: [{ name: 'input', description: 'authoritative account identity.' }],
+        returns: 'public catalog with installation state.',
+      },
+      {
+        signature: 'abstract install(input: { userId: string; pluginId: string }): Promise<AccountPluginView>',
+        description: 'Install one optional catalog entry.',
+        parameters: [{ name: 'input', description: 'authoritative account and server catalog id.' }],
+        returns: 'installed public row.',
+      },
+      {
+        signature: 'abstract uninstall(input: { userId: string; pluginId: string }): Promise<AccountPluginView>',
+        description: 'Uninstall one optional catalog entry.',
+        parameters: [{ name: 'input', description: 'authoritative account and server catalog id.' }],
+        returns: 'uninstalled public row.',
+      },
+      {
+        signature: 'abstract composition(input: { userId: string }): Promise<PluginCatalogEntry[]>',
+        description: 'Resolve entries enabled for a later agent.',
+        parameters: [{ name: 'input', description: 'authoritative account identity.' }],
+        returns: 'enabled server catalog entries.',
+      },
+      {
+        signature: 'abstract activations(input: { userId: string }): Promise<PluginActivator[]>',
+        description: 'Resolve activators for the account\'s next agent scope.',
+        parameters: [{ name: 'input', description: 'authoritative account identity.' }],
+        returns: 'server-owned activation functions.',
+      },
+      {
+        signature: 'abstract activationsFor(input: { pluginIds: readonly string[] }): PluginActivator[]',
+        description: 'Resolve activators for an explicit optional selection plus system defaults.',
+        parameters: [{ name: 'input', description: 'optional plugin ids recorded for one session.' }],
+        returns: 'server-owned activation functions in catalog order.',
+      },
+      {
+        signature: 'abstract activationsFromEvents(events: readonly SessionEvent[]): PluginActivator[]',
+        description: 'Resolve activators from a durable session selection snapshot.',
+        parameters: [{ name: 'events', description: 'authoritative session log events.' }],
+        returns: 'server-owned activation functions from the recorded selection.',
+      },
+      {
+        signature: 'abstract selected(input: { userId: string }): Promise<string[]>',
+        description: 'Read the account\'s optional selection in catalog order.',
+        parameters: [{ name: 'input', description: 'authoritative account identity.' }],
+        returns: 'optional plugin ids selected for later sessions.',
+      },
+      {
+        signature: 'abstract selectionSeed(input: { pluginIds: readonly string[] }): SessionEvent<\'account-plugins/selected\'>',
+        description: 'Construct the seq-zero selection snapshot for a newly created session.',
+        parameters: [{ name: 'input', description: 'optional plugin ids selected for the new session.' }],
+        returns: 'durable session event recording the selection.',
+      },
+    ],
+  },
+  {
+    key: 'accountSkillStore',
+    summary: 'Service for account-owned skill files.',
+    description: 'Service for account-owned skill files.',
+    methods: [
+      {
+        signature: 'abstract install(ownerId: SessionOwnerId, input: SkillInstallInput): Promise<SkillInstallResult>',
+        description: 'Publish one account-owned Skill.',
+        parameters: [{ name: 'ownerId', description: 'durable Session owner.' }, { name: 'input', description: 'validated Skill content.' }],
+        returns: 'publication result.',
+      },
+    ],
+  },
+  {
     key: 'agentDefaultModel',
     summary: 'Owns the default model selection independently of any Host or transport.',
     description: 'Owns the default model selection independently of any Host or transport. The composition entry remains usable without a settings provider; when one is mounted, its user layer is read live.',
@@ -388,9 +468,29 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [],
       },
       {
-        signature: 'respond(message: ClientResponse): Promise<RpcReceipt>',
+        signature: 'account: AccountApi',
+        description: 'xiaowei multi-user account seam: signup / signin / signout / state, plus email-verification code minting. Non-privileged — anonymous LAN callers may hit signup, signin, and emailCode to grow the user base.',
+        parameters: [],
+      },
+      {
+        signature: 'wallet: WalletApi',
+        description: 'xiaowei wallet: balance, ledger, debit/credit/setQuota/refresh-daily. The fence restricts credit/debit/setQuota/refreshDaily/grantWelcomeBonus to loopback; get and listLedger are loopback OR bearer.',
+        parameters: [],
+      },
+      {
+        signature: 'modelKeys: ModelKeysApi',
+        description: 'xiaowei per-user model keys: provision/list/revoke.',
+        parameters: [],
+      },
+      {
+        signature: 'artifactRegistry: ArtifactsApi',
+        description: 'xiaowei durable artifact registry: list/read/remove.',
+        parameters: [],
+      },
+      {
+        signature: 'respond(message: ClientResponse, principal?: RpcPrincipal): Promise<RpcReceipt>',
         description: 'Response entry for server requests; not a domain method.',
-        parameters: [{ name: 'message', description: 'Client response carrying the server request\'s rpcId.' }],
+        parameters: [{ name: 'message', description: 'Client response carrying the server request\'s rpcId.' }, { name: 'principal', description: 'authenticated carrier identity, when one is required.' }],
         returns: 'Transport receipt for the response delivery.',
       },
     ],
@@ -421,6 +521,54 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'artifactRegistry',
+    summary: 'Durable, content-addressed artifact registry.',
+    description: 'Durable, content-addressed artifact registry.\n\nImplementations validate bytes before publishing a reference, dedup on the sha256 digest (so two writes with identical bytes share one storage object), and verify reference + bytes on every read.',
+    methods: [
+      {
+        signature: 'abstract readonly limits: ArtifactLimits',
+        description: 'Deployment-resolved admission policy applied at write time.',
+        parameters: [],
+      },
+      {
+        signature: 'abstract validate(input: WriteArtifactInput): Promise<void>',
+        description: 'Validate one artifact without persisting it. Batch callers validate every member before saving any member.',
+        parameters: [{ name: 'input', description: 'encoded bytes, kind, source, declared media type, and metadata.' }],
+        returns: 'completion after admission has fully decoded and verified the bytes.',
+      },
+      {
+        signature: 'async writeMany(inputs: readonly WriteArtifactInput[]): Promise<readonly ArtifactView[]>',
+        description: 'Validate and durably commit one ordered artifact batch.\n\nValidation failures start no writes; storage failures return no partial references, although already published content-addressed objects may stay unreachable until a future retention policy collects them.',
+        parameters: [{ name: 'inputs', description: 'artifacts in their owning-message order.' }],
+        returns: 'durable references in the exact input order.',
+      },
+      {
+        signature: 'abstract write(input: WriteArtifactInput): Promise<ArtifactView>',
+        description: 'Validate and durably commit one artifact before its owning session event is appended. The returned view describes the persisted artifact and indexes it under the calling workspace + session when supplied.',
+        parameters: [{ name: 'input', description: 'encoded bytes, kind, source, declared media type, and metadata.' }],
+        returns: 'the durable content-addressed artifact view.',
+      },
+      {
+        signature: 'abstract read(ref: { readonly artifactId: ArtifactView[\'artifactId\'] }, signal?: AbortSignal): Promise<StoredArtifact>',
+        description: 'Read one artifact and verify that bytes still match the recorded reference.',
+        parameters: [{ name: 'ref', description: 'durable reference from the session log.' }, { name: 'signal', description: 'optional cancellation for backend read and verification work.' }],
+        returns: 'the verified bytes and full durable view.',
+        throws: ['the signal reason when aborted, or an {@link ArtifactError} when verification fails.'],
+      },
+      {
+        signature: 'abstract list(filter?: { readonly workspaceId?: ArtifactView[\'workspaceId\'] readonly sessionId?: ArtifactView[\'sessionId\'] }): Promise<readonly ArtifactView[]>',
+        description: 'List durable artifact views under optional ownership filters. The session filter narrows the listing to one session; the workspace filter narrows to one workspace; both omitted lists the entire deployment root.',
+        parameters: [{ name: 'filter', description: 'workspace and/or session ownership filter; both omitted is unfiltered.' }],
+        returns: 'durable artifact views in newest-first order.',
+      },
+      {
+        signature: 'abstract remove(ref: { readonly artifactId: ArtifactView[\'artifactId\'] }): Promise<void>',
+        description: 'Remove one artifact from the durable index. Content-addressed bytes may remain on disk until a future retention sweep collects unreferenced objects; a removed artifactId is gone from the listing and unreadable.',
+        parameters: [{ name: 'ref', description: 'durable reference to remove.' }],
+      },
+    ],
+  },
+  {
     key: 'attachments',
     summary: 'Immutable binary attachment service.',
     description: 'Immutable binary attachment service. Implementations validate bytes before publishing a reference.',
@@ -428,6 +576,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       {
         signature: 'abstract readonly imageLimits: ImageAttachmentLimits',
         description: 'Deployment-resolved image policy used by authoritative and fast-path validation.',
+        parameters: [],
+      },
+      {
+        signature: 'readonly documentLimits: DocumentAttachmentLimits = Object.freeze({ maxDocumentBytes: 0, maxDocumentsPerMessage: 0, maxMessageDocumentBytes: 0, mediaTypes: Object.freeze([]), })',
+        description: 'Deployment-resolved PDF and Office upload policy; providers opt in with non-zero limits.',
         parameters: [],
       },
       {
@@ -447,6 +600,24 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Validate and durably commit one image before its owning session event is appended. The returned reference describes the persisted normalized image. When normalization reduces the raster, its `originalDimensions` records the orientation-applied input dimensions.',
         parameters: [{ name: 'input', description: 'encoded bytes, declared media type, and optional display name.' }],
         returns: 'the durable content-addressed normalized image reference.',
+      },
+      {
+        signature: 'saveDocument(_input: SaveDocumentAttachment): Promise<DocumentAttachmentRef>',
+        description: 'Persist original document bytes after format admission.',
+        parameters: [{ name: '_input', description: 'verified document bytes and declaration.' }],
+        returns: 'the durable content-addressed reference.',
+      },
+      {
+        signature: 'async saveDocuments(inputs: readonly SaveDocumentAttachment[]): Promise<readonly DocumentAttachmentRef[]>',
+        description: 'Validate and durably commit one ordered document batch.',
+        parameters: [{ name: 'inputs', description: 'decoded documents in owning-message order.' }],
+        returns: 'durable references in the same order.',
+      },
+      {
+        signature: 'readDocument(_ref: DocumentAttachmentRef, _signal?: AbortSignal): Promise<StoredDocumentAttachment>',
+        description: 'Read and integrity-check a previously persisted document.',
+        parameters: [{ name: '_ref', description: 'durable reference recorded by a Session.' }, { name: '_signal', description: 'optional cancellation for storage reads.' }],
+        returns: 'verified original document bytes.',
       },
       {
         signature: 'abstract readImage(ref: ImageAttachmentRef, signal?: AbortSignal): Promise<StoredImageAttachment>',
@@ -620,6 +791,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'connection',
+    summary: 'Host `ctx.connection` shape consumed by transport-independent adapters.',
+    description: 'Host `ctx.connection` shape consumed by transport-independent adapters.',
+    methods: [
+      {
+        signature: 'readonly rpc: HostConnectionRpc',
+        description: 'Generic RPC channel registry.',
+        parameters: [],
+      },
+    ],
+  },
+  {
     key: 'credentials',
     summary: 'Abstract credential service over two key spaces that answer two questions.',
     description: 'Abstract credential service over two key spaces that answer two questions.\n\nA CredentialRef answers "what is behind this environment-variable name", layered over the process environment, the provider-managed store, and `.env` files. One seam-wide rule binds that half: an empty stored value is absent everywhere — `resolve` skips it, `describe` reports it unconfigured — so a blank never masquerades as a configured secret.\n\nA CredentialKey answers "what credential does this plugin hold for this id". Nothing can layer here — an authorization grant has no environment to be read from — so presence of the record is the whole fact, and modifyRecord is the only write path because a correct write depends on the current value (a token refresh is read-decide-replace under one lock).',
@@ -711,6 +894,58 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [],
         returns: 'the created sandbox after the configured cwd exists.',
         throws: ['when E2B rejects creation or the service is disposing.'],
+      },
+    ],
+  },
+  {
+    key: 'emailVerification',
+    summary: 'The Service Definition.',
+    description: 'The Service Definition. Wire methods project its two public methods.\n\nImplementations MUST be safe to call concurrently from the same Cordis context — the host-side RPC handlers do not serialize requests.',
+    methods: [
+      {
+        signature: 'abstract isEnabled(): boolean',
+        description: 'Whether the seam is wired. `false` means `verifyCode` becomes a no-op.',
+        parameters: [],
+        returns: '`true` when verification gates `signup`; `false` when the seam is disabled and `verifyCode` is a pass-through.',
+      },
+      {
+        signature: 'abstract requestCode(input: { email: string }): Promise<EmailCodeRequestResult>',
+        description: 'Mint and dispatch a fresh 6-digit code to the given email.',
+        parameters: [{ name: 'input', description: '.email The email address the code is dispatched to.' }],
+        returns: 'The TTL and resend cooldown the renderer should advertise.',
+        throws: ['EmailVerificationError on bad input, cooldown, rate-limit, lockout, or transport failure. The host layer maps these to wire codes.'],
+      },
+      {
+        signature: 'abstract verifyCode(input: { email: string; code: string }): Promise<boolean>',
+        description: 'Verify a code against the row that `requestCode` produced.',
+        parameters: [{ name: 'input', description: '.code The 6-digit candidate code the caller is asserting.' }],
+        returns: '`true` when the code matches and the row is within TTL and not locked. The verified row is deleted so the same code cannot be reused.',
+        throws: ['EmailVerificationError on bad input, missing row, wrong code, expired code, or lockout. Errors that increment the attempts counter are reflected in the row before the throw.'],
+      },
+    ],
+  },
+  {
+    key: 'embedding',
+    summary: 'Embedding registry and execution service.',
+    description: 'Embedding registry and execution service.',
+    methods: [
+      {
+        signature: 'registerProvider(provider: EmbeddingProvider): () => void',
+        description: 'Register a provider and return its effect-scoped disposer.',
+        parameters: [{ name: 'provider', description: 'Provider registered under its stable id.' }],
+        returns: 'Disposer that unregisters this contribution.',
+      },
+      {
+        signature: 'async embedDocuments(documents: readonly string[], signal?: AbortSignal): Promise<EmbeddingResult>',
+        description: 'Embed documents through the selected provider.',
+        parameters: [{ name: 'documents', description: 'Document strings in result-vector order.' }, { name: 'signal', description: 'Optional cancellation signal forwarded unchanged.' }],
+        returns: 'Vectors and their shared vector-space identity.',
+      },
+      {
+        signature: 'async embedQuery(query: string, signal?: AbortSignal): Promise<EmbeddingResult>',
+        description: 'Embed one query through the selected provider.',
+        parameters: [{ name: 'query', description: 'Query text to embed.' }, { name: 'signal', description: 'Optional cancellation signal forwarded unchanged.' }],
+        returns: 'One vector and its vector-space identity.',
       },
     ],
   },
@@ -881,6 +1116,39 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'identity',
+    summary: 'The Service Definition for the identity seam.',
+    description: 'The Service Definition for the identity seam. Every implementation owns one `users` table and one `sessions` table; cross-process or hosted IdPs would extend this contract without changing the wire shape.',
+    methods: [
+      {
+        signature: 'abstract signup(input: { email: string; password: string; displayName?: string }): Promise<SignedIn>',
+        description: 'Create one account and return an immediately-valid session.',
+        parameters: [{ name: 'input', description: 'email + password + optional display name.' }],
+        returns: 'the new account\'s id, the opaque bearer token, and the absolute unix-millisecond expiry. The token is the ONLY thing the desktop / browser must persist; the rest is included for the cold-start card.',
+        throws: ['IdentityError(EMAIL_TAKEN) when the email is already present.', 'IdentityError(BAD_REQUEST) on schema-rejected input.'],
+      },
+      {
+        signature: 'abstract signin(input: { email: string; password: string }): Promise<SignedIn>',
+        description: 'Verify an email + password pair and issue a fresh session token. Constant-time failure: a wrong password and a missing account return the same wire code (`UNAUTHENTICATED`) and the same message.',
+        parameters: [{ name: 'input', description: 'email + password.' }],
+        returns: 'the userId, the opaque bearer token, and absolute expiry.',
+        throws: ['IdentityError(UNAUTHENTICATED) on either wrong password or missing account. Distinguishing the two leaks an email-oracle.'],
+      },
+      {
+        signature: 'abstract signout(input: { sessionToken: SessionToken }): Promise<{ revoked: true }>',
+        description: 'Revoke one bearer token. Idempotent: removing an unknown token resolves with `{ revoked: true }` rather than throwing.',
+        parameters: [{ name: 'input', description: 'the token to revoke.' }],
+        returns: '`{ revoked: true }` once the row is removed (or was never there).',
+      },
+      {
+        signature: 'abstract validate(input: { sessionToken: SessionToken }): Promise<AuthenticatedView | null>',
+        description: 'Resolve a bearer token to its account view. Used by `account.state` (a desktop-cold-start probe) AND by the trust fence on every privileged request; called per request so revocation propagates without delay.',
+        parameters: [{ name: 'input', description: 'the token to validate.' }],
+        returns: 'the user id, display name, and absolute expiry, or `null` when the token is unknown / expired / revoked.',
+      },
+    ],
+  },
+  {
     key: 'invariants',
     summary: 'Package-owned invariant registry with global and regex-based selection.',
     description: 'Package-owned invariant registry with global and regex-based selection.',
@@ -951,6 +1219,55 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Attach an effect-scoped controller that can read and stop jobs. It serves the owners its registering context\'s scope covers, and start refuses an owner no attached controller serves.',
         parameters: [{ name: 'name', description: 'diagnostic label; duplicate names remain independent.' }],
         returns: 'disposer that detaches this controller.',
+      },
+    ],
+  },
+  {
+    key: 'knowledge',
+    summary: 'Provider registry and scoped operation facade for `ctx.knowledge`.',
+    description: 'Provider registry and scoped operation facade for `ctx.knowledge`.',
+    methods: [
+      {
+        signature: 'registerProvider(provider: KnowledgeProvider): () => void',
+        description: 'Register a provider under its stable id.',
+        parameters: [{ name: 'provider', description: 'Scoped knowledge implementation.' }],
+        returns: 'HMR/fiber disposer that unregisters the provider.',
+      },
+      {
+        signature: 'async createKnowledgeBase(scope: KnowledgeScope, input: KnowledgeBaseInput, signal: AbortSignal): Promise<KnowledgeBase>',
+        description: 'Create a knowledge base in the caller\'s scope.',
+        parameters: [{ name: 'scope', description: 'Trusted tenant and subject scope.' }, { name: 'input', description: 'Knowledge-base metadata.' }, { name: 'signal', description: 'Cancellation signal forwarded unchanged.' }],
+        returns: 'The created scoped knowledge base.',
+      },
+      {
+        signature: 'async listKnowledgeBases(scope: KnowledgeScope, signal: AbortSignal): Promise<readonly KnowledgeBase[]>',
+        description: 'List knowledge bases visible in the caller\'s scope.',
+        parameters: [{ name: 'scope', description: 'Trusted tenant and subject scope.' }, { name: 'signal', description: 'Cancellation signal forwarded unchanged.' }],
+        returns: 'Knowledge bases visible in the complete scope.',
+      },
+      {
+        signature: 'async startIngest(scope: KnowledgeScope, input: KnowledgeDocumentInput, signal: AbortSignal): Promise<KnowledgeIngestJob>',
+        description: 'Start document ingestion in the caller\'s scope.',
+        parameters: [{ name: 'scope', description: 'Trusted tenant and subject scope.' }, { name: 'input', description: 'Streaming document and metadata.' }, { name: 'signal', description: 'Cancellation signal forwarded unchanged.' }],
+        returns: 'The initial asynchronous ingestion job state.',
+      },
+      {
+        signature: 'async getIngestJob(scope: KnowledgeScope, jobId: KnowledgeIngestJobId, signal: AbortSignal): Promise<KnowledgeIngestJob>',
+        description: 'Read an ingestion job in the caller\'s scope.',
+        parameters: [{ name: 'scope', description: 'Trusted tenant and subject scope.' }, { name: 'jobId', description: 'Opaque ingestion job id.' }, { name: 'signal', description: 'Cancellation signal forwarded unchanged.' }],
+        returns: 'Current job state visible in the complete scope.',
+      },
+      {
+        signature: 'async search(scope: KnowledgeScope, request: KnowledgeSearchRequest, signal: AbortSignal): Promise<KnowledgeSearchResult>',
+        description: 'Search and enforce the configured maximum result count.',
+        parameters: [{ name: 'scope', description: 'Trusted tenant and subject scope.' }, { name: 'request', description: 'Query, optional base selection, and requested bound.' }, { name: 'signal', description: 'Cancellation signal forwarded unchanged.' }],
+        returns: 'Bounded provider-independent citations.',
+      },
+      {
+        signature: 'async deleteDocument(scope: KnowledgeScope, documentId: KnowledgeDocumentId, signal: AbortSignal): Promise<void>',
+        description: 'Delete a document in the caller\'s scope.',
+        parameters: [{ name: 'scope', description: 'Trusted tenant and subject scope.' }, { name: 'documentId', description: 'Opaque document id resolved within the scope.' }, { name: 'signal', description: 'Cancellation signal forwarded unchanged.' }],
+        returns: 'Nothing after the scoped deletion completes.',
       },
     ],
   },
@@ -1708,6 +2025,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'name', description: 'kebab-case skill name.' }, { name: 'options', description: 'view options; `scope` selects the viewing agent\'s layers, `cwd` selects workspace-sensitive skills, and `signal` cancels work.' }],
         returns: 'the full skill, including body content, or `undefined`.',
       },
+      {
+        signature: 'refresh(): void',
+        description: 'Invalidate provider-backed catalogs after a trusted first-party mutation. Provider plugins normally use their registration control; this entry is for a service that owns the durable write but not the provider instance.',
+        parameters: [],
+      },
     ],
   },
   {
@@ -2200,6 +2522,62 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'userModelKeys',
+    summary: 'The Service Definition.',
+    description: 'The Service Definition. Every implementation owns one `user_model_keys` table; hosted / Stripe-backed providers would extend this contract without changing the wire shape.',
+    methods: [
+      {
+        signature: 'abstract provision(input: { userId: UserId; label?: string }): Promise<ProvisionedKey>',
+        description: 'Ensure one active upstream credential for this user and provider route.',
+        parameters: [{ name: 'input', description: '.label Optional human label (default from `Config.defaultLabel`).' }],
+        returns: 'Metadata for the active credential. The bearer token remains internal.',
+        throws: ['ModelKeyError when configured key material or upstream issuance fails.', 'ModelKeyError when the upstream issuer cannot ensure a credential.'],
+      },
+      {
+        signature: 'abstract list(input: { userId: UserId }): Promise<ModelKeyView[]>',
+        description: 'List metadata for every key owned by `userId`, newest first.',
+        parameters: [{ name: 'input', description: '.userId The user whose key metadata is queried.' }],
+        returns: 'Newest-first key metadata rows (never the plaintext `keyValue`).',
+      },
+      {
+        signature: 'abstract revoke(input: { keyId: KeyId }): Promise<{ revoked: boolean }>',
+        description: 'Mark `keyId` as revoked. Idempotent — revoking an unknown or already- revoked key resolves with `revoked: false` rather than throwing.',
+        parameters: [{ name: 'input', description: '.keyId The key row id to revoke.' }],
+        returns: '`{ revoked: true }` if this call closed a live row; `false` if the row was unknown or already revoked.',
+      },
+      {
+        signature: 'abstract resolveActive(input: { userId: UserId; route?: string }): Promise<ActiveModelCredential | undefined>',
+        description: 'Resolve the encrypted active upstream token for model execution.',
+        parameters: [{ name: 'input', description: '.route Optional provider route filter.' }],
+        returns: 'Internal credential metadata and token, or undefined when absent.',
+      },
+      {
+        signature: 'abstract createCustom(input: { userId: UserId; label: string; api: \'openai-completions\' | \'openai-responses\'; baseURL: string; upstreamModel: string; apiKey: string }): Promise<CustomModelView>',
+        description: 'Create one account-owned custom model with an encrypted API key.',
+        parameters: [{ name: 'input', description: 'Owner, public endpoint metadata, upstream model, and write-only key.' }],
+        returns: 'Public metadata without the API key.',
+      },
+      {
+        signature: 'abstract listCustom(input: { userId: UserId }): Promise<CustomModelView[]>',
+        description: 'List custom models for one account.',
+        parameters: [{ name: 'input', description: 'Account whose records are listed.' }],
+        returns: 'Newest-first metadata without API keys.',
+      },
+      {
+        signature: 'abstract removeCustom(input: { userId: UserId; customModelId: CustomModelId }): Promise<{ removed: boolean }>',
+        description: 'Revoke one custom model only when owned by the account.',
+        parameters: [{ name: 'input', description: 'Account and opaque custom-model id.' }],
+        returns: 'Whether this call revoked an active owned row.',
+      },
+      {
+        signature: 'abstract resolveCustom(input: { userId: UserId; customModelId: CustomModelId }): Promise<ResolvedCustomModel | undefined>',
+        description: 'Resolve one custom model only when owned by the account.',
+        parameters: [{ name: 'input', description: 'Account and opaque custom-model id.' }],
+        returns: 'Decrypted internal record, or undefined when unavailable.',
+      },
+    ],
+  },
+  {
     key: 'userQuestions',
     summary: '`ctx.userQuestions`: one active UI provider plus an `ask()` API.',
     description: '`ctx.userQuestions`: one active UI provider plus an `ask()` API.',
@@ -2216,6 +2594,78 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'request', description: 'Questions, owner agent, and abort signal.' }],
         returns: 'The answer chosen or typed by the human.',
         throws: ['{UserQuestionError} code `CALLER_NOT_LIVE` when a supplied agent is not the registry\'s exact live instance, or `DELEGATED_CALLER` when that live agent is owned by another agent.'],
+      },
+    ],
+  },
+  {
+    key: 'wallet',
+    summary: 'The Service Definition for the wallet seam.',
+    description: 'The Service Definition for the wallet seam. Every implementation owns one `wallets` table and one `wallet_ledger` table; cross-process or hosted providers (Stripe, new-api, etc.) would extend this contract without changing the wire shape.',
+    methods: [
+      {
+        signature: 'abstract get(input: { userId: UserId }): Promise<WalletView>',
+        description: 'Fetch the wallet view for one user. Returns a zero-balance view when the user has no row yet; this is the same default the bootstrap path inserts.',
+        parameters: [{ name: 'input', description: '.userId The user whose wallet view is requested.' }],
+        returns: 'A `WalletView` snapshot of the current balance and timestamp.',
+      },
+      {
+        signature: 'abstract credit(input: { userId: UserId; amountMicros: number; reason: LedgerReason; idempotencyKey?: string }): Promise<WalletView>',
+        description: 'Add `amountMicros` to the user\'s balance and append a ledger row.',
+        parameters: [{ name: 'input', description: 'The credit payload.' }],
+        returns: 'The new wallet view after the credit is applied.',
+        throws: ['WalletError(BAD_REQUEST) on schema-rejected input.'],
+      },
+      {
+        signature: 'abstract debit(input: { userId: UserId; amountMicros: number; reason: LedgerReason; idempotencyKey?: string }): Promise<WalletView>',
+        description: 'Subtract `amountMicros` from the user\'s balance; throws when the result would be negative.',
+        parameters: [{ name: 'input', description: 'The debit payload.' }],
+        returns: 'The new wallet view after the debit is applied.',
+        throws: ['WalletError(INSUFFICIENT_BALANCE) when the balance cannot cover.'],
+      },
+      {
+        signature: 'abstract setQuota(input: { userId: UserId; balanceMicros: number; reason: LedgerReason }): Promise<WalletView>',
+        description: 'Force the balance to `balanceMicros` and append a `set-quota` ledger row. Admin-privileged; wire-layer fence restricts callers to loopback.',
+        parameters: [{ name: 'input', description: 'The quota override payload.' }],
+        returns: 'The new wallet view after the override is applied.',
+      },
+      {
+        signature: 'abstract refreshDaily(input: { userId: UserId; idempotencyKey: string }): Promise<WalletView>',
+        description: 'Apply the configured daily-refresh amount once. Idempotent by date: a second call with the same `idempotencyKey` returns the prior balance without applying a second delta.',
+        parameters: [{ name: 'input', description: 'The refresh payload (must carry today\'s idempotency key).' }],
+        returns: 'The wallet view after the refresh (or the existing one when the key was already applied today).',
+      },
+      {
+        signature: 'abstract grantWelcomeBonus(input: { userId: UserId }): Promise<WalletView>',
+        description: 'Apply the configured welcome bonus. Convenience for `credit`.',
+        parameters: [{ name: 'input', description: 'The user id to credit.' }],
+        returns: 'The new wallet view after the welcome bonus is applied.',
+      },
+      {
+        signature: 'abstract listLedger(input: { userId: UserId; limit?: number }): Promise<LedgerEntry[]>',
+        description: 'Return the most-recent ledger entries, newest first.',
+        parameters: [{ name: 'input', description: '.limit Optional cap on returned rows (server default applies when omitted).' }],
+        returns: 'Newest-first ledger rows.',
+      },
+      {
+        signature: 'abstract reserve(input: { userId: UserId; reservationId: string; amountMicros: number }): Promise<WalletReservation>',
+        description: 'Reserve available balance without changing the reported current balance.',
+        parameters: [{ name: 'input', description: '.amountMicros Non-negative safe-integer amount to hold.' }],
+        returns: 'The durable active reservation; an exact retry returns the same record.',
+        throws: ['WalletError on invalid input, conflicting identity, or insufficient available balance.'],
+      },
+      {
+        signature: 'abstract settle(input: { userId: UserId; reservationId: string; actualMicros: number; idempotencyKey: string }): Promise<WalletSettlement>',
+        description: 'Settle a reservation and charge actual model usage.',
+        parameters: [{ name: 'input', description: '.idempotencyKey Stable ledger idempotency key.' }],
+        returns: 'The committed settlement; an exact retry returns the same result.',
+        throws: ['WalletError on missing/cancelled reservations, parameter drift, or invalid input.'],
+      },
+      {
+        signature: 'abstract cancel(input: { userId: UserId; reservationId: string }): Promise<WalletReservation>',
+        description: 'Cancel a reservation and release its hold without writing a ledger row.',
+        parameters: [{ name: 'input', description: '.reservationId Reservation to cancel.' }],
+        returns: 'The durable reservation record; repeated cancellation returns the same record.',
+        throws: ['WalletError when the reservation is missing or already settled.'],
       },
     ],
   },
@@ -2606,6 +3056,22 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'payload', description: '.change - fresh current projection or clear tombstone.' }],
   },
   {
+    name: 'llm-pi-ai/resolve-api-key',
+    mode: 'waterfall',
+    signature: '\'llm-pi-ai/resolve-api-key\'( request: { provider: string; profile: ResolvedPiAiProviderProfile; options: GenerateOptions }, next: () => Promise<string | undefined>, ): Promise<string | undefined>',
+    summary: 'Resolve an account model request\'s credential before the provider call.',
+    description: 'Resolve an account model request\'s credential before the provider call. Listeners may supply an account credential or delegate to the next resolver.',
+    parameters: [{ name: 'request', description: 'Account model request and selected provider profile.' }, { name: 'next', description: 'Continue credential resolution.' }],
+  },
+  {
+    name: 'llm-pi-ai/resolve-api-key',
+    mode: 'waterfall',
+    signature: '\'llm-pi-ai/resolve-api-key\'( this: Context, request: { provider: string; profile: ResolvedPiAiProviderProfile; options: GenerateOptions }, next: () => Promise<string | undefined>, ): Promise<string | undefined>',
+    summary: 'Resolve a credential for one real stream request; discovery never emits this event.',
+    description: 'Resolve a credential for one real stream request; discovery never emits this event. Listeners must call `next()` for non-owned routes.',
+    parameters: [{ name: 'request', description: 'provider route, resolved profile, and complete GenerateOptions.' }, { name: 'next', description: 'continue to the existing credentials/environment resolver.' }],
+  },
+  {
     name: 'llm/adapters-updated',
     mode: 'emit',
     signature: '\'llm/adapters-updated\'(): void',
@@ -2842,6 +3308,18 @@ export const EVENT_API: readonly EventApiEntry[] = [
 /** Shapes of every exported type the Service and Event signatures reference (transitively), sorted by name. */
 export const TYPE_API: readonly TypeApiEntry[] = [
   {
+    name: 'AccountApi',
+    declaration: 'export interface AccountApi {\n    signup(request: RpcRequest<{\n        email: string;\n        password: string;\n        displayName?: string;\n        verificationCode?: string;\n    }>): Promise<RpcResponse<SignedIn>>;\n    emailCode(request: RpcRequest<{\n        email: string;\n    }>): Promise<RpcResponse<{\n        expiresInSeconds: number;\n        retryAfterSeconds: number;\n    }>>;\n    signin(request: RpcRequest<{\n        email: string;\n        password: string;\n    }>): Promise<RpcResponse<SignedIn>>;\n    signout(request: RpcRequest<{\n        sessionToken: SessionToken;\n    }>): Promise<RpcResponse<{\n        revoked: true;\n    }>>;\n    state(request: RpcRequest<{\n        sessionToken: SessionToken;\n    }>): Promise<RpcResponse<AuthenticatedView | null>>;\n}',
+  },
+  {
+    name: 'AccountPluginView',
+    declaration: 'export interface AccountPluginView extends Omit<PluginCatalogEntry, \'activationId\'> {\n    installed: boolean;\n}',
+  },
+  {
+    name: 'ActiveModelCredential',
+    declaration: 'export interface ActiveModelCredential {\n    readonly keyId: KeyId;\n    readonly token: KeyValue;\n    readonly route: string;\n    readonly apiBaseUrl: string;\n    readonly model: string;\n    readonly inputPriceMicrosPerToken: number;\n    readonly outputPriceMicrosPerToken: number;\n}',
+  },
+  {
     name: 'AdapterRegistrationHandle',
     declaration: 'export interface AdapterRegistrationHandle {\n    (): void;\n    replace(providers: string[]): void;\n}',
   },
@@ -2882,6 +3360,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type AgentStatus = \'idle\' | \'running\';',
   },
   {
+    name: 'AlwaysRetryPolicyConfig',
+    declaration: 'export interface AlwaysRetryPolicyConfig {\n    mode: \'always\';\n    backoff?: BackoffConfig;\n}',
+  },
+  {
     name: 'ApiKeyRecord',
     declaration: 'export interface ApiKeyRecord {\n    readonly kind: \'api-key\';\n    readonly key?: string;\n    readonly env?: Readonly<Record<string, string>>;\n}',
   },
@@ -2900,6 +3382,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ApprovalService',
     declaration: 'export class ApprovalService extends Service {\n    static Config: z<Config>;\n    constructor(ctx: Context, public config: Config);\n    setPolicy(agent: Agent, policy: ApprovalPolicy): void;\n    async request(req: ApprovalRequest): Promise<ApprovalOutcome>;\n    overrideOf(session: Session): ApprovalPolicy | undefined;\n}',
+  },
+  {
+    name: 'ArtifactLimits',
+    declaration: 'export interface ArtifactLimits {\n    maxArtifactBytes: number;\n    maxArtifactsPerSession: number;\n    mediaTypes: readonly ArtifactMediaType[];\n}',
+  },
+  {
+    name: 'ArtifactsApi',
+    declaration: 'export interface ArtifactsApi {\n    list(request: RpcRequest<{\n        workspaceId?: WorkspaceId;\n        sessionId?: SessionId;\n        kind?: ArtifactKind;\n    }>): Promise<RpcResponse<{\n        items: ArtifactView[];\n    }>>;\n    read(request: RpcRequest<{\n        artifactId: ArtifactId;\n    }>): Promise<RpcResponse<{\n        view: ArtifactView;\n        bytesBase64: string;\n    }>>;\n    remove(request: RpcRequest<{\n        artifactId: ArtifactId;\n    }>): Promise<RpcResponse<{\n        removed: true;\n    }>>;\n}',
   },
   {
     name: 'AskUserQuestionAnswer',
@@ -3002,6 +3492,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export class BackendRegistry {\n    register(name: string, backend: StorageBackend): () => void;\n    get(name: string): StorageBackend;\n    names(): string[];\n}',
   },
   {
+    name: 'BackoffConfig',
+    declaration: 'export interface BackoffConfig {\n    initialDelayMs?: number;\n    maxDelayMs?: number;\n    jitterRatio?: number;\n}',
+  },
+  {
     name: 'BashEnvContributor',
     declaration: 'export interface BashEnvContributor {\n    name: string;\n    variables: Readonly<Record<DshEnvironmentKey, BashEnvVariable>>;\n    resolve(execution: ToolExecution): Readonly<Partial<Record<DshEnvironmentKey, string>>>;\n}',
   },
@@ -3020,6 +3514,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CancelOptions',
     declaration: 'export interface CancelOptions {\n    keepInbox?: boolean | undefined;\n}',
+  },
+  {
+    name: 'ChartResultView',
+    declaration: 'export interface ChartResultView extends ArtifactBackedResultView {\n    card: \'chart\';\n    generator: \'mermaid\' | \'svg\';\n}',
   },
   {
     name: 'ClientResponse',
@@ -3114,6 +3612,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ConfinedSandboxMode = Exclude<SandboxMode, \'danger-full-access\'>;',
   },
   {
+    name: 'ConnectionRpcAuthority',
+    declaration: 'export type ConnectionRpcAuthority = \'trusted-host\' | \'loopback\';',
+  },
+  {
+    name: 'ConnectionRpcEndpointMatcher',
+    declaration: 'export type ConnectionRpcEndpointMatcher = (endpoint: string) => boolean;',
+  },
+  {
+    name: 'ConnectionRpcHandler',
+    declaration: 'export type ConnectionRpcHandler = (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<RpcResult<unknown>>;',
+  },
+  {
+    name: 'ConnectionRpcHandlerOptions',
+    declaration: 'export interface ConnectionRpcHandlerOptions {\n    readonly authority: ConnectionRpcAuthority;\n}',
+  },
+  {
     name: 'ContentBlockMap',
     declaration: 'export interface ContentBlockMap {\n    \'text\': TextBlock;\n    \'reasoning\': ReasoningBlock;\n    \'image\': ImageBlock;\n    \'tool-call\': ToolCallBlock;\n    \'tool-result\': ToolResultBlock;\n}',
   },
@@ -3195,7 +3709,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'CreateSessionOptions',
-    declaration: 'export interface CreateSessionOptions {\n    readonly seed?: readonly SessionEvent[];\n    readonly meta?: {\n        readonly cwd?: string;\n        readonly parentSession?: SessionId;\n        readonly createdAt?: number;\n        readonly seedLength?: number;\n        readonly origin?: \'subagent\';\n        readonly delegationDepth?: number;\n        readonly agentPreset?: string;\n    };\n}',
+    declaration: 'export interface CreateSessionOptions {\n    readonly seed?: readonly SessionEvent[];\n    readonly meta?: {\n        readonly cwd?: string;\n        readonly parentSession?: SessionId;\n        readonly createdAt?: number;\n        readonly seedLength?: number;\n        readonly origin?: \'subagent\';\n        readonly delegationDepth?: number;\n        readonly agentPreset?: string;\n        readonly ownerId?: SessionOwnerId;\n    };\n}',
   },
   {
     name: 'CreateTeamTaskRequest',
@@ -3254,6 +3768,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface DirectoryRegistrationHandle {\n    (): void;\n    replace(entries: readonly LlmConfigurableProvider[]): void;\n}',
   },
   {
+    name: 'DocResultView',
+    declaration: 'export interface DocResultView extends ArtifactBackedResultView {\n    card: \'doc\';\n}',
+  },
+  {
+    name: 'DocumentAttachmentLimits',
+    declaration: 'export interface DocumentAttachmentLimits {\n    maxDocumentBytes: number;\n    maxDocumentsPerMessage: number;\n    maxMessageDocumentBytes: number;\n    mediaTypes: readonly DocumentMediaType[];\n}',
+  },
+  {
+    name: 'DocumentAttachmentRef',
+    declaration: 'export interface DocumentAttachmentRef {\n    attachmentId: AttachmentId;\n    mediaType: DocumentMediaType;\n    bytes: number;\n    name?: string;\n    kind: \'pdf\' | \'docx\' | \'xlsx\' | \'pptx\';\n    summary: string;\n}',
+  },
+  {
     name: 'Domain',
     declaration: 'export interface Domain<S extends DomainSpec> {\n    readonly name: string;\n    readonly global: DomainGlobalHandleOf<S>;\n    table<N extends keyof S[\'tables\'] & string>(name: N): KvTable<TableKeyOf<S, N>, TableValueOf<S, N>>;\n    close(): Promise<void>;\n}',
   },
@@ -3299,7 +3825,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'DownloadsApi',
-    declaration: 'export interface DownloadsApi {\n    sessionLog(request: {\n        sessionId: SessionId;\n        includeDescendants?: boolean;\n    }, signal: AbortSignal): Promise<Response>;\n}',
+    declaration: 'export interface DownloadsApi {\n    sessionLog(request: {\n        sessionId: SessionId;\n        includeDescendants?: boolean;\n    }, signal: AbortSignal, principal?: RpcPrincipal): Promise<Response>;\n}',
   },
   {
     name: 'DshEnvironment',
@@ -3328,6 +3854,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'EditGoalRequest',
     declaration: 'export interface EditGoalRequest {\n    readonly objective?: string;\n    readonly maxGoalRounds?: number;\n}',
+  },
+  {
+    name: 'EmailCodeRequestResult',
+    declaration: 'export interface EmailCodeRequestResult {\n    readonly expiresInSeconds: number;\n    readonly retryAfterSeconds: number;\n    readonly devCode?: string;\n}',
+  },
+  {
+    name: 'EmbeddingIdentity',
+    declaration: 'export interface EmbeddingIdentity {\n    readonly model: string;\n    readonly revision: string;\n    readonly dimensions: number;\n}',
+  },
+  {
+    name: 'EmbeddingProvider',
+    declaration: 'export interface EmbeddingProvider {\n    readonly id: string;\n    available(): boolean;\n    embedDocuments(documents: readonly string[], signal?: AbortSignal): Promise<EmbeddingResult>;\n    embedQuery(query: string, signal?: AbortSignal): Promise<EmbeddingResult>;\n}',
+  },
+  {
+    name: 'EmbeddingResult',
+    declaration: 'export interface EmbeddingResult {\n    readonly vectors: readonly (readonly number[])[];\n    readonly identity: EmbeddingIdentity;\n}',
   },
   {
     name: 'EncodedImageAttachment',
@@ -3444,6 +3986,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'GrantRecord',
     declaration: 'export interface GrantRecord {\n    readonly kind: \'grant\';\n    readonly payload: unknown;\n}',
+  },
+  {
+    name: 'HostConnectionRpc',
+    declaration: 'export interface HostConnectionRpc {\n    handle(channel: string, handler: ConnectionRpcHandler, options: ConnectionRpcHandlerOptions): () => Promise<void>;\n    intercept(channel: \'/api\', matches: ConnectionRpcEndpointMatcher, handler: ConnectionRpcHandler, options: ConnectionRpcHandlerOptions): () => Promise<void>;\n}',
+  },
+  {
+    name: 'HtmlResultView',
+    declaration: 'export interface HtmlResultView extends ArtifactBackedResultView {\n    card: \'html\';\n}',
   },
   {
     name: 'ImageAttachmentLimits',
@@ -3574,8 +4124,84 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type JsonValue = null | boolean | number | string | JsonValue[] | {\n    [key: string]: JsonValue;\n};',
   },
   {
+    name: 'KeyValue',
+    declaration: 'export type KeyValue = Branded<\'KeyValue\'>;',
+  },
+  {
     name: 'KnobState',
     declaration: 'export interface KnobState {\n    preset: string | null;\n    sandbox: SandboxMode | null;\n    approval: ApprovalPolicy | null;\n}',
+  },
+  {
+    name: 'KnowledgeBase',
+    declaration: 'export interface KnowledgeBase {\n    readonly id: KnowledgeBaseId;\n    readonly name: string;\n    readonly description?: string;\n}',
+  },
+  {
+    name: 'KnowledgeBaseId',
+    declaration: 'export type KnowledgeBaseId = Branded<\'KnowledgeBaseId\'>;',
+  },
+  {
+    name: 'KnowledgeBaseInput',
+    declaration: 'export interface KnowledgeBaseInput {\n    readonly name: string;\n    readonly description?: string;\n}',
+  },
+  {
+    name: 'KnowledgeChunkId',
+    declaration: 'export type KnowledgeChunkId = Branded<\'KnowledgeChunkId\'>;',
+  },
+  {
+    name: 'KnowledgeCitation',
+    declaration: 'export interface KnowledgeCitation {\n    readonly knowledgeBaseId: KnowledgeBaseId;\n    readonly documentId: KnowledgeDocumentId;\n    readonly revisionId: KnowledgeRevisionId;\n    readonly chunkId: KnowledgeChunkId;\n    readonly title: string;\n    readonly location: KnowledgeCitationLocation;\n    readonly excerpt: string;\n    readonly contentHash: string;\n    readonly indexRevision: string;\n    readonly score: number;\n}',
+  },
+  {
+    name: 'KnowledgeCitationLocation',
+    declaration: 'export interface KnowledgeCitationLocation {\n    readonly page?: number;\n    readonly section?: string;\n    readonly sourceUri?: string;\n}',
+  },
+  {
+    name: 'KnowledgeContent',
+    declaration: 'export type KnowledgeContent = AsyncIterable<Uint8Array>;',
+  },
+  {
+    name: 'KnowledgeDocumentId',
+    declaration: 'export type KnowledgeDocumentId = Branded<\'KnowledgeDocumentId\'>;',
+  },
+  {
+    name: 'KnowledgeDocumentInput',
+    declaration: 'export interface KnowledgeDocumentInput {\n    readonly knowledgeBaseId: KnowledgeBaseId;\n    readonly title: string;\n    readonly contentType: string;\n    readonly content: KnowledgeContent;\n    readonly byteLength?: number;\n}',
+  },
+  {
+    name: 'KnowledgeIngestJob',
+    declaration: 'export interface KnowledgeIngestJob {\n    readonly id: KnowledgeIngestJobId;\n    readonly status: KnowledgeIngestJobStatus;\n    readonly documentId?: KnowledgeDocumentId;\n    readonly revisionId?: KnowledgeRevisionId;\n    readonly error?: string;\n}',
+  },
+  {
+    name: 'KnowledgeIngestJobId',
+    declaration: 'export type KnowledgeIngestJobId = Branded<\'KnowledgeIngestJobId\'>;',
+  },
+  {
+    name: 'KnowledgeIngestJobStatus',
+    declaration: 'export type KnowledgeIngestJobStatus = \'queued\' | \'running\' | \'succeeded\' | \'failed\' | \'cancelled\';',
+  },
+  {
+    name: 'KnowledgeProvider',
+    declaration: 'export interface KnowledgeProvider {\n    readonly id: string;\n    available(): boolean;\n    createKnowledgeBase(scope: KnowledgeScope, input: KnowledgeBaseInput, signal: AbortSignal): Promise<KnowledgeBase>;\n    listKnowledgeBases(scope: KnowledgeScope, signal: AbortSignal): Promise<readonly KnowledgeBase[]>;\n    startIngest(scope: KnowledgeScope, input: KnowledgeDocumentInput, signal: AbortSignal): Promise<KnowledgeIngestJob>;\n    getIngestJob(scope: KnowledgeScope, jobId: KnowledgeIngestJobId, signal: AbortSignal): Promise<KnowledgeIngestJob>;\n    search(scope: KnowledgeScope, request: KnowledgeSearchRequest, signal: AbortSignal): Promise<KnowledgeSearchResult>;\n    deleteDocument(scope: KnowledgeScope, documentId: KnowledgeDocumentId, signal: AbortSignal): Promise<void>;\n}',
+  },
+  {
+    name: 'KnowledgeRevisionId',
+    declaration: 'export type KnowledgeRevisionId = Branded<\'KnowledgeRevisionId\'>;',
+  },
+  {
+    name: 'KnowledgeScope',
+    declaration: 'export interface KnowledgeScope {\n    readonly tenantId: TenantId;\n    readonly subjectId: KnowledgeSubjectId;\n}',
+  },
+  {
+    name: 'KnowledgeSearchRequest',
+    declaration: 'export interface KnowledgeSearchRequest {\n    readonly knowledgeBaseIds?: readonly KnowledgeBaseId[];\n    readonly query: string;\n    readonly maxResults: number;\n}',
+  },
+  {
+    name: 'KnowledgeSearchResult',
+    declaration: 'export interface KnowledgeSearchResult {\n    readonly hits: readonly KnowledgeCitation[];\n    readonly truncated: boolean;\n}',
+  },
+  {
+    name: 'KnowledgeSubjectId',
+    declaration: 'export type KnowledgeSubjectId = Branded<\'KnowledgeSubjectId\'>;',
   },
   {
     name: 'KvFacet',
@@ -3592,6 +4218,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'KvUnitDescriptor',
     declaration: 'export interface KvUnitDescriptor {\n    readonly name: string;\n    readonly version: number;\n    readonly tables: readonly string[];\n    readonly hasGlobal: boolean;\n}',
+  },
+  {
+    name: 'LedgerReason',
+    declaration: 'export type LedgerReason = \'welcome\' | \'daily-refresh\' | \'topup\' | \'debit\' | \'set-quota\' | \'refund\' | \'model-usage\';',
   },
   {
     name: 'LlmAdapter',
@@ -3786,6 +4416,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface MessageSourceMap {\n    user: {\n        kind: \'user\';\n    };\n    plugin: {\n        kind: \'plugin\';\n        plugin: string;\n    } & ContextFormed;\n    model: ModelMessageSource;\n    tool: ToolMessageSource;\n}',
   },
   {
+    name: 'ModelKeysApi',
+    declaration: 'export interface ModelKeysApi {\n    provision(request: RpcRequest<{\n        userId?: UserId;\n        label?: string;\n    }>): Promise<RpcResponse<ProvisionedKey>>;\n    list(request: RpcRequest<{\n        userId?: UserId;\n    }>): Promise<RpcResponse<{\n        items: ModelKeyView[];\n    }>>;\n    revoke(request: RpcRequest<{\n        keyId: KeyId;\n    }>): Promise<RpcResponse<{\n        revoked: boolean;\n    }>>;\n}',
+  },
+  {
     name: 'ModelMessageSource',
     declaration: 'export interface ModelMessageSource extends AssistantProvenance {\n    kind: \'model\';\n}',
   },
@@ -3798,6 +4432,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ModelModalityMap {\n    text: \'text\';\n    image: \'image\';\n}',
   },
   {
+    name: 'NormalRetryPolicyConfig',
+    declaration: 'export interface NormalRetryPolicyConfig {\n    mode: \'normal\';\n    maxRetries?: number;\n    retryableCodes?: string[];\n    backoff?: BackoffConfig;\n}',
+  },
+  {
     name: 'ObjectJsonSchema',
     declaration: 'export type ObjectJsonSchema = JsonSchemaNode & {\n    type: \'object\';\n};',
   },
@@ -3808,6 +4446,42 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PermissionSelect',
     declaration: 'export interface PermissionSelect {\n    options: PresetOption[];\n    currentValue: string;\n}',
+  },
+  {
+    name: 'PiAiCompatProfile',
+    declaration: 'export interface PiAiCompatProfile {\n    supportsStore?: boolean;\n    supportsDeveloperRole?: boolean;\n    supportsReasoningEffort?: boolean;\n    supportsUsageInStreaming?: boolean;\n    maxTokensField?: NonNullable<OpenAICompletionsCompat[\'maxTokensField\']>;\n    requiresToolResultName?: boolean;\n    requiresAssistantAfterToolResult?: boolean;\n    requiresThinkingAsText?: boolean;\n    requiresReasoningContentOnAssistantMessages?: boolean;\n    thinkingFormat?: PiAiThinkingFormat;\n    chatTemplateKwargs?: NonNullable<OpenAICompletionsCompat[\'chatTemplateKwargs\']>;\n    supportsStrictMode?: boolean;\n    cacheControlFormat?: NonNullable<OpenAICompletionsCompat[\'cacheControlFormat\']>;\n    supportsLongCacheRetention?: boolean;\n    supportsEagerToolInputStreaming?: boolean;\n    supportsCacheControlOnTools?: boolean;\n    supportsTemperature?: boolean;\n    forceAdaptiveThinking?: boolean;\n    allowEmptySignature?: boolean;\n    supportsStrictTools?: boolean;\n}',
+  },
+  {
+    name: 'PiAiModality',
+    declaration: 'export type PiAiModality = Model<Api>[\'input\'][number];',
+  },
+  {
+    name: 'PiAiModelOverride',
+    declaration: 'export type PiAiModelOverride = Omit<PiAiModelProfile, \'id\'>;',
+  },
+  {
+    name: 'PiAiModelProfile',
+    declaration: 'export interface PiAiModelProfile {\n    id: string;\n    name?: string;\n    contextWindow?: number;\n    maxTokens?: number;\n    input?: PiAiModality[];\n    reasoningEfforts?: false | PiAiReasoningEfforts;\n    compat?: PiAiCompatProfile;\n}',
+  },
+  {
+    name: 'PiAiProviderProfile',
+    declaration: 'export interface PiAiProviderProfile {\n    apiKeyEnv?: string;\n    displayName?: string;\n    api?: string;\n    baseURL?: string;\n    baseURLEnv?: string;\n    models?: PiAiModelProfile[];\n    modelOverrides?: Record<string, PiAiModelOverride>;\n    compat?: PiAiCompatProfile;\n    defaultContextWindow?: number;\n    defaultMaxTokens?: number;\n    defaultInput?: PiAiModality[];\n    headers?: Record<string, string>;\n    reasoning?: ModelThinkingLevel;\n    thinkingBudgets?: ThinkingBudgets;\n    cacheRetention?: CacheRetention;\n    transport?: Transport;\n    timeoutMs?: number;\n    websocketConnectTimeoutMs?: number;\n    streamIdleTimeoutMs?: number;\n    maxRequestImageBytes?: number;\n    requestImagePixelBudget?: number;\n    requestImageMaxBytes?: number;\n    retryPolicy?: RetryPolicyConfig;\n}',
+  },
+  {
+    name: 'PiAiReasoningEfforts',
+    declaration: 'export type PiAiReasoningEfforts = Partial<Record<ModelThinkingLevel, string | null>>;',
+  },
+  {
+    name: 'PiAiThinkingFormat',
+    declaration: 'export type PiAiThinkingFormat = NonNullable<OpenAICompletionsCompat[\'thinkingFormat\']>;',
+  },
+  {
+    name: 'PluginActivator',
+    declaration: 'export type PluginActivator = (ctx: Context) => Promise<void> | void;',
+  },
+  {
+    name: 'PluginCatalogEntry',
+    declaration: 'export interface PluginCatalogEntry {\n    pluginId: string;\n    title: string;\n    description: string;\n    version: string;\n    systemDefault: boolean;\n    activationId?: string;\n}',
   },
   {
     name: 'PostToolDecision',
@@ -3946,8 +4620,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ResolvedCredential {\n    value: string;\n    source: string;\n}',
   },
   {
+    name: 'ResolvedCustomModel',
+    declaration: 'export interface ResolvedCustomModel extends CustomModelView {\n    readonly apiKey: KeyValue;\n}',
+  },
+  {
     name: 'ResolvedNormalRetryPolicy',
     declaration: 'export interface ResolvedNormalRetryPolicy extends ResolvedRetryBackoff {\n    readonly mode: \'normal\';\n    readonly maxRetries: number;\n    readonly retryableCodes: readonly string[];\n}',
+  },
+  {
+    name: 'ResolvedPiAiProviderProfile',
+    declaration: 'export interface ResolvedPiAiProviderProfile extends Omit<PiAiProviderProfile, \'apiKeyEnv\' | \'baseURLEnv\' | \'retryPolicy\' | \'models\' | \'displayName\'> {\n    provider: string;\n    displayName: string;\n    apiKeyEnv?: CredentialRef;\n    streamIdleTimeoutMs: number;\n    maxRequestImageBytes: number;\n    requestImagePixelBudget: number;\n    requestImageMaxBytes: number;\n    retryPolicy: ResolvedRetryPolicy;\n    piProvider: Provider;\n    configuredMaxTokens: ReadonlyMap<string, number>;\n}',
   },
   {
     name: 'ResolvedRetryBackoff',
@@ -3970,6 +4652,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ResumeAgentOptions {\n    readonly resumeSessionId: SessionId;\n    readonly agentOptions?: AgentOptions;\n    readonly signal?: AbortSignal;\n    readonly setup?: AgentSetup;\n}',
   },
   {
+    name: 'RetryPolicyConfig',
+    declaration: 'export type RetryPolicyConfig = NormalRetryPolicyConfig | AlwaysRetryPolicyConfig;',
+  },
+  {
     name: 'RpcError',
     declaration: 'export type RpcError = {\n    [C in RpcErrorCode]: {\n        code: C;\n        message: string;\n        details: RpcErrorDetailsMap[C];\n    };\n}[RpcErrorCode];',
   },
@@ -3986,8 +4672,20 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type RpcId = Branded<\'rpc-id\'>;',
   },
   {
+    name: 'RpcPrincipal',
+    declaration: 'export type RpcPrincipal = {\n    kind: \'account\';\n    userId: string;\n} | {\n    kind: \'local\';\n};',
+  },
+  {
     name: 'RpcReceipt',
     declaration: 'export type RpcReceipt = {\n    accepted: true;\n} | {\n    accepted: false;\n    reason: \'not-pending\' | \'bad-response\';\n};',
+  },
+  {
+    name: 'RpcRequest',
+    declaration: 'export interface RpcRequest<P> {\n    rpcId: RpcId;\n    payload: P;\n    principal?: RpcPrincipal;\n}',
+  },
+  {
+    name: 'RpcResponse',
+    declaration: 'export interface RpcResponse<T> {\n    rpcId: RpcId;\n    result: RpcResult<T>;\n}',
   },
   {
     name: 'RpcResult',
@@ -4016,6 +4714,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SandboxPolicyRequest',
     declaration: 'export interface SandboxPolicyRequest {\n    session?: Session;\n    mode?: SandboxMode;\n}',
+  },
+  {
+    name: 'SaveDocumentAttachment',
+    declaration: 'export interface SaveDocumentAttachment {\n    data: Uint8Array;\n    mediaType: DocumentMediaType;\n    name?: string;\n    kind: DocumentAttachmentRef[\'kind\'];\n    summary: string;\n}',
   },
   {
     name: 'SaveImageAttachment',
@@ -4147,7 +4849,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionHeader',
-    declaration: 'export interface SessionHeader {\n    readonly version: number;\n    readonly id: SessionId;\n    readonly createdAt: number;\n    readonly cwd?: string;\n    readonly parentSession?: SessionId;\n    readonly seedLength?: number;\n    readonly origin?: \'subagent\';\n    readonly delegationDepth?: number;\n    readonly agentPreset?: string;\n}',
+    declaration: 'export interface SessionHeader {\n    readonly version: number;\n    readonly id: SessionId;\n    readonly ownerId?: SessionOwnerId;\n    readonly createdAt: number;\n    readonly cwd?: string;\n    readonly parentSession?: SessionId;\n    readonly seedLength?: number;\n    readonly origin?: \'subagent\';\n    readonly delegationDepth?: number;\n    readonly agentPreset?: string;\n}',
   },
   {
     name: 'SessionId',
@@ -4342,6 +5044,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type SettingsUpdateSource = \'update\' | \'provider\';',
   },
   {
+    name: 'SheetResultView',
+    declaration: 'export interface SheetResultView extends ArtifactBackedResultView {\n    card: \'sheet\';\n}',
+  },
+  {
     name: 'ShellExecRequest',
     declaration: 'export interface ShellExecRequest {\n    command: string;\n    workdir?: string | undefined;\n    timeoutMs?: number | undefined;\n    stdoutMaxBytes?: number | undefined;\n    signal?: AbortSignal | undefined;\n    stdin?: string | undefined;\n    env?: Record<string, string> | undefined;\n    dshEnv?: DshEnvironment | undefined;\n    sandboxPolicy?: SandboxExecutionPolicy | undefined;\n}',
   },
@@ -4382,12 +5088,20 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SkillDefinition extends SkillSummary {\n    readonly content: string;\n    readonly path?: string;\n    readonly metadata?: Readonly<Record<string, unknown>>;\n}',
   },
   {
+    name: 'SkillInstallInput',
+    declaration: 'export interface SkillInstallInput {\n    name: string;\n    description: string;\n    instructions: string;\n}',
+  },
+  {
+    name: 'SkillInstallResult',
+    declaration: 'export interface SkillInstallResult {\n    name: string;\n    path: string;\n    changed: boolean;\n}',
+  },
+  {
     name: 'SkillInvocationPolicy',
     declaration: 'export interface SkillInvocationPolicy {\n    readonly modelInvocable: boolean;\n    readonly userInvocable: boolean;\n}',
   },
   {
     name: 'SkillLookupOptions',
-    declaration: 'export interface SkillLookupOptions {\n    readonly cwd?: string | undefined;\n    readonly signal?: AbortSignal | undefined;\n}',
+    declaration: 'export interface SkillLookupOptions {\n    readonly cwd?: string | undefined;\n    readonly signal?: AbortSignal | undefined;\n    readonly ownerId?: SessionOwnerId | undefined;\n}',
   },
   {
     name: 'SkillProvider',
@@ -4422,6 +5136,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SkillViewOptions extends SkillLookupOptions {\n    readonly scope?: ScopeKey | undefined;\n}',
   },
   {
+    name: 'SlidesResultView',
+    declaration: 'export interface SlidesResultView extends ArtifactBackedResultView {\n    card: \'slides\';\n}',
+  },
+  {
     name: 'SpawnTeammateRequest',
     declaration: 'export interface SpawnTeammateRequest {\n    readonly name: string;\n    readonly description: string;\n    readonly prompt: ContentBlock[];\n    readonly context: \'fresh\' | \'fork\';\n    readonly provider: string;\n    readonly signal: AbortSignal;\n}',
   },
@@ -4452,6 +5170,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'StorageForms',
     declaration: 'export interface StorageForms {\n}',
+  },
+  {
+    name: 'StoredArtifact',
+    declaration: 'export interface StoredArtifact {\n    view: ArtifactView;\n    data: Uint8Array;\n}',
+  },
+  {
+    name: 'StoredDocumentAttachment',
+    declaration: 'export interface StoredDocumentAttachment {\n    ref: DocumentAttachmentRef;\n    data: Uint8Array;\n}',
   },
   {
     name: 'StoredImageAttachment',
@@ -4646,6 +5372,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface TeamWaitResult {\n    readonly timedOut: boolean;\n}',
   },
   {
+    name: 'TenantId',
+    declaration: 'export type TenantId = Branded<\'TenantId\'>;',
+  },
+  {
     name: 'TerminalBackend',
     declaration: 'export interface TerminalBackend {\n    readonly type: string;\n    spawn(spec: TerminalBackendSpawnSpec): Promise<TerminalBackendSession>;\n}',
   },
@@ -4835,7 +5565,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ToolResultView',
-    declaration: 'export type ToolResultView = GenericResultView | TerminalResultView | DiffResultView | SearchResultView | ReadResultView | WebResultView;',
+    declaration: 'export type ToolResultView = GenericResultView | TerminalResultView | DiffResultView | SearchResultView | ReadResultView | WebResultView | HtmlResultView | SlidesResultView | DocResultView | SheetResultView | ChartResultView;',
   },
   {
     name: 'ToolRunContext',
@@ -4936,6 +5666,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'UserQuestionProvider',
     declaration: 'export interface UserQuestionProvider {\n    ask(request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer>;\n}',
+  },
+  {
+    name: 'WalletApi',
+    declaration: 'export interface WalletApi {\n    get(request: RpcRequest<{\n        userId: UserId;\n    }>): Promise<RpcResponse<WalletView>>;\n    credit(request: RpcRequest<{\n        userId: UserId;\n        amountMicros: number;\n        reason: WalletLedgerReason;\n        idempotencyKey?: string;\n    }>): Promise<RpcResponse<WalletView>>;\n    debit(request: RpcRequest<{\n        userId: UserId;\n        amountMicros: number;\n        reason: WalletLedgerReason;\n        idempotencyKey?: string;\n    }>): Promise<RpcResponse<WalletView>>;\n    setQuota(request: RpcRequest<{\n        userId: UserId;\n        balanceMicros: number;\n        reason: WalletLedgerReason;\n    }>): Promise<RpcResponse<WalletView>>;\n    refreshDaily(request: RpcRequest<{\n        userId: UserId;\n        idempotencyKey: string;\n    }>): Promise<RpcResponse<WalletView>>;\n    grantWelcomeBonus(request: RpcRequest<{\n        userId: UserId;\n    }>): Promise<RpcResponse<WalletView>>;\n    listLedger(request: RpcRequest<{\n        userId: UserId;\n        limit?: number;\n    }>): Promise<RpcResponse<{\n        items: LedgerEntry[];\n    }>>;\n}',
+  },
+  {
+    name: 'WalletLedgerReason',
+    declaration: 'export type WalletLedgerReason = \'welcome\' | \'daily-refresh\' | \'topup\' | \'debit\' | \'set-quota\' | \'refund\' | \'model-usage\';',
+  },
+  {
+    name: 'WalletReservation',
+    declaration: 'export interface WalletReservation {\n    readonly userId: UserId;\n    readonly reservationId: string;\n    readonly reservedMicros: number;\n    readonly createdAt: number;\n    readonly expiresAt: number;\n}',
+  },
+  {
+    name: 'WalletSettlement',
+    declaration: 'export interface WalletSettlement {\n    readonly userId: UserId;\n    readonly reservationId: string;\n    readonly reservedMicros: number;\n    readonly actualMicros: number;\n    readonly refundedMicros: number;\n    readonly balanceMicros: number;\n    readonly updatedAt: number;\n    readonly ledgerId: number;\n}',
   },
   {
     name: 'WebBootEntry',
@@ -5052,6 +5798,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'WorkflowStopReason',
     declaration: 'export type WorkflowStopReason = \'completed\' | \'cancelled\' | \'error\';',
+  },
+  {
+    name: 'WorkspaceOwnerId',
+    declaration: 'export type WorkspaceOwnerId = Branded<\'WorkspaceId\'>;',
+  },
+  {
+    name: 'WriteArtifactInput',
+    declaration: 'export interface WriteArtifactInput {\n    data: Uint8Array;\n    kind: ArtifactKind;\n    source: ArtifactSource;\n    mediaType: ArtifactMediaType;\n    title?: string;\n    workspaceId?: WorkspaceOwnerId;\n    sessionId?: SessionOwnerId;\n    name?: string;\n}',
   },
 ]
 

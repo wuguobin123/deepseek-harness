@@ -42,6 +42,17 @@ export const workspaceCreateValueSchema = z.object({
   created: z.boolean(),
 }) satisfies z.ZodType<Wire<ResponseValue<'workspace.create'>>>
 
+/** workspace.importDirectory request payload with bounded transfer fields. */
+export const workspaceImportDirectoryRequestSchema = z.object({
+  importId: z.string().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/),
+  title: z.string().min(1).max(200),
+  files: z.array(z.object({ path: z.string().min(1).max(1024), content: z.string().max(7_000_000) })).max(200),
+}).refine(payload => payload.title.trim() !== '', {
+  message: 'workspace.importDirectory requires a non-blank title',
+}) satisfies z.ZodType<Wire<RequestPayload<'workspace.importDirectory'>>>
+/** workspace.importDirectory response value. */
+export const workspaceImportDirectoryValueSchema = z.object({ workspace: workspaceViewSchema, created: z.boolean() }) satisfies z.ZodType<Wire<ResponseValue<'workspace.importDirectory'>>>
+
 /** workspace.rename request payload: the new title must be non-blank. */
 export const workspaceRenameRequestSchema = z.object({
   workspaceId: workspaceIdSchema,

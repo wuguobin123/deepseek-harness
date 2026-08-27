@@ -47,9 +47,9 @@ function coerceJobs(jobs: ReadonlyArray<unknown>): JobView[] {
   return jobs.map((j) => {
     const raw = (j ?? {}) as Record<string, unknown>
     return {
-      id: String(raw.id ?? ''),
-      kind: String(raw.kind ?? ''),
-      label: String(raw.label ?? ''),
+      id: typeof raw.id === 'string' ? raw.id : '',
+      kind: typeof raw.kind === 'string' ? raw.kind : '',
+      label: typeof raw.label === 'string' ? raw.label : '',
       status: (typeof raw.status === 'string'
         ? raw.status
         : 'running') as JobView['status'],
@@ -60,7 +60,7 @@ function coerceJobs(jobs: ReadonlyArray<unknown>): JobView[] {
   })
 }
 
-export function TasksPage(): JSX.Element {
+export function TasksPage(): React.JSX.Element {
   const navigate = useNavigate()
   const [rows, setRows] = React.useState<Map<string, SessionRow> | null>(null)
   const [error, setError] = React.useState<string | null>(null)
@@ -97,7 +97,7 @@ export function TasksPage(): JSX.Element {
     void api
       .subscribeMux((envelope) => {
         if (!active) return
-        const frame = envelope.payload as MuxFrame
+        const frame = envelope.payload
         if (!isSessionJobsFrame(frame)) return
         setRows((prev) => {
           if (!prev) return prev
@@ -163,7 +163,7 @@ export function TasksPage(): JSX.Element {
                 <button
                   type="button"
                   className="task-card__title"
-                  onClick={() => navigate(`/assistant/${row.sessionId}`)}
+                  onClick={() =>{  navigate(`/assistant/${row.sessionId}`) }}
                   data-testid={`task-card-open-${row.sessionId}`}
                 >
                   <strong>{row.title?.trim() || `会话 ${row.sessionId.slice(0, 8)}`}</strong>

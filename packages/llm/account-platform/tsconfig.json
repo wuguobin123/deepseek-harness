@@ -1,0 +1,10 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "lib/types" },
+  "include": ["src"],
+  "references": [
+    { "path": "../../../vendor/cordis" }, { "path": "../../../vendor/schemastery" },
+    { "path": "../llm" }, { "path": "../llm-pi-ai" }, { "path": "../../core/session" }, { "path": "../../account/identity" },
+    { "path": "../../account/wallet" }, { "path": "../../account/model-keys" }, { "path": "../../runtime-diagnostics/invariants" }
+  ]
+}

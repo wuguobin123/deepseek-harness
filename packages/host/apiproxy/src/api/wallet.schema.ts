@@ -109,8 +109,13 @@ const walletViewSchema: z.ZodType<Wire<WalletView>> = z.object({
   updatedAt: z.number().int().nonnegative(),
 })
 
+/** Schema for the wallet credit response. */
 export const accountWalletCreditValueSchema = walletViewSchema satisfies z.ZodType<Wire<ResponseValue<'account.wallet.credit'>>>
+/** Schema for the wallet debit response. */
 export const accountWalletDebitValueSchema = walletViewSchema satisfies z.ZodType<Wire<ResponseValue<'account.wallet.debit'>>>
+/** Schema for the wallet quota response. */
 export const accountWalletSetQuotaValueSchema = walletViewSchema satisfies z.ZodType<Wire<ResponseValue<'account.wallet.setQuota'>>>
+/** Schema for the daily wallet refresh response. */
 export const accountWalletRefreshDailyValueSchema = walletViewSchema satisfies z.ZodType<Wire<ResponseValue<'account.wallet.refreshDaily'>>>
+/** Schema for the welcome-bonus response. */
 export const accountWalletGrantWelcomeBonusValueSchema = walletViewSchema satisfies z.ZodType<Wire<ResponseValue<'account.wallet.grantWelcomeBonus'>>>

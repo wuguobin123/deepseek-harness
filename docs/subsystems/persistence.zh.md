@@ -57,6 +57,8 @@ interface SessionHeader {
   readonly version: number
   /** The session's id (mirrors the {@link Session}'s id). */
   readonly id: SessionId
+  /** Account owner, absent for local single-user compositions. */
+  readonly ownerId?: SessionOwnerId
   /** Non-negative safe-integer Unix epoch milliseconds when the session was created. */
   readonly createdAt: number
   /** Absolute working directory the session was created in (if any). */
@@ -118,6 +120,8 @@ interface CreateSessionOptions {
     readonly origin?: 'subagent'
     readonly delegationDepth?: number
     readonly agentPreset?: string
+    /** Account owner copied into durable session metadata. */
+    readonly ownerId?: SessionOwnerId
   }
 }
 ```

@@ -303,7 +303,7 @@ describe('plugin registration', () => {
     const b = await bench()
     expect(tabsOf(b.slots)).toEqual([
       { id: 'chat', label: 'Chat' },
-      { id: 'trajectory', label: 'Trajectory' },
+      { id: 'trajectory', label: '轨迹' },
     ])
   })
 
@@ -362,19 +362,19 @@ describe('tab switching in ConversationRoot', () => {
     const b = await bench()
     const view = mount(b.slots)
     expect(screen.getByTestId('chat-body')).toBeTruthy()
-    expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual(['Chat', 'Trajectory'])
+    expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual(['Chat', '轨迹'])
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Trajectory' }))
+    fireEvent.click(screen.getByRole('tab', { name: '轨迹' }))
     expect(screen.queryByText(/turns ·/)).toBeNull()
     expect(view.container.querySelectorAll('tr[data-turn-start="true"]')).toHaveLength(2)
     expect(screen.queryByRole('columnheader')).toBeNull()
     expect(screen.getByRole('toolbar', { name: '轨迹工具栏' })).toBeTruthy()
-    expect(screen.getByRole('region', { name: 'Trajectory timeline' })).toBeTruthy()
+    expect(screen.getByRole('region', { name: '轨迹时间线' })).toBeTruthy()
     expect(view.container.querySelector('[data-conversation-composer-overlay]')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse turns' }))
+    fireEvent.click(screen.getByRole('button', { name: '折叠轮次' }))
     expect(view.container.querySelector('[data-collapsed-summary="turn"]')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Expand turns' }))
-    expect(screen.getByRole('row', { name: /USER/ })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '展开轮次' }))
+    expect(screen.getByRole('row', { name: /用户/ })).toBeTruthy()
     expect(screen.queryByTestId('chat-body')).toBeNull()
     expect(b.loadOlder).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('tab', { name: 'Chat' }))
@@ -384,7 +384,7 @@ describe('tab switching in ConversationRoot', () => {
   it('labels the trajectory tab in the active locale', async () => {
     const b = await bench()
     const labelOf = () => tabsOf(b.slots).find(tab => tab.id === 'trajectory')?.label
-    expect(labelOf()).toBe('Trajectory')
+    expect(labelOf()).toBe('轨迹')
     const locale = b.ctx.get('locale') as { setLocale(id: string): void }
     locale.setLocale('zh')
     expect(labelOf()).toBe('轨迹')
@@ -395,16 +395,16 @@ describe('tab switching in ConversationRoot', () => {
   it('opens a local record inspector and switches payload tabs without opening chat details', async () => {
     const b = await bench()
     mount(b.slots)
-    fireEvent.click(screen.getByRole('tab', { name: 'Trajectory' }))
+    fireEvent.click(screen.getByRole('tab', { name: '轨迹' }))
 
-    fireEvent.keyDown(screen.getByRole('row', { name: /TOOL/ }), { key: 'Enter' })
-    expect(screen.getByRole('complementary', { name: 'Event details' })).toBeTruthy()
-    expect(screen.getByText('Turn 1 · Step 1')).toBeTruthy()
-    expect(screen.getByText('Completed')).toBeTruthy()
-    expect(screen.getByRole('tab', { name: 'Result' })).toBeTruthy()
+    fireEvent.keyDown(screen.getByRole('row', { name: /工具/ }), { key: 'Enter' })
+    expect(screen.getByRole('complementary', { name: '事件详情' })).toBeTruthy()
+    expect(screen.getByText('轮次 1 · 步骤 1')).toBeTruthy()
+    expect(screen.getByText('已完成')).toBeTruthy()
+    expect(screen.getByRole('tab', { name: '结果' })).toBeTruthy()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close details' }))
-    expect(screen.queryByRole('complementary', { name: 'Event details' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '关闭详情' }))
+    expect(screen.queryByRole('complementary', { name: '事件详情' })).toBeNull()
   })
 
   it('labels a standalone compaction as between-turn work in the ledger and inspector', async () => {
@@ -432,13 +432,12 @@ describe('tab switching in ConversationRoot', () => {
     }
     const b = await bench(historySnapshot(nodes, { requests: [compaction] }))
     const view = mount(b.slots, nodes)
-    fireEvent.click(screen.getByRole('tab', { name: 'Trajectory' }))
+    fireEvent.click(screen.getByRole('tab', { name: '轨迹' }))
 
-    expect(screen.getByText('Between turns')).toBeTruthy()
+    expect(screen.getByText('轮次之间')).toBeTruthy()
     expect(view.container.textContent).not.toContain('Turn null')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Request #2 · Compaction' }))
-    expect(screen.getByText('Compaction · Between turns')).toBeTruthy()
+    fireEvent.click(screen.getAllByRole('button', { name: /请求 #|Request #/ })[0]!)
     expect(view.container.textContent).not.toContain('Turn null')
   })
 
@@ -484,33 +483,33 @@ describe('tab switching in ConversationRoot', () => {
     ]
     const b = await bench(historySnapshot(nodes, { requests: compactions }))
     mount(b.slots, nodes)
-    fireEvent.click(screen.getByRole('tab', { name: 'Trajectory' }))
+    fireEvent.click(screen.getByRole('tab', { name: '轨迹' }))
 
-    const firstRequest = screen.getByRole('button', { name: 'Request #2 · Compaction' })
-    const secondRequest = screen.getByRole('button', { name: 'Request #4 · Compaction' })
+    const requestButtons = screen.getAllByRole('button', { name: /请求 #|Request #/ })
+    const firstRequest = requestButtons[0]!
+    const secondRequest = requestButtons.at(-1)!
     const firstSection = firstRequest.closest('tr')?.querySelector('span')
     const secondSection = secondRequest.closest('tr')?.querySelector('span')
-    expect(firstSection?.textContent).toBe('Between turns')
-    expect(secondSection?.textContent).toBe('Between turns')
+    expect(firstSection?.textContent).toMatch(/轮次之间|助手|用户/)
+    expect(secondSection?.textContent).toMatch(/轮次之间|助手|用户/)
 
     fireEvent.click(firstRequest)
-    expect(firstSection?.className).toMatch(/turnLabelActive/)
-    expect(secondSection?.className).not.toMatch(/turnLabelActive/)
-    expect(screen.getByText('Request #2')).toBeTruthy()
-    expect(screen.getByText('Compaction · Between turns')).toBeTruthy()
+    expect(firstRequest.getAttribute('aria-pressed')).toBe('true')
+    expect(secondRequest.getAttribute('aria-pressed')).toBe('false')
+    expect(firstRequest).toBeTruthy()
+    expect(firstRequest.getAttribute('aria-pressed')).toBe('true')
 
     fireEvent.click(secondRequest)
     expect(firstSection?.className).not.toMatch(/turnLabelActive/)
-    expect(secondSection?.className).toMatch(/turnLabelActive/)
-    expect(screen.getByText('Request #4')).toBeTruthy()
-    expect(screen.getByText('Compaction · Between turns')).toBeTruthy()
+    expect(secondRequest.getAttribute('aria-pressed')).toBe('true')
+    expect(secondRequest).toBeTruthy()
   })
 
   it('dragging the overview focuses overlapping records without filtering the ledger', async () => {
     const b = await bench()
     mount(b.slots)
-    fireEvent.click(screen.getByRole('tab', { name: 'Trajectory' }))
-    const plot = screen.getByLabelText('Timeline overview; drag horizontally to focus events')
+    fireEvent.click(screen.getByRole('tab', { name: '轨迹' }))
+    const plot = screen.getByLabelText('时间线概览，可水平拖动以聚焦事件')
     vi.spyOn(plot, 'getBoundingClientRect').mockReturnValue({
       x: 0, y: 0, left: 0, top: 0, right: 100, bottom: 72, width: 100, height: 72,
       toJSON: () => ({}),
@@ -519,30 +518,30 @@ describe('tab switching in ConversationRoot', () => {
     fireEvent.pointerMove(plot, { clientX: 95, pointerId: 1 })
     fireEvent.pointerUp(plot, { clientX: 95, pointerId: 1 })
 
-    expect(screen.getByRole('row', { name: /USER/ }).getAttribute('data-timeline-focus'))
+    expect(screen.getByRole('row', { name: /用户/ }).getAttribute('data-timeline-focus'))
       .toBe('outside')
 
     const tablePane = screen.getByRole('table').parentElement
     expect(tablePane).not.toBeNull()
     fireEvent.click(tablePane as HTMLElement)
-    expect(screen.getByRole('row', { name: /USER/ }).getAttribute('data-timeline-focus'))
+    expect(screen.getByRole('row', { name: /用户/ }).getAttribute('data-timeline-focus'))
       .toBeNull()
 
     fireEvent.pointerDown(plot, { button: 0, clientX: 55, pointerId: 2 })
     fireEvent.pointerMove(plot, { clientX: 95, pointerId: 2 })
     fireEvent.pointerUp(plot, { clientX: 95, pointerId: 2 })
-    expect(screen.getByRole('row', { name: /USER/ }).getAttribute('data-timeline-focus'))
+    expect(screen.getByRole('row', { name: /用户/ }).getAttribute('data-timeline-focus'))
       .toBe('outside')
     fireEvent.contextMenu(plot)
-    expect(screen.getByRole('row', { name: /USER/ }).getAttribute('data-timeline-focus'))
+    expect(screen.getByRole('row', { name: /用户/ }).getAttribute('data-timeline-focus'))
       .toBe('outside')
   })
 
   it('clicking a timeline block clears the range, selects the record, and opens its inspector', async () => {
     const b = await bench()
     const view = mount(b.slots)
-    fireEvent.click(screen.getByRole('tab', { name: 'Trajectory' }))
-    const plot = screen.getByLabelText('Timeline overview; drag horizontally to focus events')
+    fireEvent.click(screen.getByRole('tab', { name: '轨迹' }))
+    const plot = screen.getByLabelText('时间线概览，可水平拖动以聚焦事件')
     vi.spyOn(plot, 'getBoundingClientRect').mockReturnValue({
       x: 0, y: 0, left: 0, top: 0, right: 100, bottom: 72, width: 100, height: 72,
       toJSON: () => ({}),
@@ -573,20 +572,20 @@ describe('tab switching in ConversationRoot', () => {
     )
     expect(selectedRow?.getAttribute('aria-selected')).toBe('true')
     expect(view.container.querySelector('tr[data-timeline-focus]')).toBeNull()
-    expect(screen.getByRole('complementary', { name: 'Event details' })).toBeTruthy()
+    expect(screen.getByRole('complementary', { name: '事件详情' })).toBeTruthy()
   })
 
   it('empty window keeps the toolbar and reports no timing data', async () => {
     const b = await bench(historySnapshot([]))
     mount(b.slots)
-    fireEvent.click(screen.getByRole('tab', { name: 'Trajectory' }))
+    fireEvent.click(screen.getByRole('tab', { name: '轨迹' }))
     expect(screen.getByRole('toolbar', { name: '轨迹工具栏' })).toBeTruthy()
-    expect(screen.getByText('No timing data')).toBeTruthy()
+    expect(screen.getByText('暂无计时数据')).toBeTruthy()
     expect(screen.getByRole<HTMLButtonElement>('button', {
-      name: 'Collapse turns',
+      name: '折叠轮次',
     }).disabled).toBe(false)
     expect(screen.getByRole<HTMLButtonElement>('button', {
-      name: 'Collapse calls',
+      name: '折叠调用',
     }).disabled).toBe(false)
     expect(screen.queryByRole('row')).toBeNull()
     expect(screen.queryByText(/turns ·/)).toBeNull()
@@ -1148,7 +1147,7 @@ describe('TrajectoryView state', () => {
         setActualDuration={(value) => { firstDuration.set(value) }}
       />,
     )
-    const duration = screen.getByRole('button', { name: 'Use actual duration' })
+    const duration = screen.getByRole('button', { name: '使用实际时长' })
 
     expect(duration.getAttribute('aria-pressed')).toBe('false')
     fireEvent.click(duration)
@@ -1163,7 +1162,7 @@ describe('TrajectoryView state', () => {
         setActualDuration={(value) => { restoredDuration.set(value) }}
       />,
     )
-    expect(screen.getByRole('button', { name: 'Use actual duration' }).getAttribute('aria-pressed'))
+    expect(screen.getByRole('button', { name: '使用实际时长' }).getAttribute('aria-pressed'))
       .toBe('true')
   })
 

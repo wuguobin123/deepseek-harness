@@ -13,6 +13,7 @@ import type {
   ImageAttachmentRef,
   SaveImageAttachment,
   StoredImageAttachment,
+  DocumentAttachmentRef, SaveDocumentAttachment, StoredDocumentAttachment, DocumentAttachmentLimits,
 } from '@deepseek-ai/dsh-attachment'
 import { normalizeImage } from './normalization.ts'
 import type { NormalizationPolicy } from './normalization.ts'
@@ -40,7 +41,29 @@ function objectPath(root: string, sha256: string): string {
   return join(root, 'objects', sha256.slice(0, 2), sha256)
 }
 
-function ensureReference(ref: ImageAttachmentRef): string {
+async function commitObjectFile(root: string, sha256: string, data: Uint8Array): Promise<void> {
+  const bucket = join(root, 'objects', sha256.slice(0, 2)); const staging = join(root, 'tmp')
+  const boundary = await ensureDurableHome(dirname(dirname(resolve(root))))
+  await ensureDurableDirectory(bucket, boundary); await ensureDurableDirectory(staging, boundary)
+  const temporary = join(staging, randomUUID()); const target = objectPath(root, sha256)
+  let handle
+  try {
+    handle = await open(temporary, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600)
+    await handle.writeFile(data); await handle.sync(); await handle.close(); handle = undefined
+    try { await link(temporary, target) } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error
+      const existing = new Uint8Array(await readFile(target)); if (digest(existing) !== sha256) throw new AttachmentError('Stored attachment failed integrity verification.', 'ATTACHMENT_CORRUPT')
+    }
+    await syncDirectory(bucket); await syncDirectory(join(root, 'objects')); await unlink(temporary)
+  } catch (error) {
+    if (handle !== undefined) await handle.close().catch(() => {})
+    await unlink(temporary).catch(() => {})
+    if (error instanceof AttachmentError) throw error
+    throw new AttachmentError('Unable to persist document attachment.', 'ATTACHMENT_WRITE_FAILED', { cause: error })
+  }
+}
+
+function ensureReference(ref: Pick<ImageAttachmentRef, 'attachmentId'>): string {
   const match = ID_PATTERN.exec(String(ref.attachmentId))
   if (match?.[1] === undefined) throw new AttachmentError('Attachment reference is invalid.', 'INVALID_ATTACHMENT_REF')
   return match[1]
@@ -292,5 +315,53 @@ export async function readImageFile(
     || metadata.width !== ref.width || metadata.height !== ref.height) {
     throw new AttachmentError('Stored attachment metadata does not match its reference.', 'ATTACHMENT_CORRUPT')
   }
+  return { ref, data }
+}
+
+/**
+ * Publish original document bytes under the shared content-addressed object root.
+ * @param root - versioned attachment storage root.
+ * @param input - declared document and complete bytes.
+ * @param limits - deployment-resolved document policy.
+ * @returns verified immutable document reference.
+ */
+export async function saveDocumentFile(
+  root: string,
+  input: SaveDocumentAttachment,
+  limits: DocumentAttachmentLimits,
+): Promise<DocumentAttachmentRef> {
+  if (input.data.byteLength === 0 || input.data.byteLength > limits.maxDocumentBytes) throw new AttachmentError('Document exceeds the configured byte limit.', 'DOCUMENT_TOO_LARGE')
+  let parsed
+  try {
+    const { DEFAULT_DOCUMENT_LIMITS, readDocument } = await import('@deepseek-ai/dsh-document')
+    parsed = await readDocument(
+      input.data,
+      { mediaType: input.mediaType, ...(input.name === undefined ? {} : { name: input.name }) },
+      { ...DEFAULT_DOCUMENT_LIMITS, maxBytes: limits.maxDocumentBytes },
+    )
+  }
+  catch (error) { throw new AttachmentError(error instanceof Error ? error.message : 'Document is invalid.', 'DOCUMENT_INVALID', { cause: error }) }
+  if (parsed.ref.kind !== input.kind) throw new AttachmentError('Document kind does not match its verified format.', 'DOCUMENT_INVALID')
+  const sha256 = digest(input.data)
+  const name = displayName(input.name)
+  const ref: DocumentAttachmentRef = { attachmentId: AttachmentId(`sha256:${sha256}`), mediaType: parsed.ref.mediaType, bytes: input.data.byteLength, kind: parsed.ref.kind, summary: parsed.summary.slice(0, 40_000), ...(name === undefined ? {} : { name }) }
+  await commitObjectFile(root, sha256, input.data)
+  return ref
+}
+
+/**
+ * Read and verify one persisted document without interpreting its contents.
+ * @param root - versioned attachment storage root.
+ * @param ref - durable reference recorded by a Session.
+ * @param signal - optional cancellation for the filesystem read.
+ * @returns exact stored bytes after digest and length verification.
+ */
+export async function readDocumentFile(root: string, ref: DocumentAttachmentRef, signal?: AbortSignal): Promise<StoredDocumentAttachment> {
+  signal?.throwIfAborted()
+  const sha256 = ensureReference(ref)
+  let data: Uint8Array
+  try { data = new Uint8Array(await readFile(objectPath(root, sha256), { signal })) }
+  catch (error) { signal?.throwIfAborted(); if (error instanceof Error && 'code' in error && error.code === 'ENOENT') throw new AttachmentError('Attachment object is missing.', 'ATTACHMENT_NOT_FOUND'); throw new AttachmentError('Unable to read document attachment.', 'ATTACHMENT_READ_FAILED', { cause: error }) }
+  if (digest(data) !== sha256 || data.byteLength !== ref.bytes) throw new AttachmentError('Stored document failed integrity verification.', 'ATTACHMENT_CORRUPT')
   return { ref, data }
 }

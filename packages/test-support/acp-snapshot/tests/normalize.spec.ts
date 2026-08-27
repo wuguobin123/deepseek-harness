@@ -211,7 +211,7 @@ Additional instructions from: nested\AGENTS.md`,
 })
 
 describe('normalizeSessionLog', () => {
-  const header = (over: object) => JSON.stringify({ type: 'session', version: 0, id: 's', createdAt: 123, ...over })
+  const header = (over: object) => JSON.stringify({ type: 'session', version: 1, id: 's', createdAt: 123, ...over })
   const event = (over: object) => JSON.stringify({ type: 'turn/start', seq: 1, time: 999, data: { turn: 1 }, ...over })
 
   it('zeroes the header createdAt', () => {
@@ -421,7 +421,7 @@ describe('normalizeSessionLog', () => {
 describe('normalizeSessionSnapshot', () => {
   it('normalizes, scrubs, and projects each parsed body record', () => {
     const raw = [
-      JSON.stringify({ type: 'session', version: 0, createdAt: 123, cwd: ctx.cwd }),
+      JSON.stringify({ type: 'session', version: 1, createdAt: 123, cwd: ctx.cwd }),
       JSON.stringify({
         type: 'request/header',
         seq: 7,
@@ -430,14 +430,14 @@ describe('normalizeSessionSnapshot', () => {
       }),
     ].join('\n') + '\n'
     expect(normalizeSessionSnapshot(raw, ctx)).toBe([
-      JSON.stringify({ type: 'session', version: 0, createdAt: 0, cwd: '{{cwd}}' }),
+      JSON.stringify({ type: 'session', version: 1, createdAt: 0, cwd: '{{cwd}}' }),
       JSON.stringify({ type: 'request/header', data: { header: { system: '{{system}}', tools: '{{tools}}' } } }),
     ].join('\n') + '\n')
   })
 
   it('normalizes an already-projected packed row', () => {
     const raw = [
-      JSON.stringify({ type: 'session', version: 0 }),
+      JSON.stringify({ type: 'session', version: 1 }),
       JSON.stringify({
         type: 'text-chunks',
         data: { turn: 1, step: 1, index: 0, dt: [9], texts: ['a', 'b'] },
@@ -557,7 +557,7 @@ describe('extractSnapshotSpillPaths', () => {
 })
 
 describe('scrubRequestHeaders', () => {
-  const headerLine = JSON.stringify({ type: 'session', version: 0, id: 's', createdAt: 1, cwd: '/w' })
+  const headerLine = JSON.stringify({ type: 'session', version: 1, id: 's', createdAt: 1, cwd: '/w' })
   const headerEvent = (header: object) =>
     JSON.stringify({ type: 'request/header', seq: 3, time: 9, data: { header, reason: 'initial' } })
 
@@ -610,7 +610,7 @@ describe('scrubRequestHeaders', () => {
 
 describe('scrubSessionSnapshot', () => {
   it('preserves the header while projecting and scrubbing each body record', () => {
-    const header = '  {"type":"session","version":0,"id":"s","createdAt":7}  '
+    const header = '  {"type":"session","version":1,"id":"s","createdAt":7}  '
     const request = JSON.stringify({
       type: 'request/header', seq: 0, time: 9,
       data: { header: { system: 'secret', tools: [{ name: 'read' }] }, reason: 'initial' },

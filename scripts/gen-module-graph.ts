@@ -20,6 +20,7 @@ type Pkg = PackageGraphNode
 const GROUP_ORDER = [
   'util',
   'llm',
+  'embedding',
   'core',
   'goal',
   'bash',
@@ -28,6 +29,7 @@ const GROUP_ORDER = [
   'compact',
   'subagent',
   'web',
+  'knowledge',
   'spill',
   'timeout',
   'todo',

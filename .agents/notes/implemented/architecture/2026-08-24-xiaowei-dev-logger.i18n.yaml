@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-24-xiaowei-dev-logger.md
+2026-08-24-xiaowei-dev-logger.md: 505afbea28fb0cf7743ab266f00b05585f649881
+2026-08-24-xiaowei-dev-logger.zh.md: 2db39334a645549e0a2e405a39bcc68123a6b71a

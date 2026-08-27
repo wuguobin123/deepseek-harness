@@ -64,8 +64,7 @@ export function PlanChip({ useProjection, locked, exitPlanMode, t }: PlanChipPro
           <IconCloseFill14 size={12} />
         </span>
       </button>
-      {/* Failure copy stays English (error-surface policy: not localized). */}
-      {error !== null && <span className={css.error} role="status" title={error}>failed to exit plan mode</span>}
+      {error !== null && <span className={css.error} role="status" title={error}>{t('chip.exitFailed')}</span>}
     </span>
   )
 }

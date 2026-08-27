@@ -1,6 +1,8 @@
 # Patch overlay reserved for `@deepseek-ai/dsh-ops-runtime`. The plugin is a
 # no-op skeleton until the first business Subagent preset is needed; uncomment
-# the row below when that happens.
+# replace the empty sequence below with the row when that happens.
 #
 # - id: ops-runtime
 #   name: '@deepseek-ai/dsh-ops-runtime'
+
+[]

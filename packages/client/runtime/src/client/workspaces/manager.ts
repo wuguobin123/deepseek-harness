@@ -232,6 +232,21 @@ export class WorkspaceManager {
   }
 
   /**
+   * Reflect a successful workspace-scoped session creation before the Host's
+   * changed frame arrives. A removed or unknown Workspace is left untouched:
+   * the successful Session remains visible as ungrouped until the next Host
+   * baseline determines its durable membership.
+   * @param workspaceId - Workspace that accepted the new Session.
+   * @param sessionId - newly created Session id.
+   */
+  attachSession(workspaceId: WorkspaceId, sessionId: SessionId): void {
+    const workspace = this.items.find(item => item.getSnapshot().view?.workspaceId === workspaceId)
+    const view = workspace?.getSnapshot().view
+    if (view === undefined || view.sessionIds.includes(sessionId)) return
+    this.upsert({ ...view, sessionIds: [sessionId, ...view.sessionIds] })
+  }
+
+  /**
    * Host-frame entry. Non-workspace frames are ignored so the runtime can
    * fan one host stream out to both object managers.
    * @param envelope - host stream envelope.

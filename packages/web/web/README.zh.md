@@ -22,13 +22,13 @@
 |---|---|
 | `registerSearchProvider(provider)`／`registerFetchProvider(provider)` | 注册后端。同一能力类型下 id 重复时抛出 `WebError` `WEB_DUPLICATE_PROVIDER`。返回 disposer。随调用 fiber 一并 dispose（资源释放）。 |
 | `search(request, signal?)` | 解析搜索提供方并运行一次搜索。在结果上强制执行 `request.maxResults`（截断 `sources[]`，设置 `truncated`）。能力无法运行时抛出 `WebError`。 |
-| `fetch(request, signal?)` | 解析抓取提供方并获取一个 URL。非 2xx 响应是结果，不会抛出异常。无法安全获取或表示资源时抛出 `WebError`。 |
+| `fetch(request, signal?)` | 解析抓取提供方并获取一个 URL。非 2xx 响应是结果，不会抛出异常。配置显式 `fetchFallbackProvider` 后，主提供方返回 403 或 429 时调用该提供方；后备提供方缺少凭据时保留主结果。无法安全获取或表示资源时抛出 `WebError`。 |
 
 提供方注册的是**能力**而非工具。`dsh-tool-web` 是面向模型的名称、描述、提示词指引、JSON Schema 和呈现的唯一归属方。
 
 ## 选择
 
-选择绝不依赖注册、配置或 HMR（热模块替换）顺序。能力要么具有显式提供方 id（配置 `searchProvider`／`fetchProvider`，或由环境变量 `$DSH_WEB_SEARCH_PROVIDER`／`$DSH_WEB_FETCH_PROVIDER` 提供相同字段），要么在恰好只注册一个可用提供方时自动选择。`search()`／`fetch()` 会在执行时解析提供方：
+选择绝不依赖注册、配置或 HMR（热模块替换）顺序。能力要么具有显式提供方 id（配置 `searchProvider`／`fetchProvider`，或由环境变量 `$DSH_WEB_SEARCH_PROVIDER`／`$DSH_WEB_FETCH_PROVIDER` 提供相同字段），要么在恰好只注册一个可用提供方时自动选择。`search()`／`fetch()` 会在执行时解析提供方。搜索还可以设置 `searchCredentialFallbackProvider`（或 `$DSH_WEB_SEARCH_CREDENTIAL_FALLBACK_PROVIDER`）；它要求显式配置不同的 `searchProvider`，且仅在主提供方抛出 code 为 `WEB_PROVIDER_CREDENTIAL_MISSING` 的 `WebError` 时尝试。抓取还可以设置 `fetchFallbackProvider`（或 `$DSH_WEB_FETCH_FALLBACK_PROVIDER`）；它要求显式配置不同的 `fetchProvider`，且仅在主提供方安全返回 403 或 429 时尝试。主提供方抛错或返回其他状态时绝不调用抓取后备。抓取后备缺少凭据时返回主结果，其他后备错误原样抛出。
 
 | 情况 | 执行 |
 |---|---|

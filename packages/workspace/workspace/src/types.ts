@@ -7,12 +7,18 @@
 
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionOwnerId } from '@deepseek-ai/dsh-session'
 
 /**
  * Identifies one workspace record. A generated uuid, never the path: path
  * normalization rewrites paths, and a reference anchor must stay stable.
  */
 export type WorkspaceId = Branded<'WorkspaceId'>
+
+/** Durable access identity for a workspace record. */
+export type WorkspaceAccess =
+  | { readonly kind: 'local' }
+  | { readonly kind: 'account'; readonly userId: SessionOwnerId }
 
 /**
  * One workspace: a stable id over an existing directory, a display title, and
@@ -23,6 +29,9 @@ export type WorkspaceId = Branded<'WorkspaceId'>
 export interface Workspace {
   /** Stable record id (generated uuid). */
   readonly id: WorkspaceId
+
+  /** Explicit durable owner; local records are never visible to accounts. */
+  readonly owner: WorkspaceAccess
 
   /**
    * Canonical directory path: the `fs.realpath` of the path given at create

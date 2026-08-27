@@ -22,6 +22,16 @@ function clientCssDeclarations(): string[] {
 }
 
 describe('client TypeScript aggregate', () => {
+  it('keeps referenced host sources out of client analyzer programs', () => {
+    const configPath = resolve(root, 'tsconfig.client.json')
+    const read = ts.readConfigFile(configPath, file => ts.sys.readFile(file))
+    if (read.error !== undefined) {
+      throw new Error(ts.flattenDiagnosticMessageText(read.error.messageText, '\n'))
+    }
+    const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, root)
+    expect(parsed.options.disableSourceOfProjectReferenceRedirect).toBe(true)
+  })
+
   it('loads package CSS declarations without relying on workspace-link realpaths', () => {
     const configPath = resolve(root, 'tsconfig.client.json')
     const read = ts.readConfigFile(configPath, file => ts.sys.readFile(file))

@@ -1,33 +1,33 @@
-import React from 'react';
-import { IconSend } from './icons';
-import { t } from '../i18n';
+import React from 'react'
+import { IconSend } from './icons'
+import { t } from '../i18n'
 
 export interface ConversationMessage {
-  role: 'user' | 'assistant' | 'tool';
-  content: string;
-  createdAt?: string;
+  role: 'user' | 'assistant' | 'tool'
+  content: string
+  createdAt?: string
 }
 
 interface Props {
-  conversationId: string | null;
-  messages: ConversationMessage[];
-  onSend?: (text: string) => void;
+  conversationId: string | null
+  messages: ConversationMessage[]
+  onSend?: (text: string) => void
 }
 
 const ROLE_LABELS: Record<ConversationMessage['role'], string> = {
   user: '我',
   assistant: 'AI 助手',
-  tool: '工具'
-};
+  tool: '工具',
+}
 
-export function ConversationThread({ conversationId, messages, onSend }: Props): JSX.Element {
-  const [draft, setDraft] = React.useState('');
+export function ConversationThread({ conversationId, messages, onSend }: Props): React.JSX.Element {
+  const [draft, setDraft] = React.useState('')
 
   function handleSubmit(e: React.FormEvent): void {
-    e.preventDefault();
-    if (!draft.trim() || !onSend) return;
-    onSend(draft.trim());
-    setDraft('');
+    e.preventDefault()
+    if (!draft.trim() || !onSend) return
+    onSend(draft.trim())
+    setDraft('')
   }
 
   return (
@@ -66,7 +66,7 @@ export function ConversationThread({ conversationId, messages, onSend }: Props):
         <input
           type="text"
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) =>{  setDraft(e.target.value) }}
           placeholder={t('anomalies.detail.placeholder')}
           aria-label={t('anomalies.detail.placeholder')}
           data-testid="conversation-input"
@@ -82,5 +82,5 @@ export function ConversationThread({ conversationId, messages, onSend }: Props):
         </button>
       </form>
     </section>
-  );
+  )
 }

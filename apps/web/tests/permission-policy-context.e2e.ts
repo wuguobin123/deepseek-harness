@@ -28,7 +28,7 @@ const PROMPTS = [
   'Create the relative path policy-neutral.txt in the current workspace containing exactly POLICY_NEUTRAL_OK, verify its contents, then report completion.',
 ] as const
 
-const PRESET_LABELS = ['Read Only', 'Full access', 'Workspace Write'] as const
+const PRESET_LABELS = ['只读', '完全访问', '工作区写入'] as const
 
 function requestSystems(events: readonly SessionEvent[]): string[] {
   return events.flatMap((event) => {
@@ -99,7 +99,7 @@ describe('web e2e: current sandbox policy reaches the model before tools', () =>
     for (const [index, preset] of ['read-only', 'danger-full-access', 'workspace-write'].entries()) {
       await input.fill(`/permission ${preset}`)
       await input.press('Enter')
-      await page.getByRole('button', { name: `Access mode, current: ${PRESET_LABELS[index]}` })
+      await page.getByRole('button', { name: `访问模式，当前：${PRESET_LABELS[index]}` })
         .waitFor({ timeout: 10_000 })
 
       const settled = scaffold.whenTurnSettled()
@@ -111,7 +111,7 @@ describe('web e2e: current sandbox policy reaches the model before tools', () =>
 
     await input.fill('/permission read-only')
     await input.press('Enter')
-    await page.getByRole('button', { name: 'Access mode, current: Read Only' }).waitFor({ timeout: 10_000 })
+    await page.getByRole('button', { name: '访问模式，当前：只读' }).waitFor({ timeout: 10_000 })
     const settled = scaffold.whenTurnSettled()
     await input.fill(PROMPTS[3])
     await input.press('Enter')

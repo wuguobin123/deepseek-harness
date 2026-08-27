@@ -243,9 +243,10 @@ Root interface of the unified API. New client-request domain = one new file pair
 /**
  * Response entry for server requests; not a domain method.
  * @param message - Client response carrying the server request's rpcId.
+ * @param principal - authenticated carrier identity, when one is required.
  * @returns Transport receipt for the response delivery.
  */
-respond(message: ClientResponse): Promise<RpcReceipt>
+respond(message: ClientResponse, principal?: RpcPrincipal): Promise<RpcReceipt>
 ```
 
 Source: [`packages/host/apiproxy/src/api/index.ts`](../../packages/host/apiproxy/src/api/index.ts)

@@ -7,6 +7,7 @@
 
 import { z } from 'zod'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionOwnerId } from '@deepseek-ai/dsh-session'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import type { WorkspaceId } from './types.ts'
 
@@ -19,6 +20,10 @@ const workspaceId = z.string().transform(value => value as WorkspaceId)
  * order is display order); timestamps are ISO-8601 strings.
  */
 export const workspaceRecord = z.object({
+  owner: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('local') }),
+    z.object({ kind: z.literal('account'), userId: z.string().min(1).transform(value => value as SessionOwnerId) }),
+  ]),
   path: z.string(),
   title: z.string(),
   sessionIds: z.array(z.string().transform(SessionId)),
@@ -66,7 +71,7 @@ export type WorkspaceDomainState = z.infer<typeof workspaceDomainState>
  */
 export const workspaceDomainSpec = defineDomain({
   name: 'workspace',
-  version: 2,
+  version: 3,
   global: {
     schema: workspaceDomainState,
     initial: { initialized: false, workspaceIds: [], archivedSessionIds: [] },

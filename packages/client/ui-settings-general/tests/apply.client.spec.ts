@@ -62,6 +62,7 @@ function declare(slots: SlotRegistry): () => void {
       name: 'root',
       children: {
         'settings.trigger': { kind: 'single', scope: 'root' },
+        'settings.launcher': { kind: 'single', scope: 'root' },
         'settings.header': { kind: 'single', scope: 'root' },
         'settings.action': { kind: 'list', scope: 'root' },
         'settings.close': { kind: 'single', scope: 'root' },

@@ -13,28 +13,32 @@ rem one-click installer aborts with "Failed to uninstall old application files".
 rem
 rem Why curl + batch instead of PowerShell: download-execute cradles like
 rem "iex (Invoke-WebRequest ...)" are flagged and blocked by Tencent Cloud's
-rem host security agent. Messages are ASCII-only so the .bat never depends on
-rem the console codepage (GBK/UTF-8 garbling).
+rem host security agent.
 
+chcp 65001 >nul
 setlocal EnableDelayedExpansion
 
-set "APP_NAME=DeepSeek Harness"
+set "APP_NAME=小薇"
+set "LEGACY_APP_NAME=DeepSeek Harness"
 set "PACKAGE=latest-win-x64.exe"
 set "BASE_URL=%DSH_RELEASES_URL%"
 if not defined BASE_URL set "BASE_URL=https://wgb123-1257121815.cos.ap-beijing.myqcloud.com"
 
 set "INSTALL_DIR=%LOCALAPPDATA%\Programs\%APP_NAME%"
-set "LEGACY_DIR=%LOCALAPPDATA%\Programs\@deepseek-harnessdesktop"
+set "LEGACY_PRODUCT_DIR=%LOCALAPPDATA%\Programs\%LEGACY_APP_NAME%"
+set "LEGACY_INTERNAL_DIR=%LOCALAPPDATA%\Programs\@deepseek-harnessdesktop"
 
 echo ==^> [1/4] Stopping running instances
 taskkill /F /IM "%APP_NAME%.exe" >nul 2>&1
+taskkill /F /IM "%LEGACY_APP_NAME%.exe" >nul 2>&1
 
 echo ==^> [2/4] Uninstalling previous version if present
 set "FOUND=0"
 
 rem The NSIS uninstaller lives inside the install dir as "Uninstall <product>.exe".
 set "UNI1=%INSTALL_DIR%\Uninstall %APP_NAME%.exe"
-set "UNI2=%LEGACY_DIR%\Uninstall %APP_NAME%.exe"
+set "UNI2=%LEGACY_PRODUCT_DIR%\Uninstall %LEGACY_APP_NAME%.exe"
+set "UNI3=%LEGACY_INTERNAL_DIR%\Uninstall %LEGACY_APP_NAME%.exe"
 if exist "%UNI1%" (
   set "FOUND=1"
   echo     Running "%UNI1%" /S
@@ -45,6 +49,11 @@ if exist "%UNI2%" (
   echo     Running "%UNI2%" /S
   start "" /wait "%UNI2%" /S
 )
+if exist "%UNI3%" (
+  set "FOUND=1"
+  echo     Running "%UNI3%" /S
+  start "" /wait "%UNI3%" /S
+)
 
 rem Drop leftover Add/Remove Programs entries pointing at removed installs.
 for %%K in (
@@ -53,6 +62,11 @@ for %%K in (
   "HKLM\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
 ) do (
   for /f "delims=" %%E in ('reg query %%K /s /f "%APP_NAME%" /d 2^>nul ^| findstr /i "^HKEY"') do (
+    set "FOUND=1"
+    echo     Removing registry entry %%E
+    reg delete "%%E" /f >nul 2>&1
+  )
+  for /f "delims=" %%E in ('reg query %%K /s /f "%LEGACY_APP_NAME%" /d 2^>nul ^| findstr /i "^HKEY"') do (
     set "FOUND=1"
     echo     Removing registry entry %%E
     reg delete "%%E" /f >nul 2>&1
@@ -69,7 +83,7 @@ rem until the install directory is actually gone.
 echo ==^> [3/4] Waiting for cleanup to finish
 set /a TRIES=0
 :waitloop
-if not exist "%INSTALL_DIR%" if not exist "%LEGACY_DIR%" goto waitdone
+if not exist "%INSTALL_DIR%" if not exist "%LEGACY_PRODUCT_DIR%" if not exist "%LEGACY_INTERNAL_DIR%" goto waitdone
 set /a TRIES+=1
 if !TRIES! GEQ 60 goto waitdone
 timeout /t 1 /nobreak >nul
@@ -77,8 +91,10 @@ goto waitloop
 :waitdone
 
 taskkill /F /IM "%APP_NAME%.exe" >nul 2>&1
+taskkill /F /IM "%LEGACY_APP_NAME%.exe" >nul 2>&1
 if exist "%INSTALL_DIR%" rd /s /q "%INSTALL_DIR%" >nul 2>&1
-if exist "%LEGACY_DIR%" rd /s /q "%LEGACY_DIR%" >nul 2>&1
+if exist "%LEGACY_PRODUCT_DIR%" rd /s /q "%LEGACY_PRODUCT_DIR%" >nul 2>&1
+if exist "%LEGACY_INTERNAL_DIR%" rd /s /q "%LEGACY_INTERNAL_DIR%" >nul 2>&1
 
 echo ==^> [4/4] Downloading and installing %PACKAGE%
 where curl >nul 2>&1

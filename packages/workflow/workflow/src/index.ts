@@ -106,6 +106,7 @@ export type WorkflowEventName =
  * `null` and is not one of these fatal codes.
  */
 export type WorkflowErrorCode =
+  | 'ACCOUNT_HOST_EXECUTION_DENIED'
   | 'SCRIPT_PARSE'
   | 'META_INVALID'
   | 'INVALID_ARGUMENT'

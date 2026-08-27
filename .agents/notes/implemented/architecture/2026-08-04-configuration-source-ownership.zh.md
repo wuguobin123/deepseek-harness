@@ -49,6 +49,8 @@ inherited process environment      (read-only, wins)
 
 **`packages/util/launch-environment` 拥有该快照**，刻意做成 utility 而不是三包能力 seam。快照在 Cordis 启动前就冻结，并由启动器一次性注入，因此不存在需要切换的运行时实现；消费方需要的只是类型和纯函数，而 `util/` 包能提供这些且不必依赖 UI 包。`launchEnvironmentOf(ctx)` 返回启动器的快照，或者返回只含继承环境的那一层——SDK 宿主或裸 `cordis.yml` 从未发现过任何文件，它那唯一一层确实就是它被启动时的环境，因此同样的受信查询在那里原样继续工作。
 
+**通用 pi-ai profile 可通过 `baseURLEnv` 引用 endpoint。** 适配器在物化 profile 时从该不可变启动快照解析点名的值；显式 `baseURL` 优先，而引用值缺失或为空会明确失败。这样，已交付组合可以携带部署专属 endpoint 的名字，同时不会在请求或 settings 变化期间重新读取可变的 `process.env`。
+
 **`verify-config-source-ownership`** 仅作为一道窄门禁，检查已交付 Cordis 配置中从环境内联 `apiKey`/`baseURL`/`headers` 的普通单行写法。删除这些内联正是「部署层」得以成立的原因——已交付配置树对 `baseURL` 保持沉默之后，「有值」就意味着「人或部署设过它」。实际解析由适配器负责；该门禁不声称覆盖仓库范围内的 `process.env` 访问。
 
 ## Consequences
@@ -56,6 +58,7 @@ inherited process environment      (read-only, wins)
 - Web 凭据表单现在能压过用户 `.env` 里更旧的密钥；只有在启动 shell 里 export 的密钥才会让它变成只读，诊断信息也会这么说。
 - 含 `DSH_*`、`PATH`、`BROWSER` 或 proxy 变量的 `.env` 会导致启动失败而不是被应用。把开关放在仓库 `.env` 里的开发者需要改放到 shell——这是一次刻意且响亮的破坏。
 - composition 不再会被陈旧的 shell endpoint 覆盖。但它仍然会被用户已存的 `settings.yaml` 覆盖，这是 settings seam 的分层方式，本 Note 不改变它；产品 CLI 没有高于它的标志，因此需要压过已存 settings 的部署方要自带 bin 或 loader 配置树。
+- composition 可以携带 `baseURLEnv`，而不是内联 endpoint。它的值在该进程内由启动快照固定，显式 profile `baseURL` 仍然是优先级更高的 composition 或 settings 值。
 - 未解决的：各层仍然会被物化进 `process.env`，因此普通项目变量继续按子进程清洗规则抵达子进程。bootstrap 变量完全不能来自文件；环境包将其余变量仍可抵达子进程这一点记录为一项限制。
 - Exa 与 Perplexity 仍在加载时捕获密钥，而不是经凭据 seam。它们不再读裸 `process.env`——改为经受信层解析——但把它们改造成按请求解析凭据是另一件事。
 

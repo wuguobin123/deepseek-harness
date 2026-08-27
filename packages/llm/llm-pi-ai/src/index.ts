@@ -58,7 +58,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { assertUsableApiKey, LlmError } from '@deepseek-ai/dsh-llm'
-import type { AdapterRegistrationHandle, DirectoryRegistrationHandle, LlmConfigurableProvider } from '@deepseek-ai/dsh-llm'
+import type { AdapterRegistrationHandle, DirectoryRegistrationHandle, GenerateOptions, LlmConfigurableProvider } from '@deepseek-ai/dsh-llm'
 import { deepEqualJson, installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { PiAiAdapter } from './adapter.ts'
 import { authContextFrom, credentialStoreFrom } from './auth.ts'
@@ -68,9 +68,27 @@ import type { ResolvedPiAiProviderProfile } from './config.ts'
 import { discoverModels } from './discovery.ts'
 import { registerPiAiFlows } from './login.ts'
 
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    /**
+     * Resolve a credential for one real stream request; discovery never emits this event.
+     * Listeners must call `next()` for non-owned routes.
+     * @param request - provider route, resolved profile, and complete GenerateOptions.
+     * @param next - continue to the existing credentials/environment resolver.
+     * @mode waterfall
+     */
+    'llm-pi-ai/resolve-api-key'(
+      this: Context,
+      request: { provider: string; profile: ResolvedPiAiProviderProfile; options: GenerateOptions },
+      next: () => Promise<string | undefined>,
+    ): Promise<string | undefined>
+  }
+}
+
 export { PiAiAdapter } from './adapter.ts'
 export type { PiAiAdapterOptions } from './adapter.ts'
 export { Config } from './config.ts'
+export { resolveProfiles } from './config.ts'
 export type {
   PiAiCompatProfile,
   PiAiModality,
@@ -82,6 +100,7 @@ export type {
   ResolvedPiAiProviderProfile,
 } from './config.ts'
 export { recordKeyFor } from './auth.ts'
+export { authContextFrom, credentialStoreFrom } from './auth.ts'
 export { supportedProtocols } from './provider.ts'
 
 export const name = 'llm-pi-ai'
@@ -139,6 +158,7 @@ function directoryEntries(
 
 /** Register one generic pi-ai adapter for all configured provider routes. */
 export function apply(ctx: Context, config: Config): void {
+  const launchEnvironment = launchEnvironmentOf(ctx)
   let current: () => Config = () => config
   let lastRaw: Config | undefined
   let memoized: ReadonlyMap<string, ResolvedPiAiProviderProfile> | undefined
@@ -156,14 +176,14 @@ export function apply(ctx: Context, config: Config): void {
   const profiles = (): ReadonlyMap<string, ResolvedPiAiProviderProfile> => {
     const raw = current()
     if (raw === lastRaw && memoized !== undefined) return memoized
-    const next = resolveProfiles(raw.providers)
+    const next = resolveProfiles(raw.providers, launchEnvironment)
     lastRaw = raw
     memoized = next
     return next
   }
   profiles()
 
-  const resolveApiKey = async (
+  const resolveApiKeyBase = async (
     provider: string,
     profile: ResolvedPiAiProviderProfile,
   ): Promise<string | undefined> => {
@@ -187,6 +207,8 @@ export function apply(ctx: Context, config: Config): void {
       'MISSING_CREDENTIAL',
     )
   }
+  const resolveApiKey = (provider: string, profile: ResolvedPiAiProviderProfile, options: GenerateOptions): Promise<string | undefined> =>
+    ctx.waterfall('llm-pi-ai/resolve-api-key', { provider, profile, options }, () => resolveApiKeyBase(provider, profile))
 
   // One store and one ambient context for the whole plugin instance: both read
   // through `ctx` per call, so they stay correct across the collection rebuilds
@@ -243,7 +265,7 @@ export function apply(ctx: Context, config: Config): void {
     if (provider === undefined) return undefined
     const profile = profiles().get(provider)
     if (profile === undefined) return undefined
-    return resolveApiKey(provider, profile)
+    return resolveApiKeyBase(provider, profile)
   }
   // Interrogating an endpoint is a configuration-time action over a draft, so
   // it is offered for the whole namespace rather than per route: the provider
@@ -287,7 +309,7 @@ export function apply(ctx: Context, config: Config): void {
     // Refuse an unserviceable section where it is written: without this a
     // schema-valid profile the adapter cannot serve would be stored and then
     // silently disable every route in this namespace.
-    validate: assertServiceable,
+    validate: (section) =>{  assertServiceable(section, launchEnvironment) },
     setSource: (source) => {
       current = source
     },

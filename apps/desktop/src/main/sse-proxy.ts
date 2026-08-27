@@ -7,17 +7,19 @@
  * line 150 and `websocket-downlink.ts`). Each message is one JSON
  * `ServerRequest` envelope `{ type:'server-request', rpcId, method, payload }`.
  *
- * Idle streams abort with a typed `WsStreamError`; consumers see failures
- * instead of silent disconnects. The host never sends mid-stream `stream/error`
- * frames — a frame whose `payload.type === 'stream/error'` is what an
- * upstream impl failure becomes on the wire, so we surface it as a parse
- * success and let the IPC handler fan it out like any other frame.
+ * Protocol ping/pong frames distinguish a quiet workspace from a silent dead
+ * carrier. Missing pong deadlines abort with a typed `WsStreamError`, which
+ * lets the renderer-owned connection controller reconnect both streams and
+ * repull open sessions. The host never sends mid-stream `stream/error` frames
+ * — a frame whose `payload.type === 'stream/error'` is what an upstream impl
+ * failure becomes on the wire, so we surface it as a parse success and let the
+ * IPC handler fan it out like any other frame.
  */
 import WebSocket from 'ws'
 import { ServerRequestSchema } from '../shared/contracts'
 
 export class WsStreamError extends Error {
-  readonly code: 'NETWORK_ERROR' | 'STREAM_IDLE' | 'BAD_FRAME'
+  readonly code: 'NETWORK_ERROR' | 'HEARTBEAT_TIMEOUT' | 'BAD_FRAME'
   constructor(code: WsStreamError['code'], message: string) {
     super(message)
     this.name = 'WsStreamError'
@@ -26,62 +28,35 @@ export class WsStreamError extends Error {
 }
 
 export interface OpenWsStreamOptions {
-  /** Idle timeout before the stream is treated as dead. */
-  idleTimeoutMs?: number
+  /** Delay between WebSocket ping frames. */
+  heartbeatIntervalMs?: number
+  /** Maximum wait for a pong or another inbound frame after each ping. */
+  heartbeatTimeoutMs?: number
   signal?: AbortSignal
+  /** HTTP headers sent during the WebSocket upgrade. */
+  headers?: Record<string, string>
 }
 
-const DEFAULT_IDLE_TIMEOUT_MS = 90_000
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000
+const DEFAULT_HEARTBEAT_TIMEOUT_MS = 10_000
 
 export async function* openWsStream(
   url: string,
   options: OpenWsStreamOptions = {},
 ): AsyncGenerator<{ rpcId: string; method: string; payload: unknown }> {
-  const idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS
+  const heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS
+  const heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? DEFAULT_HEARTBEAT_TIMEOUT_MS
   const externalSignal = options.signal
-  const socket = new WebSocket(url)
-
-  // The ws library closes when you set readyState to CLOSED via .close(); the
-  // first emit of 'message' tells us the handshake succeeded.
-  const opened = new Promise<void>((resolve, reject) => {
-    const onOpen = (): void => {
-      cleanup()
-      resolve()
-    }
-    const onError = (err: Error): void => {
-      cleanup()
-      reject(err)
-    }
-    const cleanup = (): void => {
-      socket.off('open', onOpen)
-      socket.off('error', onError)
-    }
-    socket.once('open', onOpen)
-    socket.once('error', onError)
-  })
-
-  try {
-    await opened
-  } catch (err) {
-    try { socket.terminate() } catch { /* already gone */ }
-    throw new WsStreamError('NETWORK_ERROR', `WS handshake failed: ${String(err)}`)
-  }
+  const socket = new WebSocket(url, { headers: options.headers })
 
   // Queue frames as they arrive; the async generator drains it. We can't
-  // await each emit because the generator runs in the consumer's tick.
+  // await each emit because the generator runs in the consumer's tick. Install
+  // these listeners before awaiting `open`: the host sends subscription
+  // baselines immediately after upgrade and they must not race the continuation.
   const queue: Array<{ rpcId: string; method: string; payload: unknown }> = []
   const waiters: Array<(value: IteratorResult<{ rpcId: string; method: string; payload: unknown }>) => void> = []
   let closed = false
   let failure: Error | null = null
-
-  let idleTimer: ReturnType<typeof setTimeout> | null = null
-  const resetIdle = (): void => {
-    if (idleTimer) clearTimeout(idleTimer)
-    idleTimer = setTimeout(() => {
-      failure = new WsStreamError('STREAM_IDLE', `WS stream idle for ${idleTimeoutMs}ms`)
-      socket.terminate()
-    }, idleTimeoutMs)
-  }
 
   const deliver = (frame: { rpcId: string; method: string; payload: unknown } | null): void => {
     const waiter = waiters.shift()
@@ -92,11 +67,51 @@ export async function* openWsStream(
     if (frame !== null) queue.push(frame)
   }
 
+  let heartbeatDeadline: ReturnType<typeof setTimeout> | null = null
+  const clearHeartbeatDeadline = (): void => {
+    if (heartbeatDeadline !== null) clearTimeout(heartbeatDeadline)
+    heartbeatDeadline = null
+  }
+  const fail = (error: WsStreamError): void => {
+    if (failure !== null || closed) return
+    failure = error
+    clearHeartbeatDeadline()
+    try {
+      socket.terminate()
+    } catch {
+      closed = true
+      deliver(null)
+    }
+  }
+  const sendHeartbeat = (): void => {
+    if (socket.readyState !== WebSocket.OPEN || heartbeatDeadline !== null) return
+    heartbeatDeadline = setTimeout(() => {
+      fail(new WsStreamError(
+        'HEARTBEAT_TIMEOUT',
+        `WS heartbeat received no pong for ${heartbeatTimeoutMs}ms`,
+      ))
+    }, heartbeatTimeoutMs)
+    try {
+      socket.ping(undefined, undefined, (error?: Error | null) => {
+        if (error != null) {
+          fail(new WsStreamError('NETWORK_ERROR', `WS ping failed: ${error.message}`))
+        }
+      })
+    } catch (error) {
+      fail(new WsStreamError('NETWORK_ERROR', `WS ping failed: ${String(error)}`))
+      return
+    }
+  }
   socket.on('message', (raw: WebSocket.RawData) => {
-    resetIdle()
+    clearHeartbeatDeadline()
     let parsed: { rpcId: string; method: string; payload?: unknown }
     try {
-      const json = JSON.parse(raw.toString('utf8'))
+      const text = typeof raw === 'string'
+        ? raw
+        : Array.isArray(raw)
+          ? Buffer.concat(raw).toString('utf8')
+          : Buffer.from(new Uint8Array(raw as ArrayBuffer)).toString('utf8')
+      const json: unknown = JSON.parse(text)
       parsed = ServerRequestSchema.parse(json)
     } catch (err) {
       failure = new WsStreamError('BAD_FRAME', `WS data is not a ServerRequest: ${String(err)}`)
@@ -105,6 +120,7 @@ export async function* openWsStream(
     }
     deliver({ rpcId: parsed.rpcId, method: parsed.method, payload: parsed.payload ?? null })
   })
+  socket.on('pong', clearHeartbeatDeadline)
   socket.on('close', () => {
     closed = true
     deliver(null)
@@ -115,10 +131,32 @@ export async function* openWsStream(
     deliver(null)
   })
 
-  resetIdle()
+  const opened = new Promise<void>((resolve, reject) => {
+    const onOpen = (): void => {
+      cleanup()
+      resolve()
+    }
+    const onError = (error: Error): void => {
+      cleanup()
+      reject(error)
+    }
+    const onClose = (): void => {
+      cleanup()
+      reject(new Error('WS closed during handshake'))
+    }
+    const cleanup = (): void => {
+      socket.off('open', onOpen)
+      socket.off('error', onError)
+      socket.off('close', onClose)
+    }
+    socket.once('open', onOpen)
+    socket.once('error', onError)
+    socket.once('close', onClose)
+  })
 
+  let onAbort: (() => void) | undefined
   if (externalSignal) {
-    const onAbort = (): void => {
+    onAbort = (): void => {
       try { socket.close() } catch { /* ignore */ }
     }
     if (externalSignal.aborted) onAbort()
@@ -126,25 +164,41 @@ export async function* openWsStream(
   }
 
   try {
+    await opened
+  } catch (error) {
+    if (externalSignal !== undefined && onAbort !== undefined) {
+      externalSignal.removeEventListener('abort', onAbort)
+    }
+    try { socket.terminate() } catch { /* already gone */ }
+    throw new WsStreamError('NETWORK_ERROR', `WS handshake failed: ${String(error)}`)
+  }
+  const heartbeatTimer = setInterval(sendHeartbeat, heartbeatIntervalMs)
+
+  try {
     while (true) {
-      if (failure) throw failure
+      const pendingFailure = failure as WsStreamError | null
+      if (pendingFailure !== null) throw new WsStreamError(pendingFailure.code, pendingFailure.message)
       if (queue.length > 0) {
         const next = queue.shift() as { rpcId: string; method: string; payload: unknown }
         yield next
         continue
       }
-      if (closed) return
       const next = await new Promise<IteratorResult<{ rpcId: string; method: string; payload: unknown }>>((resolve) => {
         waiters.push(resolve)
       })
       if (next.done) {
-        if (failure) throw failure
+        const pendingFailure = failure as WsStreamError | null
+        if (pendingFailure !== null) throw new WsStreamError(pendingFailure.code, pendingFailure.message)
         return
       }
       yield next.value
     }
   } finally {
-    if (idleTimer) clearTimeout(idleTimer)
+    clearInterval(heartbeatTimer)
+    clearHeartbeatDeadline()
+    if (externalSignal !== undefined && onAbort !== undefined) {
+      externalSignal.removeEventListener('abort', onAbort)
+    }
     try { socket.close() } catch { /* ignore */ }
   }
 }

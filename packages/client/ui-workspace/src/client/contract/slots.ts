@@ -45,10 +45,14 @@ export interface DirectoryFlowOwnerProps {
   busy: boolean
   /** The operator picked a directory (absolute host path); the owner adopts it. */
   onPicked: (path: string) => void
+  /** Desktop action already created the Workspace; adopt it without a second create RPC. */
+  onWorkspace?: (workspace: WorkspaceView) => void
   /** The operator dismissed the interaction; the owner just closes the flow. */
   onCancel: () => void
   /** The interaction itself failed (chooser missing, listing denied); the owner shows its error surface. */
   onError: (message: string) => void
+  /** Explicit destination for a desktop directory operation. */
+  location?: 'local' | 'cloud'
 }
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {

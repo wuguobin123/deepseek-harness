@@ -9,11 +9,40 @@
 
 ```mermaid
 flowchart LR
+  pkg_account_identity["account-identity"]
+  svc_identity["ctx.identity<br/>Account identity and session tokens"]
+  pkg_host_apiproxy["host-apiproxy"]
+  pkg_client_connection["client-connection"]
+  pkg_account_email_verification["account-email-verification"]
+  svc_emailVerification["ctx.emailVerification<br/>Account email verification"]
+  pkg_account_model_keys["account-model-keys"]
+  svc_userModelKeys["ctx.userModelKeys<br/>Account model credentials"]
+  pkg_llm_account_platform["llm-account-platform"]
+  pkg_account_wallet["account-wallet"]
+  svc_wallet["ctx.wallet<br/>Account wallet and usage ledger"]
+  svc_accountPlatform["ctx.accountPlatform<br/>Account-billed model route"]
+  pkg_account_plugin_factory["account-plugin-factory"]
+  svc_accountPluginFactory["ctx.accountPluginFactory<br/>Account plugin catalog and activation"]
+  pkg_account_skill_store["account-skill-store"]
+  svc_accountSkillStore["ctx.accountSkillStore<br/>Account-private skill storage"]
+  pkg_tool_skill_install["tool-skill-install"]
   pkg_attachment["attachment"]
   svc_attachments["ctx.attachments<br/>Durable binary attachment storage"]
   pkg_attachment_local["attachment-local"]
   pkg_host_runtime["host-runtime"]
   pkg_llm_pi_ai["llm-pi-ai"]
+  pkg_artifact["artifact"]
+  svc_artifactRegistry["ctx.artifactRegistry<br/>Durable generated artifact storage"]
+  pkg_artifact_store_fs["artifact-store-fs"]
+  pkg_tool_chart["tool-chart"]
+  pkg_tool_doc["tool-doc"]
+  pkg_tool_html["tool-html"]
+  pkg_tool_sheet["tool-sheet"]
+  pkg_tool_slides["tool-slides"]
+  svc_connection["ctx.connection<br/>Host/client RPC transport"]
+  pkg_api_gateway["api-gateway"]
+  pkg_client_runtime["client-runtime"]
+  pkg_hmr["hmr"]
   pkg_llm["llm"]
   svc_llm["ctx.llm<br/>LLM adapter registry"]
   pkg_llm_deepseek["llm-deepseek"]
@@ -38,7 +67,6 @@ flowchart LR
   pkg_typert_registry["typert-registry"]
   svc_typert["ctx.typert<br/>Runtime type registry"]
   pkg_typert_loader["typert-loader"]
-  pkg_api_gateway["api-gateway"]
   svc_typertGateway["ctx.typertGateway<br/>Typert Host invocation gateway"]
   svc_sessionPersistence["ctx.sessionPersistence<br/>Durable session persistence seam"]
   pkg_session_persistence_jsonl["session-persistence-jsonl"]
@@ -100,7 +128,6 @@ flowchart LR
   svc_commands["ctx.commands<br/>Human command registry"]
   pkg_session_projection["session-projection"]
   svc_sessionProjections["ctx.sessionProjections<br/>Session projection units"]
-  pkg_host_apiproxy["host-apiproxy"]
   pkg_session_projection_cache["session-projection-cache"]
   svc_sessionProjectionCache["ctx.sessionProjectionCache<br/>Persisted projection cache"]
   pkg_skill["skill"]
@@ -176,7 +203,15 @@ flowchart LR
   pkg_web_search_exa["web-search-exa"]
   pkg_web_search_perplexity["web-search-perplexity"]
   pkg_web_search_deepseek["web-search-deepseek"]
+  pkg_web_search_searxng["web-search-searxng"]
   pkg_web_fetch_http["web-fetch-http"]
+  pkg_embedding["embedding"]
+  svc_embedding["ctx.embedding<br/>Embedding provider registry"]
+  pkg_embedding_hash_local["embedding-hash-local"]
+  pkg_knowledge_sqlite_local["knowledge-sqlite-local"]
+  pkg_knowledge["knowledge"]
+  svc_knowledge["ctx.knowledge<br/>Tenant-scoped knowledge retrieval"]
+  pkg_tool_knowledge["tool-knowledge"]
   pkg_spill["spill"]
   svc_spillStore["ctx.spillStore<br/>Spill storage seam"]
   pkg_spill_local["spill-local"]
@@ -189,7 +224,6 @@ flowchart LR
   svc_webServer["ctx.webServer<br/>HTTP route registration"]
   pkg_connection["connection"]
   pkg_modules["modules"]
-  pkg_hmr["hmr"]
   svc_clientModules["ctx.clientModules<br/>Client plugin graph host"]
   pkg_workflow["workflow"]
   svc_workflowEngine["ctx.workflowEngine<br/>Workflow script engine"]
@@ -203,6 +237,12 @@ flowchart LR
   pkg_cordis_host_runner["cordis-host-runner"]
   svc_dynamicCordisRunner["ctx.dynamicCordisRunner<br/>Dynamic Cordis package host runner"]
   svc_cordisInspect["ctx.cordisInspect<br/>Dynamic Cordis inspect registry"]
+  pkg_account_email_verification --> svc_emailVerification
+  pkg_account_identity --> svc_identity
+  pkg_account_model_keys --> svc_userModelKeys
+  pkg_account_plugin_factory --> svc_accountPluginFactory
+  pkg_account_skill_store --> svc_accountSkillStore
+  pkg_account_wallet --> svc_wallet
   pkg_acp --> svc_approval
   pkg_agent --> svc_agents
   pkg_agent_default_model --> svc_agentDefaultModel
@@ -212,11 +252,14 @@ flowchart LR
   pkg_api_gateway --> svc_typertGateway
   pkg_apiproxy --> svc_apiProxy
   pkg_approval --> svc_approval
+  pkg_artifact --> svc_artifactRegistry
+  pkg_artifact_store_fs --> svc_artifactRegistry
   pkg_attachment --> svc_attachments
   pkg_attachment_local --> svc_attachments
   pkg_authorization --> svc_authorization
   pkg_bash_local --> svc_shell
   pkg_bash_sandbox --> svc_shell
+  pkg_client_connection --> svc_connection
   pkg_code_runtime --> svc_codeRuntime
   pkg_code_runtime_worker --> svc_codeRuntime
   pkg_commands --> svc_commands
@@ -231,6 +274,8 @@ flowchart LR
   pkg_directory_picker_browse --> svc_directoryPicker
   pkg_directory_picker_native --> svc_directoryPicker
   pkg_e2b --> svc_e2b
+  pkg_embedding --> svc_embedding
+  pkg_embedding_hash_local --> svc_embedding
   pkg_file_reference --> svc_fileReferences
   pkg_file_reference_local --> svc_fileReferences
   pkg_fs --> svc_fs
@@ -241,7 +286,10 @@ flowchart LR
   pkg_invariants --> svc_invariants
   pkg_jobs --> svc_jobs
   pkg_jobs_local --> svc_jobs
+  pkg_knowledge --> svc_knowledge
+  pkg_knowledge_sqlite_local --> svc_knowledge
   pkg_llm --> svc_llm
+  pkg_llm_account_platform --> svc_accountPlatform
   pkg_llm_deepseek --> svc_llm
   pkg_llm_pi_ai --> svc_llm
   pkg_llm_replay --> svc_llm
@@ -304,10 +352,13 @@ flowchart LR
   pkg_web_search_deepseek --> svc_web
   pkg_web_search_exa --> svc_web
   pkg_web_search_perplexity --> svc_web
+  pkg_web_search_searxng --> svc_web
   pkg_webserver --> svc_webServer
   pkg_workflow --> svc_workflowEngine
   pkg_workflow_worker_thread --> svc_workflowEngine
   pkg_workspace --> svc_workspaceRegistry
+  svc_accountPluginFactory --> pkg_host_apiproxy
+  svc_accountSkillStore --> pkg_tool_skill_install
   svc_agentDefaultModel --> pkg_headless
   svc_agentDefaultModel --> pkg_host_apiproxy
   svc_agentLoop --> pkg_agent_spine_demo
@@ -318,12 +369,21 @@ flowchart LR
   svc_apiProxy --> pkg_connection
   svc_approval --> pkg_tool_bash
   svc_approval --> pkg_tools
+  svc_artifactRegistry --> pkg_host_apiproxy
+  svc_artifactRegistry --> pkg_tool_chart
+  svc_artifactRegistry --> pkg_tool_doc
+  svc_artifactRegistry --> pkg_tool_html
+  svc_artifactRegistry --> pkg_tool_sheet
+  svc_artifactRegistry --> pkg_tool_slides
   svc_attachments --> pkg_host_runtime
   svc_attachments --> pkg_llm_pi_ai
   svc_authorization --> pkg_llm_pi_ai
   svc_clientModules --> pkg_hmr
   svc_codeRuntime --> pkg_tools
   svc_compaction --> pkg_compaction_basic
+  svc_connection --> pkg_api_gateway
+  svc_connection --> pkg_client_runtime
+  svc_connection --> pkg_hmr
   svc_cordisInspect --> pkg_tool_cordis
   svc_credentials --> pkg_apiproxy
   svc_credentials --> pkg_llm_deepseek
@@ -332,7 +392,11 @@ flowchart LR
   svc_dynamicCordisRunner --> pkg_tool_cordis
   svc_e2b --> pkg_fs_e2b
   svc_e2b --> pkg_subprocess_e2b
+  svc_emailVerification --> pkg_host_apiproxy
+  svc_embedding --> pkg_knowledge_sqlite_local
   svc_fs --> pkg_tool_fs
+  svc_identity --> pkg_client_connection
+  svc_identity --> pkg_host_apiproxy
   svc_invariants --> pkg_agent
   svc_invariants --> pkg_agent_loop
   svc_invariants --> pkg_scope
@@ -341,6 +405,7 @@ flowchart LR
   svc_jobs --> pkg_tool_jobs
   svc_jobs --> pkg_tool_subagent
   svc_jobs --> pkg_tool_terminal
+  svc_knowledge --> pkg_tool_knowledge
   svc_llm --> pkg_agent_loop
   svc_llm --> pkg_compaction_basic
   svc_lsp --> pkg_tool_lsp
@@ -414,7 +479,11 @@ flowchart LR
   svc_tools --> pkg_tool_web
   svc_typert --> pkg_api_gateway
   svc_typert --> pkg_typert_loader
+  svc_userModelKeys --> pkg_host_apiproxy
+  svc_userModelKeys --> pkg_llm_account_platform
   svc_userQuestions --> pkg_tool_ask_user
+  svc_wallet --> pkg_host_apiproxy
+  svc_wallet --> pkg_llm_account_platform
   svc_web --> pkg_tool_web
   svc_webServer --> pkg_connection
   svc_webServer --> pkg_hmr
@@ -427,7 +496,16 @@ flowchart LR
 
 | ctx 键 | 角色 | 所属包 | 实现 | 直接消费方 | 配套插件 | 说明 |
 | --- | --- | --- | --- | --- | --- | --- |
+| `ctx.identity` | `seam` | [`account-identity`](../packages/account/identity) | - | [`host-apiproxy`](../packages/host/apiproxy), [`client-connection`](../packages/client/connection) | - | 同包 SQLite 提供方负责注册、登录、令牌校验与撤销；Host RPC 解析账号状态，Connection 则在分派前认证请求。 |
+| `ctx.emailVerification` | `seam` | [`account-email-verification`](../packages/account/email-verification) | - | [`host-apiproxy`](../packages/host/apiproxy) | - | 同包提供方负责验证码发送、过期、频率限制与校验；账号 RPC 是其面向用户的消费方。 |
+| `ctx.userModelKeys` | `seam` | [`account-model-keys`](../packages/account/model-keys) | - | [`host-apiproxy`](../packages/host/apiproxy), [`llm-account-platform`](../packages/llm/account-platform) | - | 同包加密 SQLite 提供方负责凭据签发、撤销、自定义模型记录和密钥解析；RPC 只公开元数据，账号模型路由只在进程内消费明文。 |
+| `ctx.wallet` | `seam` | [`account-wallet`](../packages/account/wallet) | - | [`host-apiproxy`](../packages/host/apiproxy), [`llm-account-platform`](../packages/llm/account-platform) | - | 同包 SQLite 提供方负责余额、预留、结算与账本记录；账号模型路由为每次提供方尝试执行预留和结算。 |
+| `ctx.accountPlatform` | `core` | [`llm-account-platform`](../packages/llm/account-platform) | - | - | - | 把会话所有权、账号凭据、钱包预留和 pi-ai 凭据传递组合成一条模型路由；服务标记用于识别该已安装组合。 |
+| `ctx.accountPluginFactory` | `seam` | [`account-plugin-factory`](../packages/account/plugin-factory) | - | [`host-apiproxy`](../packages/host/apiproxy) | - | 同包提供方保存每账号安装状态，并把部署方目录 ID 映射到服务端激活器；系统默认条目对所有账号始终保持已安装。 |
+| `ctx.accountSkillStore` | `seam` | [`account-skill-store`](../packages/account/skill-store) | - | [`tool-skill-install`](../packages/account/tool-skill-install) | - | 同包文件系统提供方把账号所有者哈希到私有根目录，并发布校验后的 SKILL.md；面向模型的安装器不会收到账号 ID 或服务端路径。 |
 | `ctx.attachments` | `seam` | [`attachment`](../packages/attachment/attachment) | [`attachment-local`](../packages/attachment/attachment-local) | `host-runtime`, [`llm-pi-ai`](../packages/llm/llm-pi-ai) | - | 宿主会在会话事件之前提交已接受的图片；提供方适配器将已授权的持久引用解析为提供方原生内容。 |
+| `ctx.artifactRegistry` | `seam` | [`artifact`](../packages/artifact/artifact) | [`artifact-store-fs`](../packages/artifact/artifact-store-fs) | [`host-apiproxy`](../packages/host/apiproxy), [`tool-chart`](../packages/web/tool-chart), [`tool-doc`](../packages/web/tool-doc), [`tool-html`](../packages/web/tool-html), [`tool-sheet`](../packages/web/tool-sheet), [`tool-slides`](../packages/web/tool-slides) | - | 产物工具通过注册表提交会话所有的交付物；Host 列出和读取经过校验的元数据与字节，不暴露后端路径。 |
+| `ctx.connection` | `core` | [`client-connection`](../packages/client/connection) | - | [`api-gateway`](../packages/api/gateway), [`client-runtime`](../packages/client/runtime), `hmr` | - | Host 端负责已认证 HTTP 通道和限定作用域的 RPC 注册；浏览器端通过该载体复用 Remote namespace、runtime 调用、HMR 与 UI 插件请求。 |
 | `ctx.llm` | `seam` | [`llm`](../packages/llm/llm) | [`llm-deepseek`](../packages/llm/llm-deepseek), [`llm-pi-ai`](../packages/llm/llm-pi-ai), [`llm-replay`](../packages/test-support/llm-replay) | [`agent-loop`](../packages/core/agent-loop), [`compaction-basic`](../packages/compaction/compaction-basic) | - | 适配器注册提供方实现；agent loop（智能体循环）与压缩功能调用提供方无关的流服务。 |
 | `ctx.tokenMeter` | `core` | [`token-meter`](../packages/llm/token-meter) | - | [`compaction-basic`](../packages/compaction/compaction-basic) | - | 拥有按会话隔离的回放折叠区；压力消费方共享不可变且带修订版本的测量结果。 |
 | `ctx.toolResultPruner` | `core` | [`compaction-tool-result-pruner`](../packages/compaction/compaction-tool-result-pruner) | - | [`compaction-basic`](../packages/compaction/compaction-basic) | - | 在摘要压缩前，通过可回放的单节点表层替换来改写过大的当前工具结果。 |
@@ -476,7 +554,9 @@ flowchart LR
 | `ctx.subagents` | `seam` | [`subagent`](../packages/subagent/subagent) | [`subagent-spawn-in-process`](../packages/subagent/subagent-spawn-in-process), [`subagent-fork-in-process`](../packages/subagent/subagent-fork-in-process), [`subagent-acp`](../packages/subagent/subagent-acp), [`subagent-codex`](../packages/subagent/subagent-codex), [`subagent-claude-code`](../packages/subagent/subagent-claude-code), [`subagent-dsh-sdk`](../packages/subagent/subagent-dsh-sdk) | [`tool-subagent`](../packages/subagent/tool-subagent), [`tool-subagent-control`](../packages/subagent/tool-subagent-control), [`tool-ralph`](../packages/workflow/tool-ralph) | - | 提供方实现传输；该服务还负责可选的、基于 Activation 的延续编排，tool-subagent 选择一次性或可延续委派，tool-subagent-control 传递后续消息，而 tool-ralph 要求一条全新的结构化输出路由。 |
 | `ctx.agentTeams` | `core` | `agent-team` | - | `tool-agent-team` | - | 负责隐式 Root roster、持久 peer mailbox、共享任务 DAG 与 continuable child 生命周期；tool-agent-team 提供作用域化模型策略和控制工具。 |
 | `ctx.jobs` | `seam` | [`jobs`](../packages/jobs/jobs) | [`jobs-local`](../packages/jobs/jobs-local) | [`tool-bash`](../packages/shell/tool-bash), [`tool-terminal`](../packages/terminal/tool-terminal), [`tool-subagent`](../packages/subagent/tool-subagent), [`tool-jobs`](../packages/jobs/tool-jobs) | - | 生产方（后台 bash、PTY 发送和 subagent 委派）登记正在运行的工作；tool-jobs 是面向模型的控制器，用于读取、列出和终止这些工作；jobs-local 是进程本地注册表。 |
-| `ctx.web` | `seam` | [`web`](../packages/web/web) | [`web-search-exa`](../packages/web/web-search-exa), [`web-search-perplexity`](../packages/web/web-search-perplexity), [`web-search-deepseek`](../packages/web/web-search-deepseek), [`web-fetch-http`](../packages/web/web-fetch-http) | [`tool-web`](../packages/web/tool-web) | - | 搜索和抓取提供方注册到同一个 ctx.web seam；tool-web 负责稳定的面向模型名称。 |
+| `ctx.web` | `seam` | [`web`](../packages/web/web) | [`web-search-exa`](../packages/web/web-search-exa), [`web-search-perplexity`](../packages/web/web-search-perplexity), [`web-search-deepseek`](../packages/web/web-search-deepseek), [`web-search-searxng`](../packages/web/web-search-searxng), [`web-fetch-http`](../packages/web/web-fetch-http) | [`tool-web`](../packages/web/tool-web) | - | 搜索和抓取提供方注册到同一个 ctx.web seam；tool-web 负责稳定的面向模型名称。 |
+| `ctx.embedding` | `seam` | [`embedding`](../packages/embedding/embedding) | [`embedding-hash-local`](../packages/embedding/embedding-hash-local) | [`knowledge-sqlite-local`](../packages/knowledge/knowledge-sqlite-local) | - | 提供方返回带模型、修订和维度身份的向量；索引拒绝不兼容的向量空间。 |
+| `ctx.knowledge` | `seam` | [`knowledge`](../packages/knowledge/knowledge) | [`knowledge-sqlite-local`](../packages/knowledge/knowledge-sqlite-local) | [`tool-knowledge`](../packages/knowledge/tool-knowledge) | - | 可信调用方提供租户与主体作用域；面向模型的工具只公开查询控制和稳定引用，不公开作用域标识。 |
 | `ctx.spillStore` | `seam` | [`spill`](../packages/spill/spill) | [`spill-local`](../packages/spill/spill-local) | [`spill-policy`](../packages/spill/spill-policy) | - | 后端保存过大的工具文本，并返回面向模型的定位信息和取回提示；spill-policy 是 tools/post-execute 消费方，负责决定何时 spill。 |
 | `ctx.directoryPicker` | `seam` | `directory-picker` | `directory-picker-native`, `directory-picker-browse` | `apiproxy` | - | 带判别标记的交互能力：原生后端在 Host 显示设备上打开一个操作系统选择器，浏览后端为应用内浏览器提供列表与创建原语；双端后端通过其浏览器侧填充 ui-workspace 目录流程的 slot（不通过协议发布）。 |
 | `ctx.webServer` | `core` | `webserver` | - | `connection`, `modules`, `hmr` | - | 普通的 node:http 载体：具名路由注册表、索引转换 tap，以及静态 dist 回退；Web 传输插件注册自己的路由。 |

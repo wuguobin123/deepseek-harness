@@ -77,6 +77,11 @@ export interface ISession {
    */
   loadOlder(): Promise<void>
   /**
+   * Retry the initial history pull after it settled into an error.
+   * @returns completion of the rebuilt history window; non-error states are unchanged.
+   */
+  retryOpen(): Promise<void>
+  /**
    * Execute one slash-command line against this session's agent — pure
    * admission semantics (the host executor durably logs the lifecycle).
    * @param line - the full command line, leading slash included.

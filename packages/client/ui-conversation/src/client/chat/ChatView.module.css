@@ -126,9 +126,23 @@
 }
 
 .openError {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   color: var(--dsw-alias-state-error-primary);
   font-size: 12px;
   line-height: 18px;
+}
+
+.openError button {
+  border: none;
+  padding: 0;
+  color: currentcolor;
+  font: inherit;
+  text-decoration: underline;
+  background: transparent;
+  cursor: pointer;
 }
 
 .older {

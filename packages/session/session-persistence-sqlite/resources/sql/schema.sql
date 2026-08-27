@@ -5,6 +5,7 @@ CREATE TABLE persistence_state (
 
 CREATE TABLE sessions (
   id               TEXT PRIMARY KEY,
+  owner_id         TEXT,
   version          INTEGER NOT NULL,
   created_at       INTEGER NOT NULL,
   cwd              TEXT,

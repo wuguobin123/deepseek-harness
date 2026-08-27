@@ -10,7 +10,7 @@ import { pathToFileURL } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
-import SessionStore, { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId, SessionOwnerId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import SessionPersistenceSqlite, {
   DEFAULT_BUSY_TIMEOUT_MS,
   SCHEMA_VERSION,
@@ -528,7 +528,7 @@ describe('SessionPersistenceSqlite schema ownership', () => {
 
     const foreignPath = await freshDbPath('dsh-sqlite-foreign-')
     const foreign = new DatabaseSync(foreignPath)
-    foreign.exec(testSql('set-user-version-17'))
+    foreign.exec(testSql('set-user-version-18'))
     foreign.exec(testSql('set-application-id-12345'))
     foreign.close()
     await expect(openDatabase(DatabaseSync, foreignPath, 'wal', DEFAULT_BUSY_TIMEOUT_MS)).rejects.toThrow(/has application id 12345/)
@@ -573,7 +573,8 @@ describe('SessionPersistenceSqlite schema ownership', () => {
   it('validates creation time and restores every optional header field', () => {
     const base: SessionRow = {
       id: 'stored-header',
-      version: 0,
+      owner_id: 'account-a',
+      version: 1,
       created_at: 1,
       cwd: '/project',
       parent_session: 'parent',
@@ -591,6 +592,7 @@ describe('SessionPersistenceSqlite schema ownership', () => {
       origin: 'subagent',
       delegationDepth: 2,
       agentPreset: 'minimal',
+      ownerId: SessionOwnerId('account-a'),
     })
     expect(() => decodeSessionRow({ ...base, created_at: -1 })).toThrow(/created_at/)
     expect(() => decodeSessionRow({ ...base, origin: 'external' })).toThrow(/origin/)
@@ -600,7 +602,8 @@ describe('SessionPersistenceSqlite schema ownership', () => {
   it('rejects malformed SQLite row primitives generically', () => {
     const base: SessionRow = {
       id: 'stored-header',
-      version: 0,
+      owner_id: null,
+      version: 1,
       created_at: 1,
       cwd: '/project',
       parent_session: null,

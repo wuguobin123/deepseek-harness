@@ -23,7 +23,10 @@ export function buildRenderApp(deps: AssemblyDeps): () => ReactNode {
   const { ctx } = deps
   const sessions = ctx.get('sessions')
   if (sessions === undefined) throw new Error('ui renderer: sessions service unavailable')
-  const useSessions = bindSnapshotSelector(sessions.list)
+  const useSessions = bindSnapshotSelector({
+    subscribe: fn => sessions.list.subscribe(fn),
+    getSnapshot: () => sessions.list.getSnapshot(),
+  })
   const SessionDocumentTitle = (): ReactNode => {
     const title = useSessions((state) => {
       const id = state.current

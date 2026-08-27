@@ -10,7 +10,7 @@ The agent loop records `max-tokens` as its own `turn/end` reason, but no user su
 
 ## Decision
 
-A `turn-max-tokens` conversation node Definition matches `turn/end` with `reason.kind === 'max-tokens'` and materializes a persistent chat row at the turn position: a warning StateDot, a localized title, and guidance that the truncated output is preserved and sending "continue" resumes in a new turn. The node derives from the durable session event alone, so refresh, restore, and history replay rebuild it identically. It shows no token numbers: the event carries none, and the notice must not fabricate budget data the provider did not report.
+A `turn-max-tokens` conversation node Definition matches `turn/end` with `reason.kind === 'max-tokens'` and materializes a persistent chat row at the turn position: a warning StateDot, a localized title, and recovery guidance. The node derives from the durable turn event, so refresh, restore, and history replay rebuild it identically. When a later message carries the source metadata defined by the [bounded continuation decision](2026-08-26-bounded-max-token-continuation.md), the node shows its automatic ordinal and limit; logs without that metadata retain manual guidance. It never estimates provider token usage.
 
 The renderer registers under the keyed `conversation.chat.node` seat like every chat row, and the legacy chat-snapshot contribution includes the node. The fixture history gained a max-tokens sample turn (72; the image and todo turns shifted to 73 and 74), and an assembled keyless snapshot pins the dot state, title, and hint, so a regression that routes max-tokens through the error presentation or silences it again changes a golden.
 
@@ -20,8 +20,8 @@ The renderer registers under the keyed `conversation.chat.node` seat like every 
 
 **A turn-tail marker instead of a flow row** — rejected: the tail renders closing chrome for a finished turn and its actions collapse on later turns, while the truncation notice must stay at the turn that was cut and remain visible in history without interaction.
 
-**A continue or retry action button on the notice** — deferred: resuming has open semantics (new turn versus same-turn splice, old-output retention rules) that issue #1522 explicitly leaves out of scope; guidance text carries the safe next step without committing to an action contract.
+**A continue or retry action button on the notice** — rejected: bounded automatic continuation owns ordinary recovery through a separate durable turn. A button would duplicate that mechanism while leaving cap exhaustion and old logs with different action semantics; manual messages remain the fallback.
 
 ## Consequences
 
-Max-tokens turn ends are visible, localized, and distinct from both errors and normal completion across live streaming, reload, and replay. The fixture renumbering cost two comment updates in dependent snapshots, and anything pinning fixture turn numbers must count from the new layout. Surfaces other than the Web chat flow (ACP and SDK consumers) keep mapping the reason through their own presentations and are unchanged.
+Max-tokens turn ends are visible, localized, and distinct from both errors and normal completion across live streaming, reload, and replay. Automatically continued turns show progress without rendering the internal prompt as a user message; capped turns without continuation metadata keep the manual hint. Surfaces other than the Web chat flow (ACP and SDK consumers) keep mapping the reason through their own presentations.

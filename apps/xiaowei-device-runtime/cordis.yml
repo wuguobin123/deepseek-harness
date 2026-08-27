@@ -1,0 +1,7 @@
+# The device carrier joins the same Cordis realm as ApiProxy so it cannot
+# observe a different or missing service instance.
+- id: device-host
+  name: '@deepseek-ai/dsh-host-api-core'
+  config:
+    port: 0
+    printUrl: true

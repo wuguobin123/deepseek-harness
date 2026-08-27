@@ -76,6 +76,36 @@ describe('WebRuntime registration', () => {
 })
 
 describe('WebRuntime execution resolution', () => {
+  it('falls back only when the configured primary reports missing credentials', async () => {
+    const { web } = await mountWeb({ searchProvider: 'primary', searchCredentialFallbackProvider: 'fallback' })
+    web.registerSearchProvider(makeSearchProvider('primary', available, async () => {
+      throw new WebError('missing key', 'WEB_PROVIDER_CREDENTIAL_MISSING')
+    }))
+    web.registerSearchProvider(makeSearchProvider('fallback', available, () => Promise.resolve(searchResult('fallback'))))
+
+    await expect(web.search({ query: 'q' })).resolves.toMatchObject({ content: 'fallback' })
+  })
+
+  it('does not fall back for another provider error', async () => {
+    const { web } = await mountWeb({ searchProvider: 'primary', searchCredentialFallbackProvider: 'fallback' })
+    const fallback = makeSearchProvider('fallback', available, () => Promise.resolve(searchResult('fallback')))
+    web.registerSearchProvider(makeSearchProvider('primary', available, async () => {
+      throw new WebError('upstream failed', 'WEB_PROVIDER_FAILURE')
+    }))
+    web.registerSearchProvider(fallback)
+
+    await expect(web.search({ query: 'q' })).rejects.toMatchObject({ code: 'WEB_PROVIDER_FAILURE' })
+  })
+
+  it('requires a distinct explicit primary provider for credential fallback', async () => {
+    await expect(mountWeb({ searchCredentialFallbackProvider: 'fallback' })).rejects.toThrow(
+      'searchCredentialFallbackProvider requires a distinct explicit searchProvider',
+    )
+    await expect(mountWeb({ searchProvider: 'same', searchCredentialFallbackProvider: 'same' })).rejects.toThrow(
+      'searchCredentialFallbackProvider requires a distinct explicit searchProvider',
+    )
+  })
+
   it('throws WEB_PROVIDER_UNAVAILABLE when nothing is registered', async () => {
     const { web } = await mountWeb()
     await expect(web.search({ query: 'q' })).rejects.toThrow(expect.objectContaining({ code: 'WEB_PROVIDER_UNAVAILABLE' }))
@@ -203,6 +233,85 @@ describe('WebRuntime fetch capability', () => {
     await expect(web.fetch({ url: 'https://example.com' })).rejects.toThrow(
       expect.objectContaining({ code: 'WEB_PROVIDER_UNAVAILABLE' }),
     )
+  })
+
+  it.each([403, 429])('uses the explicit fallback for a primary %s response', async (statusCode) => {
+    const { web } = await mountWeb({ fetchProvider: 'primary', fetchFallbackProvider: 'fallback' })
+    web.registerFetchProvider(makeFetchProvider('fallback', available, fetchResult('fallback')))
+    web.registerFetchProvider({
+      id: 'primary', available: () => available,
+      fetch: () => Promise.resolve({ ...fetchResult('primary'), statusCode }),
+    })
+
+    await expect(web.fetch({ url: 'https://example.com' })).resolves.toMatchObject({ body: { content: 'fallback' } })
+  })
+
+  it('does not fall back for a primary throw or another status', async () => {
+    const fallback = makeFetchProvider('fallback', available, fetchResult('fallback'))
+    const throwing = await mountWeb({ fetchProvider: 'primary', fetchFallbackProvider: 'fallback' })
+    throwing.web.registerFetchProvider({
+      id: 'primary', available: () => available,
+      fetch: async () => { throw new WebError('upstream failed', 'WEB_PROVIDER_FAILURE') },
+    })
+    throwing.web.registerFetchProvider(fallback)
+    await expect(throwing.web.fetch({ url: 'https://example.com' })).rejects.toMatchObject({ code: 'WEB_PROVIDER_FAILURE' })
+
+    const otherStatus = await mountWeb({ fetchProvider: 'primary', fetchFallbackProvider: 'fallback' })
+    otherStatus.web.registerFetchProvider({
+      id: 'primary', available: () => available,
+      fetch: () => Promise.resolve({ ...fetchResult('primary'), statusCode: 500 }),
+    })
+    otherStatus.web.registerFetchProvider(fallback)
+    await expect(otherStatus.web.fetch({ url: 'https://example.com' })).resolves.toMatchObject({ body: { content: 'primary' } })
+  })
+
+  it('returns the primary result when the fallback lacks credentials and exposes other fallback errors', async () => {
+    const primary = { ...fetchResult('primary'), statusCode: 403 }
+    const credential = await mountWeb({ fetchProvider: 'primary', fetchFallbackProvider: 'fallback' })
+    credential.web.registerFetchProvider(makeFetchProvider('primary', available, primary))
+    credential.web.registerFetchProvider({
+      id: 'fallback', available: () => available,
+      fetch: async () => { throw new WebError('missing key', 'WEB_PROVIDER_CREDENTIAL_MISSING') },
+    })
+    await expect(credential.web.fetch({ url: 'https://example.com' })).resolves.toMatchObject({ body: { content: 'primary' }, statusCode: 403 })
+
+    const failure = await mountWeb({ fetchProvider: 'primary', fetchFallbackProvider: 'fallback' })
+    failure.web.registerFetchProvider(makeFetchProvider('primary', available, primary))
+    failure.web.registerFetchProvider({
+      id: 'fallback', available: () => available,
+      fetch: async () => { throw new WebError('fallback failed', 'WEB_PROVIDER_FAILURE') },
+    })
+    await expect(failure.web.fetch({ url: 'https://example.com' })).rejects.toMatchObject({ code: 'WEB_PROVIDER_FAILURE' })
+  })
+
+  it('requires a distinct explicit primary provider for fetch fallback', async () => {
+    await expect(mountWeb({ fetchFallbackProvider: 'fallback' })).rejects.toThrow(
+      'fetchFallbackProvider requires a distinct explicit fetchProvider',
+    )
+    await expect(mountWeb({ fetchProvider: 'same', fetchFallbackProvider: 'same' })).rejects.toThrow(
+      'fetchFallbackProvider requires a distinct explicit fetchProvider',
+    )
+  })
+
+  it('accepts DSH_WEB_FETCH_FALLBACK_PROVIDER as the config equivalent', async () => {
+    const previousPrimary = process.env.DSH_WEB_FETCH_PROVIDER
+    const previousFallback = process.env.DSH_WEB_FETCH_FALLBACK_PROVIDER
+    process.env.DSH_WEB_FETCH_PROVIDER = 'primary'
+    process.env.DSH_WEB_FETCH_FALLBACK_PROVIDER = 'fallback'
+    try {
+      const { web } = await mountWeb()
+      web.registerFetchProvider({
+        id: 'primary', available: () => available,
+        fetch: () => Promise.resolve({ ...fetchResult('primary'), statusCode: 429 }),
+      })
+      web.registerFetchProvider(makeFetchProvider('fallback', available, fetchResult('fallback')))
+      await expect(web.fetch({ url: 'https://example.com' })).resolves.toMatchObject({ body: { content: 'fallback' } })
+    } finally {
+      if (previousPrimary === undefined) delete process.env.DSH_WEB_FETCH_PROVIDER
+      else process.env.DSH_WEB_FETCH_PROVIDER = previousPrimary
+      if (previousFallback === undefined) delete process.env.DSH_WEB_FETCH_FALLBACK_PROVIDER
+      else process.env.DSH_WEB_FETCH_FALLBACK_PROVIDER = previousFallback
+    }
   })
 })
 

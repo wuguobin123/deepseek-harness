@@ -20,6 +20,15 @@ export const zh = {
   active: '已挂载',
   failed: '挂载失败',
   unloading: '卸载中',
+  factoryIntro: '插件由系统目录提供，安装状态仅属于当前登录账号。',
+  factoryCatalog: '插件工厂',
+  systemDefault: '系统预装',
+  install: '安装',
+  uninstall: '卸载',
+  saving: '处理中…',
+  mutationError: '插件操作失败，请重试。',
+  newSessionNotice: '已保存，仅对之后新建的会话生效。',
+  version: '版本',
 } satisfies Record<string, string>
 
 /** Plugin inventory locale key union. */
@@ -45,4 +54,13 @@ export const en = {
   active: 'Mounted',
   failed: 'Mount failed',
   unloading: 'Unloading',
+  factoryIntro: 'Plugins come from the system catalog. Installation state belongs only to the signed-in account.',
+  factoryCatalog: 'Plugin factory',
+  systemDefault: 'System default',
+  install: 'Install',
+  uninstall: 'Uninstall',
+  saving: 'Saving…',
+  mutationError: 'The plugin change failed. Try again.',
+  newSessionNotice: 'Saved. The change applies only to Sessions created afterward.',
+  version: 'Version',
 } satisfies Record<PluginInventoryLocaleKey, string>

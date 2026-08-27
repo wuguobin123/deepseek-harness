@@ -75,7 +75,7 @@ function fakeResponse(): { response: ServerResponse; state: { status?: number; b
   return { response, state }
 }
 
-async function mounted(config?: { trustedHosts?: string[] }): Promise<{
+async function mounted(config?: { trustedHosts?: string[]; identity?: boolean; apiProxy?: ApiProxy }): Promise<{
   routes: WebRoute[]
   upgrades: WebUpgradeRoute[]
   dispose: () => Promise<void>
@@ -84,7 +84,12 @@ async function mounted(config?: { trustedHosts?: string[] }): Promise<{
   const routes: WebRoute[] = []
   const upgrades: WebUpgradeRoute[] = []
   ctx.provide('webServer', fakeHttpServer(routes, upgrades) as WebServer)
-  ctx.provide('apiProxy', {} as unknown as ApiProxy)
+  ctx.provide('apiProxy', config?.apiProxy ?? {} as unknown as ApiProxy)
+  if (config?.identity) {
+    ctx.provide('identity', {
+      validate: async () => ({ userId: 'u-1', displayName: null }),
+    })
+  }
   const fiber = ctx.plugin({ inject: [...inject], apply }, config)
   await fiber.await()
   return { routes, upgrades, dispose: () => fiber.dispose() }
@@ -167,18 +172,125 @@ describe('connection node half', () => {
     await dispose()
   })
 
-  it('pins privileged methods to loopback even for a declared trusted authority', async () => {
+  it('does not grant public account methods a local principal on an untrusted Host', async () => {
+    const { routes, dispose } = await mounted({ trustedHosts: ['harness.example'], identity: true })
+    const request: ClientRequest = {
+      type: 'client-request', rpcId: RpcId('rpc-public-untrusted'), method: 'account.signin',
+      payload: { email: 'a@example.com', password: 'secret' },
+    }
+    const denied = fakeResponse()
+    await routes[0]!.handler(fakePost({ host: 'attacker.example', authorization: 'Bearer valid-token' }, `${API_PATH}/account.signin`, request), denied.response)
+    expect(denied.state).toMatchObject({ status: 403, body: 'forbidden' })
+    await dispose()
+  })
+
+  it('preserves a valid account bearer on loopback and leaves anonymous loopback local', async () => {
+    const principals: unknown[] = []
+    const apiProxy = {
+      host: {
+        pickDirectory: async (request: { rpcId: RpcId; principal?: unknown }) => {
+          principals.push(request.principal)
+          return { rpcId: request.rpcId, result: { ok: true as const, value: { path: null } } }
+        },
+      },
+      accountPlugins: {
+        list: async (request: { rpcId: RpcId; principal?: unknown }) => {
+          principals.push(request.principal)
+          return { rpcId: request.rpcId, result: { ok: true as const, value: { items: [] } } }
+        },
+      },
+    } as unknown as ApiProxy
+    const { routes, dispose } = await mounted({ identity: true, apiProxy })
+    const request: ClientRequest = {
+      type: 'client-request', rpcId: RpcId('rpc-loopback-account'), method: 'account.plugins.list', payload: {},
+    }
+    for (const headers of [
+      { host: '127.0.0.1:3080', authorization: 'Bearer valid-token' },
+      { host: '127.0.0.1:3080' },
+    ]) {
+      const response = fakeResponse()
+      await routes[0]!.handler(fakePost(headers, `${API_PATH}/account.plugins.list`, request), response.response)
+      expect(response.state.status).toBe(200)
+    }
+    const nativeRequest: ClientRequest = {
+      type: 'client-request', rpcId: RpcId('rpc-loopback-native'), method: 'host.pickDirectory', payload: {},
+    }
+    const nativeResponse = fakeResponse()
+    await routes[0]!.handler(fakePost(
+      { host: '127.0.0.1:3080', authorization: 'Bearer valid-token' },
+      `${API_PATH}/host.pickDirectory`,
+      nativeRequest,
+    ), nativeResponse.response)
+    expect(nativeResponse.state.status).toBe(200)
+    expect(principals).toEqual([
+      { kind: 'account', userId: 'u-1' },
+      { kind: 'local' },
+      { kind: 'local' },
+    ])
+    await dispose()
+  })
+
+  it('allows invitation management only for an authenticated account principal', async () => {
+    const principals: unknown[] = []
+    const apiProxy = {
+      account: {
+        invites: {
+          list: async (request: { rpcId: RpcId; principal?: unknown }) => {
+            principals.push(request.principal)
+            return { rpcId: request.rpcId, result: { ok: true as const, value: { items: [] } } }
+          },
+        },
+      },
+    } as unknown as ApiProxy
+    const { routes, dispose } = await mounted({
+      trustedHosts: ['harness.example'],
+      identity: true,
+      apiProxy,
+    })
+    const request: ClientRequest = {
+      type: 'client-request',
+      rpcId: RpcId('rpc-invitation-list'),
+      method: 'account.invites.list',
+      payload: {},
+    }
+
+    const anonymousRemote = fakeResponse()
+    await routes[0]!.handler(fakePost({
+      host: 'harness.example',
+      origin: 'http://harness.example',
+      'sec-fetch-site': 'same-origin',
+    }, `${API_PATH}/account.invites.list`, request), anonymousRemote.response)
+    expect(anonymousRemote.state).toMatchObject({ status: 403, body: 'forbidden' })
+
+    const localManagement = fakeResponse()
+    await routes[0]!.handler(fakePost({ host: '127.0.0.1:3080' }, `${API_PATH}/account.invites.list`, request), localManagement.response)
+    expect(localManagement.state).toMatchObject({ status: 403, body: 'forbidden' })
+
+    const accountRemote = fakeResponse()
+    await routes[0]!.handler(fakePost({
+      host: 'harness.example',
+      origin: 'http://harness.example',
+      'sec-fetch-site': 'same-origin',
+      authorization: 'Bearer valid-token',
+    }, `${API_PATH}/account.invites.list`, request), accountRemote.response)
+    expect(accountRemote.state.status).toBe(200)
+    expect(principals).toEqual([{ kind: 'account', userId: 'u-1' }])
+    await dispose()
+  })
+
+  it('keeps configuration and native host methods loopback-only without an identity provider', async () => {
     const { routes, dispose } = await mounted({ trustedHosts: ['harness.example'] })
-    // The privileged set: native dialogs plus the whole settings/credential
-    // configuration plane, reads included, plus the one method that makes the
-    // host fetch a caller-chosen URL. The same declared authority reaches
-    // ordinary reads (carrier-level 404 from the empty proxy proves the fence
-    // passed), but each privileged method stays loopback-only and 403s.
+    // A trusted Host is only a DNS-rebinding grant. Without account identity,
+    // it cannot expose host configuration, credentials, or native operations.
     for (const method of [
       'host.pickDirectory', 'host.openPath',
       'settings.describe', 'settings.openDocument', 'settings.update', 'settings.replace', 'settings.mutate',
       'credentials.describe', 'credentials.set', 'credentials.unset',
       'llm.discoverModels',
+      'llm.providers', 'llm.models',
+      'account.wallet.credit', 'account.wallet.debit', 'account.wallet.setQuota',
+      'account.wallet.refreshDaily', 'account.wallet.grantWelcomeBonus',
+      'account.modelKeys.provision', 'account.modelKeys.revoke',
       // A composition names the plugins a session runs: reading one is
       // reconnaissance, and copy/remove/openDocument manage the roster and
       // drive the host desktop.
@@ -194,7 +306,64 @@ describe('connection node half', () => {
     }
     const read = fakeResponse()
     await routes[0]!.handler(fakeRequest({ host: 'harness.example' }), read.response)
-    expect(read.state.status).not.toBe(403)
+    expect(read.state.status).toBe(403)
+    await dispose()
+  })
+
+  it('rejects authenticated remote configuration and keeps native host actions on loopback', async () => {
+    const { routes, dispose } = await mounted({ trustedHosts: ['harness.example'], identity: true })
+    for (const method of [
+      'settings.describe', 'settings.update', 'settings.replace', 'settings.mutate',
+      'credentials.describe', 'credentials.set', 'credentials.unset',
+      'llm.discoverModels',
+      'llm.providers', 'llm.models',
+      'account.wallet.credit', 'account.wallet.debit', 'account.wallet.setQuota',
+      'account.wallet.refreshDaily', 'account.wallet.grantWelcomeBonus',
+      'account.modelKeys.provision', 'account.modelKeys.revoke',
+      'agentPreset.read', 'agentPreset.copy', 'agentPreset.remove',
+    ]) {
+      const allowed = fakeResponse()
+      await routes[0]!.handler(
+        fakeRequest({ host: 'harness.example', authorization: 'Bearer valid-token' }, `${API_PATH}/${method}`),
+        allowed.response,
+      )
+      expect([method, allowed.state.status]).toEqual([method, method.startsWith('agentPreset.') ? 404 : 403])
+    }
+    for (const method of [
+      'account.wallet.get',
+      'account.wallet.listLedger',
+      'account.modelKeys.list',
+      'account.customModels.create',
+      'account.customModels.list',
+      'account.customModels.remove',
+    ]) {
+      const allowed = fakeResponse()
+      await routes[0]!.handler(fakeRequest({ host: 'harness.example', authorization: 'Bearer valid-token' }, `${API_PATH}/${method}`), allowed.response)
+      expect([method, allowed.state.status]).toEqual([method, 404])
+    }
+    for (const method of [
+      'host.pickDirectory', 'host.openPath', 'settings.openDocument', 'agentPreset.openDocument',
+    ]) {
+      const denied = fakeResponse()
+      await routes[0]!.handler(
+        fakeRequest({ host: 'harness.example', authorization: 'Bearer valid-token' }, `${API_PATH}/${method}`),
+        denied.response,
+      )
+      expect([method, denied.state.status, denied.state.body]).toEqual([method, 403, 'forbidden'])
+    }
+    const anonymous = fakeResponse()
+    await routes[0]!.handler(
+      fakeRequest({ host: 'harness.example' }, `${API_PATH}/settings.describe`),
+      anonymous.response,
+    )
+    expect(anonymous.state).toMatchObject({ status: 403, body: 'forbidden' })
+
+    const localManagement = fakeResponse()
+    await routes[0]!.handler(
+      fakeRequest({ host: '127.0.0.1:3080' }, `${API_PATH}/account.modelKeys.provision`),
+      localManagement.response,
+    )
+    expect(localManagement.state.status).toBe(404)
     await dispose()
   })
 
@@ -209,13 +378,13 @@ describe('connection node half', () => {
     // pass markerless curl on any port.
     const lan = fakeResponse()
     await routes[0]!.handler(fakeRequest({ host: '192.168.1.5:3080' }), lan.response)
-    expect(lan.state.status).toBe(404)
+    expect(lan.state.status).toBe(403)
     // Declared public authority, same-origin browser shape.
     const declared = fakeResponse()
     await routes[0]!.handler(fakeRequest({
       host: 'harness.example:3080', origin: 'http://harness.example:3080', 'sec-fetch-site': 'same-origin',
     }), declared.response)
-    expect(declared.state.status).toBe(404)
+    expect(declared.state.status).toBe(403)
     await dispose()
   })
 
@@ -445,10 +614,16 @@ describe('connection node half over a real HTTP server', () => {
   }
 
   /** One real request; `host` spoofs the authority the way a LAN client's browser would send it. */
-  function call(port: number, method: string, host: string): Promise<number> {
+  function call(port: number, method: string, host: string, authorization?: string): Promise<number> {
     return new Promise((resolve, reject) => {
       const request = httpRequest(
-        { host: '127.0.0.1', port, path: `${API_PATH}/${method}`, method: 'GET', headers: { host } },
+        {
+          host: '127.0.0.1',
+          port,
+          path: `${API_PATH}/${method}`,
+          method: 'GET',
+          headers: { host, ...(authorization === undefined ? {} : { authorization }) },
+        },
         (response) => {
           response.resume()
           response.on('end', () => { resolve(response.statusCode ?? 0) })
@@ -489,10 +664,24 @@ describe('connection node half over a real HTTP server', () => {
       // deployment's own default already carries bash, so pinning the switch
       // would be a fence beside an open gate.
       for (const method of ['llm.providers', 'llm.models', 'agentPreset.list', 'agentPreset.select']) {
-        expect([method, await call(port, method, 'harness.example')]).toEqual([method, 404])
+        expect([method, await call(port, method, 'harness.example')]).toEqual([method, 403])
       }
       // Loopback reaches everything, configuration included.
       expect(await call(port, 'settings.describe', `127.0.0.1:${String(port)}`)).toBe(404)
+    } finally {
+      await close()
+      await dispose()
+    }
+  })
+
+  it('rejects authenticated remote configuration and native host actions over real HTTP', async () => {
+    const { routes, dispose } = await mounted({ trustedHosts: ['harness.example'], identity: true })
+    const { port, close } = await serve(routes)
+    try {
+      expect(await call(port, 'settings.describe', 'harness.example')).toBe(403)
+      expect(await call(port, 'settings.describe', 'harness.example', 'Bearer valid-token')).toBe(403)
+      expect(await call(port, 'credentials.describe', 'harness.example', 'Bearer valid-token')).toBe(403)
+      expect(await call(port, 'host.openPath', 'harness.example', 'Bearer valid-token')).toBe(403)
     } finally {
       await close()
       await dispose()

@@ -10,7 +10,7 @@ import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import * as api from '../../api'
 
-function HistoryPage(): JSX.Element {
+function HistoryPage(): React.JSX.Element {
   const navigate = useNavigate()
   const [query, setQuery] = React.useState('')
   const [hits, setHits] = React.useState<api.SessionSearchItem[]>([])
@@ -54,7 +54,6 @@ function HistoryPage(): JSX.Element {
     if (searched) return
     void onSearch()
     // load an empty-string search once on mount so the page is not empty
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (
@@ -63,11 +62,11 @@ function HistoryPage(): JSX.Element {
         <h1>历史会话</h1>
         <p className="muted">基于 dsh 搜索提供方，跨工作区查找过去的会话。</p>
       </header>
-      <form className="page-history__form" onSubmit={onSearch} data-testid="history-form">
+      <form className="page-history__form" onSubmit={(event) => { void onSearch(event) }} data-testid="history-form">
         <input
           type="search"
           value={query}
-          onChange={e => setQuery(e.target.value)}
+          onChange={(e) =>{  setQuery(e.target.value) }}
           placeholder="输入关键字，例如 'deploy' 或 'oncall'"
           disabled={loading}
           data-testid="history-query"
@@ -93,7 +92,7 @@ function HistoryPage(): JSX.Element {
               <button
                 type="button"
                 className="history-list__row"
-                onClick={() => navigate(`/assistant/${hit.sessionId}`)}
+                onClick={() =>{  navigate(`/assistant/${hit.sessionId}`) }}
                 data-testid={`history-row-${hit.sessionId}`}
               >
                 <strong>{`会话 ${hit.sessionId.slice(0, 8)}`}</strong>

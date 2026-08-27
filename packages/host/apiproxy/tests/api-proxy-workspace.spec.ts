@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, realpathSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, symlinkSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -413,6 +413,27 @@ describe('session creation and Workspace membership', () => {
 })
 
 describe('Host Workspace increments', () => {
+  it('projects only the authenticated account workspace events', async () => {
+    const { api, root } = await harness()
+    const accountRequest = <P>(payload: P): RpcRequest<P> => ({
+      rpcId: RpcId(`account-workspace-${String(nextRpc++)}`), payload,
+      principal: { kind: 'account', userId: 'account-stream' },
+    })
+    const abort = new AbortController()
+    const stream = api.events.host(accountRequest({}), abort.signal)[Symbol.asyncIterator]()
+    const first = nextHostFrame(stream)
+    const accountHost = expectOk(await api.host.describe(accountRequest({})))
+    const created = expectOk(await api.workspace.create(accountRequest({ path: accountHost.cwd })))
+    const frame = await first
+    expect(frame.payload.type).toBe('host/workspace-changed')
+    if (frame.payload.type === 'host/workspace-changed') {
+      expect(frame.payload.workspace.path).toContain('/workspaces')
+    }
+    const local = expectOk(await api.workspace.create(request({ path: stageDir(root, 'local-event-workspace') })))
+    expect(local.workspace.workspaceId).not.toBe(created.workspace.workspaceId)
+    abort.abort()
+  })
+
   it('projects subagent origin in attached summaries and creation increments', async () => {
     const { api, ctx } = await harness()
     const abort = new AbortController()
@@ -567,5 +588,144 @@ describe('Host Workspace increments', () => {
       error: { code: 'session-not-found', details: { sessionId: 'session-ghost' } },
     })
     abort.abort()
+  })
+})
+
+describe('account workspace/path isolation', () => {
+  it('imports an idempotent private copy for each account', async () => {
+    const { api } = await harness()
+    const account = <P>(payload: P, userId: string): RpcRequest<P> => ({
+      rpcId: RpcId(`account-import-${String(nextRpc++)}`),
+      payload,
+      principal: { kind: 'account', userId },
+    })
+    const payload = {
+      importId: 'desktop-copy-1',
+      title: '本机项目',
+      files: [
+        { path: 'README.md', content: Buffer.from('account A').toString('base64') },
+        { path: '子目录/数据.txt', content: Buffer.from('私有数据').toString('base64') },
+      ],
+    }
+
+    const first = expectOk(await api.workspace.importDirectory(account(payload, 'user-a')))
+    expect(first.created).toBe(true)
+    expect(first.workspace.title).toBe('本机项目（导入副本）')
+    expect(readFileSync(join(first.workspace.path, 'README.md'), 'utf8')).toBe('account A')
+    expect(readFileSync(join(first.workspace.path, '子目录', '数据.txt'), 'utf8')).toBe('私有数据')
+
+    const repeated = expectOk(await api.workspace.importDirectory(account({
+      ...payload,
+      files: [{ path: 'README.md', content: Buffer.from('must not replace').toString('base64') }],
+    }, 'user-a')))
+    expect(repeated).toMatchObject({ created: false, workspace: { workspaceId: first.workspace.workspaceId } })
+    expect(readFileSync(join(first.workspace.path, 'README.md'), 'utf8')).toBe('account A')
+
+    const other = expectOk(await api.workspace.importDirectory(account({
+      ...payload,
+      files: [{ path: 'README.md', content: Buffer.from('account B').toString('base64') }],
+    }, 'user-b')))
+    expect(other.workspace.path).not.toBe(first.workspace.path)
+    expect(readFileSync(join(other.workspace.path, 'README.md'), 'utf8')).toBe('account B')
+    expect(expectOk(await api.workspace.list(account({}, 'user-a'))).items).toHaveLength(1)
+    expect(expectOk(await api.workspace.list(account({}, 'user-b'))).items).toHaveLength(1)
+  })
+
+  it('rejects escaping content and removes a failed staging tree', async () => {
+    const { api } = await harness()
+    const account = <P>(payload: P): RpcRequest<P> => ({
+      rpcId: RpcId(`account-import-invalid-${String(nextRpc++)}`),
+      payload,
+      principal: { kind: 'account', userId: 'import-user' },
+    })
+    const encoded = Buffer.from('x').toString('base64')
+    for (const path of ['../escape.txt', '/absolute.txt', 'windows\\escape.txt']) {
+      expect((await api.workspace.importDirectory(account({ importId: `invalid-${nextRpc++}`, title: 'bad', files: [{ path, content: encoded }] }))).result)
+        .toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    }
+
+    const failed = await api.workspace.importDirectory(account({
+      importId: 'write-conflict',
+      title: 'conflict',
+      files: [
+        { path: 'entry', content: encoded },
+        { path: 'entry/child.txt', content: encoded },
+      ],
+    }))
+    expect(failed.result).toMatchObject({ ok: false, error: { code: 'internal', message: 'directory import failed' } })
+    const root = expectOk(await api.host.describe(account({}))).cwd
+    expect(readdirSync(join(root, 'imports'))).toEqual([])
+    expect(expectOk(await api.workspace.list(account({}))).items).toEqual([])
+  })
+
+  it('enforces file count, per-file bytes, total bytes, and canonical base64', async () => {
+    const { api } = await harness()
+    const account = <P>(payload: P): RpcRequest<P> => ({
+      rpcId: RpcId(`account-import-limit-${String(nextRpc++)}`),
+      payload,
+      principal: { kind: 'account', userId: 'limit-user' },
+    })
+    const small = Buffer.from('x').toString('base64')
+    const requestImport = (importId: string, files: Array<{ path: string; content: string }>) =>
+      api.workspace.importDirectory(account({ importId, title: 'limits', files }))
+
+    expect((await requestImport('too-many', Array.from({ length: 201 }, (_, index) => ({ path: `${index}.txt`, content: small })))).result)
+      .toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    expect((await requestImport('too-large-file', [{
+      path: 'large.bin',
+      content: Buffer.alloc(5 * 1024 * 1024 + 1).toString('base64'),
+    }])).result).toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    const fiveMiB = Buffer.alloc(5 * 1024 * 1024).toString('base64')
+    expect((await requestImport('too-large-total', Array.from({ length: 6 }, (_, index) => ({
+      path: `${index}.bin`, content: fiveMiB,
+    })))).result).toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    expect((await requestImport('invalid-base64', [{ path: 'bad.bin', content: 'YQ==' + '==' }])).result)
+      .toMatchObject({ ok: false, error: { code: 'bad-request' } })
+  })
+
+  it('isolates roots, workspace records, cwd creation, and host capabilities', async () => {
+    const { api } = await harness(undefined, BROWSE_STUB, { canOpenPath: () => true })
+    const accountRequest = <P>(payload: P, userId: string): RpcRequest<P> => ({
+      rpcId: RpcId(`account-path-${String(nextRpc++)}`), payload,
+      principal: { kind: 'account', userId },
+    })
+    const aDescribe = expectOk(await api.host.describe(accountRequest({}, 'user-a')))
+    const bDescribe = expectOk(await api.host.describe(accountRequest({}, 'user-b')))
+    expect(aDescribe.cwd).not.toBe(bDescribe.cwd)
+    expect(aDescribe.canOpenPath).toBe(false)
+    const aPath = stageDir(aDescribe.cwd, 'same-name')
+    const bPath = stageDir(bDescribe.cwd, 'same-name')
+    const aWorkspace = expectOk(await api.workspace.create(accountRequest({ path: aPath }, 'user-a'))).workspace
+    const bWorkspace = expectOk(await api.workspace.create(accountRequest({ path: bPath }, 'user-b'))).workspace
+    expect(expectOk(await api.workspace.list(accountRequest({}, 'user-a'))).items.map(item => item.workspaceId)).toEqual([aWorkspace.workspaceId])
+    expect(expectOk(await api.workspace.list(accountRequest({}, 'user-b'))).items.map(item => item.workspaceId)).toEqual([bWorkspace.workspaceId])
+    expect((await api.workspace.rename(accountRequest({ workspaceId: bWorkspace.workspaceId, title: 'stolen' }, 'user-a'))).result).toMatchObject({ ok: false, error: { code: 'workspace-not-found' } })
+    expect((await api.workspace.delete(accountRequest({ workspaceId: bWorkspace.workspaceId }, 'user-a'))).result).toMatchObject({ ok: false, error: { code: 'workspace-not-found' } })
+    expect((await api.sessions.create(accountRequest({ workspaceId: bWorkspace.workspaceId }, 'user-a'))).result).toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    expect((await api.sessions.create(accountRequest({ cwd: aPath }, 'user-a'))).result).toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    expect((await api.host.pickDirectory(accountRequest({}, 'user-a'), new AbortController().signal)).result).toMatchObject({ ok: false, error: { code: 'unauthenticated' } })
+    expect((await api.host.openPath(accountRequest({ path: aPath }, 'user-a'), new AbortController().signal)).result).toMatchObject({ ok: false, error: { code: 'unauthenticated' } })
+  })
+
+  it('rejects account browsing outside the private root', async () => {
+    const { api, root: hostRoot } = await harness(undefined, BROWSE_STUB)
+    const account = <P>(payload: P): RpcRequest<P> => ({ rpcId: RpcId(`account-browse-${String(nextRpc++)}`), payload, principal: { kind: 'account', userId: 'browse-user' } })
+    const other = <P>(payload: P): RpcRequest<P> => ({ rpcId: RpcId(`other-browse-${String(nextRpc++)}`), payload, principal: { kind: 'account', userId: 'other-user' } })
+    const root = expectOk(await api.host.describe(account({}))).cwd
+    const otherRoot = expectOk(await api.host.describe(other({}))).cwd
+    const outside = stageDir(hostRoot, 'account-browse-outside')
+    const escapingLink = join(root, 'escape-link')
+    symlinkSync(outside, escapingLink)
+    expect((await api.host.listDirectory(account({ path: '/' }), new AbortController().signal)).result).toMatchObject({ ok: false })
+    expect((await api.host.listDirectory(account({ path: root + '/../' }), new AbortController().signal)).result).toMatchObject({ ok: false })
+    expect((await api.host.listDirectory(account({ path: otherRoot }), new AbortController().signal)).result).toMatchObject({ ok: false })
+    const escaped = await api.host.listDirectory(
+      account({ path: escapingLink }),
+      new AbortController().signal,
+    )
+    expect(escaped.result).toMatchObject({ ok: false })
+    const listing = expectOk(await api.host.listDirectory(account({ path: root }), new AbortController().signal))
+    expect(listing.home).toBe(root)
+    expect(listing.crumbs.every(crumb => crumb.path === root || crumb.path.startsWith(`${root}/`))).toBe(true)
   })
 })

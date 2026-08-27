@@ -82,6 +82,34 @@ export interface UserMessageNode {
   source: unknown
 }
 
+/** Source metadata written by the bounded automatic max-token continuation guard. */
+export interface MaxTokenContinuationSource {
+  readonly kind: 'plugin'
+  readonly plugin: 'max-token-continuation'
+  readonly cause: 'max-tokens'
+  readonly fromTurn: number
+  readonly ordinal: number
+  readonly limit: number
+}
+
+/**
+ * Recognize a fully annotated automatic continuation source. Older logs omit
+ * these fields and intentionally fall through to the ordinary UI behavior.
+ * @param source - untrusted persisted message source.
+ * @returns whether source identifies a bounded max-token continuation.
+ */
+export function isMaxTokenContinuationSource(source: unknown): source is MaxTokenContinuationSource {
+  if (source === null || typeof source !== 'object') return false
+  const value = source as Record<string, unknown>
+  return value.kind === 'plugin'
+    && value.plugin === 'max-token-continuation'
+    && value.cause === 'max-tokens'
+    && Number.isSafeInteger(value.fromTurn) && (value.fromTurn as number) > 0
+    && Number.isSafeInteger(value.ordinal) && (value.ordinal as number) > 0
+    && Number.isSafeInteger(value.limit) && (value.limit as number) > 0
+    && (value.ordinal as number) <= (value.limit as number)
+}
+
 /** Recorded boundaries used to derive assistant latency and throughput. */
 export interface AssistantTiming {
   /** Matching step/start timestamp, or null when it is outside the current event window. */
@@ -182,6 +210,8 @@ export interface TurnMaxTokensNode {
   time: number
   turn: number
   step: number
+  /** Automatic continuation progress, when this turn has an annotated follow-up. */
+  continuation?: { readonly ordinal: number; readonly limit: number }
 }
 
 /** A tool result paired (when in-window) with its call head. */

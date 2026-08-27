@@ -22,6 +22,12 @@ import type { ClientRequest, ClientResponse, ServerResponse } from '../shared/co
 import { ClientRequestSchema, ClientResponseSchema, ServerResponseSchema } from '../shared/contracts'
 import type { Credentials } from './credential-store'
 import { openWsStream } from './sse-proxy'
+import {
+  parseAccountInferenceFrame,
+  type AccountInferenceFrame,
+  type AccountInferenceRequest,
+} from '@deepseek-ai/dsh-llm-account-inference'
+import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 
 export interface ApiClientOptions {
   baseUrl: string
@@ -110,7 +116,7 @@ export class ApiClient {
     ClientRequestSchema.parse(envelope)
     const url = `${this.baseUrl}/api/${method}`
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), this.requestTimeoutMs)
+    const timer = setTimeout(() =>{  controller.abort() }, this.requestTimeoutMs)
     let response: Response
     try {
       response = await this.fetchImpl(url, {
@@ -161,7 +167,7 @@ export class ApiClient {
     ClientResponseSchema.parse(envelope)
     const url = `${this.baseUrl}/api/respond`
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), this.requestTimeoutMs)
+    const timer = setTimeout(() =>{  controller.abort() }, this.requestTimeoutMs)
     let response: Response
     try {
       response = await this.fetchImpl(url, {
@@ -181,14 +187,104 @@ export class ApiClient {
     }
   }
 
+  /**
+   * Stream one account-billed model attempt for a device-owned Agent loop.
+   * The bearer is added here in Electron and never enters the child process.
+   */
+  async *streamAccountInference(
+    request: AccountInferenceRequest,
+    signal: AbortSignal,
+  ): AsyncIterable<StreamChunk> {
+    const method = 'account.inference.stream'
+    if (this.token === null) {
+      throw new ApiClientError(method, 'ACCOUNT_AUTH_REQUIRED', '请先登录后使用账号模型', 401)
+    }
+    let response: Response
+    try {
+      response = await this.fetchImpl(`${this.baseUrl}/api/${method}`, {
+        method: 'POST',
+        headers: this.requestHeaders(),
+        body: JSON.stringify(request),
+        signal,
+      })
+    } catch (error) {
+      if (signal.aborted) throw new ApiClientError(method, 'ABORTED', '模型请求已取消', 0, error)
+      throw new ApiClientError(method, 'CLOUD_OFFLINE', '无法连接云端模型服务', 0, error)
+    }
+    if (!response.ok) {
+      const body = await response.text()
+      const code = response.status === 401 || response.status === 403
+        ? 'ACCOUNT_AUTH_EXPIRED'
+        : `HTTP_${response.status}`
+      throw new ApiClientError(method, code, body || `HTTP ${response.status}`, response.status)
+    }
+    const mediaType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase()
+    if (mediaType !== 'application/x-ndjson' || response.body === null) {
+      throw new ApiClientError(method, 'BAD_RESPONSE', '云端模型流响应格式无效', response.status)
+    }
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let pending = ''
+    let sawFinish = false
+    let sawDone = false
+    const accept = (raw: string): AccountInferenceFrame => {
+      let value: unknown
+      try { value = JSON.parse(raw) } catch (error) {
+        throw new ApiClientError(method, 'BAD_RESPONSE', '云端模型流包含无效 JSON', response.status, error)
+      }
+      try { return parseAccountInferenceFrame(value) } catch (error) {
+        throw new ApiClientError(method, 'BAD_RESPONSE', '云端模型流帧无效', response.status, error)
+      }
+    }
+    const handle = (frame: AccountInferenceFrame): StreamChunk | undefined => {
+      if (sawDone) throw new ApiClientError(method, 'BAD_RESPONSE', '云端模型流在 done 后仍发送帧', response.status)
+      if (frame.type === 'error') throw new ApiClientError(method, frame.code, frame.message, response.status)
+      if (frame.type === 'done') {
+        if (!sawFinish) throw new ApiClientError(method, 'BAD_RESPONSE', '云端模型流在 finish 前结束', response.status)
+        sawDone = true
+        return undefined
+      }
+      if (sawFinish) throw new ApiClientError(method, 'BAD_RESPONSE', '云端模型流在 finish 后仍发送 chunk', response.status)
+      if (frame.chunk.type === 'finish') sawFinish = true
+      // The strict wire parser validated every discriminant and branded string
+      // field. Brands are process-local TypeScript identities, so restore the
+      // canonical runtime type at this single transport boundary.
+      return frame.chunk as StreamChunk
+    }
+    try {
+      while (!sawDone) {
+        const { value, done } = await reader.read()
+        if (done) break
+        pending += decoder.decode(value, { stream: true })
+        while (true) {
+          const lineEnd = pending.indexOf('\n')
+          if (lineEnd < 0) break
+          const line = pending.slice(0, lineEnd).trim()
+          pending = pending.slice(lineEnd + 1)
+          if (line.length === 0) continue
+          const chunk = handle(accept(line))
+          if (chunk !== undefined) yield chunk
+        }
+      }
+      pending += decoder.decode()
+      if (!sawDone && pending.trim().length > 0) {
+        const chunk = handle(accept(pending.trim()))
+        if (chunk !== undefined) yield chunk
+      }
+      if (!sawDone) throw new ApiClientError(method, 'BAD_RESPONSE', '云端模型流意外中断', response.status)
+    } finally {
+      await reader.cancel().catch(() => undefined)
+    }
+  }
+
   /** Open WS /api/events.mux and yield parsed ServerRequest envelopes. */
   streamMux(signal?: AbortSignal): AsyncIterable<{ rpcId: string; method: string; payload: unknown }> {
-    return openWsStream(toWebSocketUrl(`${this.baseUrl}/api/events.mux`), { signal })
+    return openWsStream(toWebSocketUrl(`${this.baseUrl}/api/events.mux`), { signal, headers: this.requestHeaders() })
   }
 
   /** Open WS /api/events.host and yield parsed ServerRequest envelopes. */
   streamHost(signal?: AbortSignal): AsyncIterable<{ rpcId: string; method: string; payload: unknown }> {
-    return openWsStream(toWebSocketUrl(`${this.baseUrl}/api/events.host`), { signal })
+    return openWsStream(toWebSocketUrl(`${this.baseUrl}/api/events.host`), { signal, headers: this.requestHeaders() })
   }
 }
 

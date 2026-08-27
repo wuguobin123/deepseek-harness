@@ -227,6 +227,27 @@ describe('open', () => {
     expect(session.getSnapshot().openError).toMatchObject({ code: 'internal', message: 'socket died' })
   })
 
+  it('retries a failed initial history pull by rebuilding the window', async () => {
+    const { api, session } = makeSession()
+    api.onHistory = () => Promise.reject(new Error('socket died'))
+    await session.open()
+
+    const page = plainTurn(10, 3, '问', '答')
+    api.onHistory = () => histResponse(page, false)
+    await session.retryOpen()
+
+    expect(api.callsOf('session.history')).toHaveLength(2)
+    expect(session.getSnapshot()).toMatchObject({ openState: 'open', openError: null })
+    expect(session.getSnapshot().nodes.map(node => node.kind)).toEqual(['user', 'assistant'])
+  })
+
+  it('does not disturb a session whose initial history is not in error', async () => {
+    const { api, session } = makeSession()
+    await session.open()
+    await session.retryOpen()
+    expect(api.callsOf('session.history')).toHaveLength(1)
+  })
+
   it('stitches live frames arriving while history is pending, dropping the page overlap', async () => {
     const { api, session } = makeSession()
     const gate = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()

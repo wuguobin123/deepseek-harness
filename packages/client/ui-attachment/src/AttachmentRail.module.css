@@ -50,6 +50,29 @@
   object-fit: cover;
 }
 
+.fileTile {
+  display: grid;
+  align-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 6px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.fileType {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.fileName {
+  overflow: hidden;
+  font-size: 10px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .remove {
   position: absolute;
   top: 4px;

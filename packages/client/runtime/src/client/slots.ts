@@ -410,8 +410,14 @@ export class SlotRegistry extends Service {
       storeOf: (entry, scopeKey) =>
         entry.store === undefined ? undefined : this.resolveStore(entry.store as unknown as EngineStoreHandle, scopeKey),
       sessions: {
-        list: sessions.list,
-        provideInfo: sessions.currentProvideInfo,
+        list: {
+          subscribe: fn => sessions.list.subscribe(fn),
+          getSnapshot: () => sessions.list.getSnapshot(),
+        },
+        provideInfo: {
+          subscribe: fn => sessions.currentProvideInfo.subscribe(fn),
+          getSnapshot: () => sessions.currentProvideInfo.getSnapshot(),
+        },
       },
       workspaces: { list: workspaces.list },
       get locale() { return service._locale },

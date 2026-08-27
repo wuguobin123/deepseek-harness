@@ -1,0 +1,13 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "lib/types" },
+  "include": ["src"],
+  "references": [
+    { "path": "../../../vendor/cordis" },
+    { "path": "../identity" },
+    { "path": "../email-verification" },
+    { "path": "../wallet" },
+    { "path": "../model-keys" },
+    { "path": "../plugin-factory" }
+  ]
+}

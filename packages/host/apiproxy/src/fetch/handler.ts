@@ -11,10 +11,11 @@ import type { z } from 'zod'
 import type { ApiProxy, MuxFrame, HostFrame } from '../api/index.ts'
 import { sessionLogQuerySchema } from '../api/downloads.schema.ts'
 import type { RequestPayload, ResponseValue, RpcMethodMap } from '../api/rpc-map.ts'
-import type { ClientRequest, RpcError, RpcRequest, RpcResponse, ServerRequest, ServerResponse } from '../api/rpc.ts'
+import type { ClientRequest, RpcError, RpcPrincipal, RpcRequest, RpcResponse, ServerRequest, ServerResponse } from '../api/rpc.ts'
 import { RpcId } from '../api/rpc.ts'
 import type { Wire } from '../api/rpc.schema.ts'
 import { clientRequestSchema, clientResponseSchema } from '../api/rpc.schema.ts'
+import { parseAccountInferenceRequest } from '@deepseek-ai/dsh-llm-account-inference'
 import {
   sessionCancelRequestSchema,
   sessionAttachmentRequestSchema,
@@ -37,6 +38,7 @@ import {
 import {
   workspaceArchiveSessionRequestSchema,
   workspaceCreateRequestSchema,
+  workspaceImportDirectoryRequestSchema,
   workspaceDeleteRequestSchema,
   workspaceInsertBeforeRequestSchema,
   workspaceInsertSessionBeforeRequestSchema,
@@ -67,6 +69,7 @@ import { llmDiscoverModelsRequestSchema, llmModelsRequestSchema, llmProvidersReq
 import {
   accountEmailCodeRequestSchema, accountSigninRequestSchema, accountSignoutRequestSchema,
   accountSignupRequestSchema, accountStateRequestSchema,
+  accountInvitesCreateRequestSchema, accountInvitesListRequestSchema, accountInvitesRotateRequestSchema,
 } from '../api/account.schema.ts'
 import {
   accountWalletCreditRequestSchema, accountWalletDebitRequestSchema, accountWalletGetRequestSchema,
@@ -76,9 +79,16 @@ import {
 import {
   accountModelKeysListRequestSchema, accountModelKeysProvisionRequestSchema, accountModelKeysRevokeRequestSchema,
 } from '../api/model-keys.schema.ts'
+import { accountCustomModelsCreateRequestSchema, accountCustomModelsListRequestSchema, accountCustomModelsRemoveRequestSchema } from '../api/custom-models.schema.ts'
 import {
   artifactListRequestSchema, artifactReadRequestSchema, artifactRemoveRequestSchema,
 } from '../api/artifacts.schema.ts'
+import {
+  userContextListRequestSchema, userContextGetRequestSchema,
+  userContextSetRequestSchema, userContextDeleteRequestSchema,
+} from '../api/user-context.schema.ts'
+import { accountPluginsListRequestSchema, accountPluginsInstallRequestSchema, accountPluginsUninstallRequestSchema } from '../api/account-plugins.schema.ts'
+import { assertCloudRoutePartition } from '../route-partition.ts'
 import {
   subagentHistoryRequestSchema,
   subagentInterruptRequestSchema,
@@ -126,6 +136,7 @@ const UNARY_ROUTES: UnaryRoutes = {
   'host.openPath': { schema: hostOpenPathRequestSchema, invoke: (api, r, signal) => api.host.openPath(r, signal) },
   'workspace.list': { schema: workspaceListRequestSchema, invoke: (api, r) => api.workspace.list(r) },
   'workspace.create': { schema: workspaceCreateRequestSchema, invoke: (api, r) => api.workspace.create(r) },
+  'workspace.importDirectory': { schema: workspaceImportDirectoryRequestSchema, invoke: (api, r) => api.workspace.importDirectory(r) },
   'workspace.rename': { schema: workspaceRenameRequestSchema, invoke: (api, r) => api.workspace.rename(r) },
   'workspace.delete': { schema: workspaceDeleteRequestSchema, invoke: (api, r) => api.workspace.delete(r) },
   'workspace.insertBefore': { schema: workspaceInsertBeforeRequestSchema, invoke: (api, r) => api.workspace.insertBefore(r) },
@@ -155,9 +166,12 @@ const UNARY_ROUTES: UnaryRoutes = {
   'llm.providers': { schema: llmProvidersRequestSchema, invoke: (api, r) => api.llm.providers(r) },
   'llm.models': { schema: llmModelsRequestSchema, invoke: (api, r) => api.llm.models(r) },
   'llm.discoverModels': { schema: llmDiscoverModelsRequestSchema, invoke: (api, r, signal) => api.llm.discoverModels(r, signal) },
-  // ---- workbuddy multi-user account seam ----
+  // ---- xiaowei multi-user account seam ----
   'account.signup': { schema: accountSignupRequestSchema, invoke: (api, r) => api.account.signup(r) },
   'account.emailCode': { schema: accountEmailCodeRequestSchema, invoke: (api, r) => api.account.emailCode(r) },
+  'account.invites.create': { schema: accountInvitesCreateRequestSchema, invoke: (api, r) => api.account.invites.create(r) },
+  'account.invites.list': { schema: accountInvitesListRequestSchema, invoke: (api, r) => api.account.invites.list(r) },
+  'account.invites.rotate': { schema: accountInvitesRotateRequestSchema, invoke: (api, r) => api.account.invites.rotate(r) },
   'account.signin': { schema: accountSigninRequestSchema, invoke: (api, r) => api.account.signin(r) },
   'account.signout': { schema: accountSignoutRequestSchema, invoke: (api, r) => api.account.signout(r) },
   'account.state': { schema: accountStateRequestSchema, invoke: (api, r) => api.account.state(r) },
@@ -171,9 +185,43 @@ const UNARY_ROUTES: UnaryRoutes = {
   'account.modelKeys.provision': { schema: accountModelKeysProvisionRequestSchema, invoke: (api, r) => api.modelKeys.provision(r) },
   'account.modelKeys.list': { schema: accountModelKeysListRequestSchema, invoke: (api, r) => api.modelKeys.list(r) },
   'account.modelKeys.revoke': { schema: accountModelKeysRevokeRequestSchema, invoke: (api, r) => api.modelKeys.revoke(r) },
+  'account.customModels.create': {
+    schema: accountCustomModelsCreateRequestSchema,
+    invoke: (api, r) => api.customModels.create(r),
+  },
+  'account.customModels.list': {
+    schema: accountCustomModelsListRequestSchema,
+    invoke: (api, r) => api.customModels.list(r),
+  },
+  'account.customModels.remove': {
+    schema: accountCustomModelsRemoveRequestSchema,
+    invoke: (api, r) => api.customModels.remove(r),
+  },
   'artifact.list': { schema: artifactListRequestSchema, invoke: (api, r) => api.artifactRegistry.list(r) },
   'artifact.read': { schema: artifactReadRequestSchema, invoke: (api, r) => api.artifactRegistry.read(r) },
   'artifact.remove': { schema: artifactRemoveRequestSchema, invoke: (api, r) => api.artifactRegistry.remove(r) },
+  'userContext.list': { schema: userContextListRequestSchema, invoke: (api, r) => api.userContext.list(r) },
+  'userContext.get': { schema: userContextGetRequestSchema, invoke: (api, r) => api.userContext.get(r) },
+  'userContext.set': { schema: userContextSetRequestSchema, invoke: (api, r) => api.userContext.set(r) },
+  'userContext.delete': { schema: userContextDeleteRequestSchema, invoke: (api, r) => api.userContext.delete(r) },
+  'account.plugins.list': { schema: accountPluginsListRequestSchema, invoke: (api, r) => api.accountPlugins.list(r) },
+  'account.plugins.install': { schema: accountPluginsInstallRequestSchema, invoke: (api, r) => api.accountPlugins.install(r) },
+  'account.plugins.uninstall': { schema: accountPluginsUninstallRequestSchema, invoke: (api, r) => api.accountPlugins.uninstall(r) },
+}
+
+/**
+ * Runtime companion to the compiler-locked `UnaryRoutes` table. The caller
+ * supplies the device-core ownership list; this checks that cloud routes are
+ * exactly core plus account routes before serving traffic.
+ * @param coreMethods - method names owned by the device-safe core.
+ */
+export function assertApiProxyRoutePartition(coreMethods: Iterable<string>): Promise<void> {
+  return assertCloudRoutePartition(coreMethods, Object.keys(UNARY_ROUTES))
+}
+
+/** Return the concrete route keys emitted by the compiler-locked dispatch table. */
+export function apiProxyRpcMethods(): readonly string[] {
+  return Object.keys(UNARY_ROUTES)
 }
 
 /** Route lookup that narrows an arbitrary path segment to a map key (single cast point for the string→key refinement). */
@@ -209,15 +257,23 @@ function fullResponse(narrow: RpcResponse<unknown>): Response {
 // K appears once in the signature but ties the UNARY_ROUTES[K] row lookup to its own
 // schema/invoke pairing; a union parameter degrades the row to an uninvokable intersection.
 async function handleUnary<K extends keyof RpcMethodMap>(
-  api: ApiProxy, method: K, message: ClientRequest, signal: AbortSignal,
+  api: ApiProxy,
+  method: K,
+  route: UnaryRoutes[K],
+  message: ClientRequest,
+  signal: AbortSignal,
+  principal?: RpcPrincipal,
 ): Promise<Response> {
-  const route = UNARY_ROUTES[method]
   const payload = route.schema.safeParse(message.payload)
   if (!payload.success) {
     return errorResponse(message.rpcId, { code: 'bad-request', message: `invalid payload for ${method}`, details: { issues: payload.error.issues } })
   }
   try {
-    return fullResponse(await route.invoke(api, { rpcId: message.rpcId, payload: payload.data }, signal))
+    return fullResponse(await route.invoke(api, {
+      rpcId: message.rpcId,
+      payload: payload.data,
+      ...(principal === undefined ? {} : { principal }),
+    }, signal))
   } catch (error: unknown) {
     // The impl never throws business errors; reaching here means the implementation itself crashed — 500, carrier layer.
     return new Response(`handler failure: ${String(error)}`, { status: 500 })
@@ -268,12 +324,33 @@ function sseResponse(frames: AsyncIterable<RpcRequest<MuxFrame | HostFrame>>): R
   })
 }
 
+/** Encode the direct account inference stream as newline-delimited JSON. */
+function accountInferenceResponse(api: ApiProxy, body: unknown, principal: RpcPrincipal | undefined, signal: AbortSignal): Response {
+  if (principal?.kind !== 'account') return new Response('forbidden', { status: 403 })
+  let parsed: ReturnType<typeof parseAccountInferenceRequest>
+  try { parsed = parseAccountInferenceRequest(body) } catch { return new Response('invalid account inference request', { status: 400 }) }
+  const encoder = new TextEncoder()
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        for await (const frame of api.accountInference.stream({ rpcId: RpcId(randomUUID()), payload: parsed, principal }, signal)) {
+          controller.enqueue(encoder.encode(`${JSON.stringify(frame)}\n`))
+        }
+      } finally {
+        try { controller.close() } catch { /* request cancellation already closed the stream */ }
+      }
+    },
+  })
+  return new Response(stream, { headers: { 'content-type': 'application/x-ndjson', 'cache-control': 'no-cache' } })
+}
+
 /**
  * Wraps an ApiProxy into a pure fetch function (isomorphic point: feed the returned fetch straight to InProcessApiClient).
  * @param api - the host-side ApiProxy implementation.
+ * @param principal - identity established by the outer HTTP or in-process carrier.
  * @returns an object holding `fetch(Request)`; paths outside /api/ return 404.
  */
-export function toFetchHandler(api: ApiProxy): { fetch: typeof fetch } {
+export function toFetchHandler(api: ApiProxy, principal: RpcPrincipal = { kind: 'local' }): { fetch: typeof fetch } {
   return {
     // Signature matches global fetch: the isomorphic point hands this function to InProcessApiClient as its transport aspect,
     // Clients call in (url, init) form — normalize to Request before handling.
@@ -285,10 +362,10 @@ export function toFetchHandler(api: ApiProxy): { fetch: typeof fetch } {
       // No-envelope read channels (SSE GET streams + host-only download):
       // physical routes that answer directly, without a wire envelope.
       if (path === '/api/events.mux' && req.method === 'GET') {
-        return sseResponse(api.events.mux({ rpcId: RpcId(randomUUID()), payload: {} }, req.signal))
+        return sseResponse(api.events.mux({ rpcId: RpcId(randomUUID()), payload: {}, principal }, req.signal))
       }
       if (path === '/api/events.host' && req.method === 'GET') {
-        return sseResponse(api.events.host({ rpcId: RpcId(randomUUID()), payload: {} }, req.signal))
+        return sseResponse(api.events.host({ rpcId: RpcId(randomUUID()), payload: {}, principal }, req.signal))
       }
       if (path === '/api/session.export' && (req.method === 'GET' || req.method === 'HEAD')) {
         // Query params are a different boundary from the POST envelope, but
@@ -297,7 +374,7 @@ export function toFetchHandler(api: ApiProxy): { fetch: typeof fetch } {
         if (!parsed.success) {
           return new Response('missing or invalid sessionId query parameter', { status: 400 })
         }
-        const response = await api.downloads.sessionLog(parsed.data, req.signal)
+        const response = await api.downloads.sessionLog(parsed.data, req.signal, principal)
         if (req.method === 'GET') return response
         await response.body?.cancel()
         return new Response(null, { status: response.status, headers: response.headers })
@@ -305,6 +382,14 @@ export function toFetchHandler(api: ApiProxy): { fetch: typeof fetch } {
 
       if (req.method !== 'POST' || !path.startsWith('/api/')) {
         return new Response('not found', { status: 404 })
+      }
+
+      if (path === '/api/account.inference.stream') {
+        const mediaType = req.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase()
+        if (mediaType !== 'application/json') return new Response('content type must be application/json', { status: 415 })
+        let body: unknown
+        try { body = await req.json() } catch { return new Response('body is not JSON', { status: 400 }) }
+        return accountInferenceResponse(api, body, principal, req.signal)
       }
 
       // Cross-site write fence: browsers send "simple" POSTs (text/plain,
@@ -329,7 +414,7 @@ export function toFetchHandler(api: ApiProxy): { fetch: typeof fetch } {
       if (path === '/api/respond') {
         const parsed = clientResponseSchema.safeParse(body)
         if (!parsed.success) return Response.json({ accepted: false, reason: 'bad-response' })
-        return Response.json(await api.respond(parsed.data))
+        return Response.json(await api.respond(parsed.data, principal))
       }
 
       const method = methodFor(path.slice('/api/'.length))
@@ -347,7 +432,7 @@ export function toFetchHandler(api: ApiProxy): { fetch: typeof fetch } {
       if (message.method !== method) {
         return errorResponse(message.rpcId, { code: 'bad-request', message: `method "${message.method}" does not match path "${method}"`, details: { issues: [] } })
       }
-      return handleUnary(api, method, message, req.signal)
+      return handleUnary(api, method, UNARY_ROUTES[method], message, req.signal, principal)
     },
   }
 }

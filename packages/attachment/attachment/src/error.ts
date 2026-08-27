@@ -24,6 +24,7 @@ export type AttachmentErrorCode =
   | 'ATTACHMENT_NOT_FOUND'
   | 'ATTACHMENT_READ_FAILED'
   | 'ATTACHMENT_PROJECTION_UNSUPPORTED'
+  | 'DOCUMENT_TOO_LARGE' | 'DOCUMENT_INVALID' | 'DOCUMENT_UNSUPPORTED' | 'DOCUMENT_ENCRYPTED'
 
 /** Runtime membership for structurally compatible errors crossing package boundaries. */
 const IMAGE_ADMISSION_ERROR_CODE_SET: ReadonlySet<string> = new Set(IMAGE_ADMISSION_ERROR_CODES)

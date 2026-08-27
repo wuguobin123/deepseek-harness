@@ -8,10 +8,10 @@ export const NS = 'reference'
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
   'section.files': '文件与文件夹',
-  'section.sessions': 'Session 对话',
+  'section.sessions': '会话对话',
   'candidate.file': '文件',
   'candidate.folder': '文件夹',
-  'candidate.session': 'Session',
+  'candidate.session': '会话',
   'candidate.noCwd': '（无工作目录）',
 } satisfies Record<string, string>
 

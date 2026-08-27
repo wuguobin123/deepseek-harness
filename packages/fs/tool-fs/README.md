@@ -26,6 +26,7 @@ All keys are optional; the defaults are the shipped read caps.
 | `readMaxLineLength` | `2000` | Characters kept per line before truncation (the suffix names the cap). |
 | `readMaxBytes` | `51200` | Byte cap on one `read` call's selected lines; overflow ends the window with a "capped" footer. |
 | `readStreamMinSize` | `10485760` | Files at or above this size (or with unknown size) stream instead of loading whole into memory. |
+| `workspaceOnly` | `false` | When true, every model-selected path is canonicalized and must remain below the calling session cwd. Calls without an agent workspace and symlink or absolute-path escapes fail with `FS_SANDBOX_DENIED`. Multi-user presets should enable this. |
 
 ## Tools (schemas per [the filesystem tool schemas Agent Note](../../../.agents/notes/implemented/feature/2026-06-17-filesystem-tool-schemas.md))
 

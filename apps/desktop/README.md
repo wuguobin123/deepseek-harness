@@ -1,4 +1,6 @@
-# DeepSeek Harness — Desktop Client
+# 小薇 — Desktop Client
+
+English | [中文](README.zh.md)
 
 Electron desktop client for the dsh-ops deployment. The client speaks the same
 RPC envelope as the dsh web frontend (`@deepseek-ai/dsh-host-apiproxy`), so the
@@ -15,6 +17,23 @@ two surfaces stay interchangeable against the same backend.
 - Strict TypeScript everywhere, React + Zustand in renderer, Vitest for unit
   tests.
 
+## Product branding
+
+The desktop assembly owns the Xiaowei product identity. Its renderer plugin
+fills the shared sidebar and conversation brand slots with the Xiaowei mark,
+and the packaged application, browser, and native window titles use `小薇`.
+Electron Builder converts `features/brand/xiaowei-logo.png` into the native
+macOS, Windows, and Linux application and installer icons. Generic DSH clients
+retain their own build-selected branding.
+
+## Execution environments
+
+A fresh installation defaults to **Local**. The main process supervises one `xiaowei-local` Host on an operating-system-assigned `127.0.0.1` port. Adding a Workspace in this environment passes only the canonical selected path to that loopback Host's `workspace.create`; it does not enumerate, encode, upload, or duplicate the directory, so cloud-copy file-size limits do not apply. External changes and Agent edits address the same source directory.
+
+**Cloud** is an explicit alternative. Adding a Workspace there retains the bounded `workspace.importDirectory` flow and creates an independent account-private copy; later local changes do not synchronize automatically. Sessions, Workspace ids, event streams, and artifact reads stay with the environment that created them. Switching environments aborts the old streams and reloads the renderer against the selected Host.
+
+The local Host stores its model configuration, credentials, Sessions, metadata, and installed Skills below Electron application data. An approved conversational Skill installation writes only to that local Skill root. The directory is not uploaded as a cloud Workspace, but content intentionally included in a model request still reaches the locally configured model provider. Local mode does not silently use the cloud account wallet.
+
 ## Layout
 
 ```
@@ -30,10 +49,10 @@ apps/desktop/
     ├── main/                 # Electron main process
     │   ├── index.ts          # App lifecycle + secure BrowserWindow
     │   ├── api-client.ts     # RPC client over POST /api/<method>
-    │   ├── sse-proxy.ts      # Main-process SSE → typed IPC fan-out
-    │   ├── credential-store.ts # baseUrl persistence (safeStorage)
+    │   ├── sse-proxy.ts      # WebSocket downlink + heartbeat → typed IPC fan-out
+    │   ├── credential-store.ts # connection preferences + encrypted account session
     │   ├── ipc-handlers.ts   # Typed ipcMain handlers
-    │   └── update-checker.ts # Stub: always up-to-date
+    │   └── update-checker.ts # Same-origin release-manifest polling
     ├── preload/index.ts      # contextBridge.exposeInMainWorld('workbenchApi')
     └── renderer/             # React + HashRouter
         ├── main.tsx
@@ -56,14 +75,16 @@ window.workbenchApi.request(method, payload)            // POST /api/<method>
 window.workbenchApi.subscribeMux(listener)              // SSE → MuxFrame
 window.workbenchApi.subscribeHost(listener)             // SSE → HostFrame
 window.workbenchApi.respond(rpcId, value, error?)       // POST /api/respond
-window.workbenchApi.getSession()                        // { baseUrl, version }
-window.workbenchApi.updateSession({ baseUrl })
-window.workbenchApi.checkAppUpdate()                    // stub
-window.workbenchApi.openAppUpdateDownload(url)          // shell.openExternal
+window.workbenchApi.getSession()                        // { baseUrl, environment, version }
+window.workbenchApi.updateSession({ baseUrl, environment })
+window.workbenchApi.checkAppUpdate()                    // GET /releases/latest.json
+window.workbenchApi.openAppUpdateDownload()             // validated shell.openExternal
 ```
 
 Nothing else is exposed: `ipcRenderer`, `require`, `process` are not on the
 bridge.
+
+The main process sends protocol ping frames on both downlinks. A missing pong terminates that connection generation; the shared connection controller then reopens mux and host together and repulls every open session. Application-event silence alone never marks a healthy workspace as disconnected.
 
 ## Pages
 
@@ -75,6 +96,8 @@ bridge.
 | `/approvals` | Approvals — pending `approval/requested` + decide |
 | `/history` | History — `session.search` results |
 | `/settings` | Settings — `baseUrl` field + `host.describe` probe |
+
+After sign-in, the sidebar footer shows the current user, MiniMax allowance, and a right-aligned client-update icon. The user body opens Settings → Account, while the update icon remains an independent action. Sign-out is available only from the Account section. Registration grants the configured one-time 20 CNY allowance through `account.wallet.grantWelcomeBonus`.
 
 ## Install / build / test
 
@@ -100,15 +123,18 @@ WORKBENCH_API_BASE_URL=https://assistant.example.com pnpm run package:mac
 - Windows `.exe` (NSIS) — `pnpm run package:win`
 
 The preload is bundled into a single CommonJS file before packaging because
-Electron's sandboxed preload cannot load arbitrary local modules. Local artifacts
-are ad-hoc signed; a public release still needs an Apple Developer ID
-certificate and notarization. The DMG is `DeepSeek Harness-<version>-arm64.dmg`.
+Electron's sandboxed preload cannot load arbitrary local modules. Packaging also
+deploys a self-contained `local-runtime` resource used by the supervised Local
+Host; its Sessions, settings, credentials, and installed Skills remain under
+Electron application data. Local artifacts are ad-hoc signed; a public release
+still needs an Apple Developer ID certificate and notarization. The DMG is
+`小薇-<version>-arm64.dmg`.
 
 On Apple Silicon, an unsigned DMG triggers Gatekeeper quarantine. For internal
 deploys:
 
 ```sh
-xattr -dr com.apple.quarantine "/Applications/DeepSeek Harness.app"
+xattr -dr com.apple.quarantine "/Applications/小薇.app"
 ```
 
 ## Backend contract
@@ -136,12 +162,14 @@ runtime on the Settings page.
 ## Tests
 
 ```bash
-pnpm run test           # Vitest unit tests (preload contract, update-checker stub)
+pnpm run test           # Vitest unit tests (preload, account footer, updater)
 ```
 
 ## Product deployment boundary
 
-The DMG contains the desktop client. The dsh-ops backend on the deployment host
-holds every model key, connector, workflow, and audit log. Configure
-`WORKBENCH_API_BASE_URL` to the deployment's HTTPS URL before packaging. See
-[`docs/ops/acceptance-report.md`](../../docs/ops/acceptance-report.md).
+The DMG contains both the desktop client and its Local Host runtime. Local mode
+keeps its model configuration, credentials, Sessions, metadata, and installed
+Skills in Electron application data. Cloud mode uses the dsh-ops backend for
+account-owned model access, connectors, workflows, and audit data. Configure
+`WORKBENCH_API_BASE_URL` to the cloud deployment's HTTPS URL before packaging.
+See [`docs/ops/acceptance-report.md`](../../docs/ops/acceptance-report.md).

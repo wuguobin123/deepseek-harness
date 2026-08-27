@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-26-xiaowei-local-directory-import.md
+2026-08-26-xiaowei-local-directory-import.md: b54107e869b856cbdde73b29eaff75b8840dbf22
+2026-08-26-xiaowei-local-directory-import.zh.md: bf0f31e8007f5c689bc7a36485350217a7bb5490

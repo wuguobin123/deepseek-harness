@@ -8,7 +8,7 @@
 //   3. SignInCard has the testid hooks for email / password / code input
 //   4. (best effort, when a backend is reachable) requestEmailCode fires
 //
-// The workbuddy backend is NOT a precondition — the renderer can boot
+// The xiaowei backend is NOT a precondition — the renderer can boot
 // and render the gate without it; only step 4 needs the host. When the
 // backend is unreachable, step 4 is logged as `skipped`, not a failure.
 //

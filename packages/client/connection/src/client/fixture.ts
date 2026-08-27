@@ -34,7 +34,7 @@ import { deriveEventMessage, foldSurface } from '@deepseek-ai/dsh-session/surfac
 import type {
   ApiProxy, ClientRequest, ClientResponse, HistoryEntry, HostFrame, MuxFrame, RpcReceipt,
   ModelProviderGroup, ModelSelection, RpcRequest, RpcResponse, RpcResult, ServerRequest, ServerResponse, SessionSummary,
-  ToolCallView, ToolEventView, ToolResultView, WorkspaceId, WorkspaceView,
+  ToolCallView, ToolEventView, ToolResultView, WorkspaceId, WorkspaceView, CustomModelView,
 } from './api.ts'
 import type { RequestPayload, ResponseValue, RpcMethodMap } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { AbstractApiClient, RpcId, SESSION_SEARCH_RESULT_LIMIT } from './api.ts'
@@ -1544,6 +1544,29 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     // DeepSeek route so unrelated GUI journeys do not enter first-run setup.
     ['DEEPSEEK_API_KEY', true],
   ])
+  /** Account-owned models for the explicit remote fixture branch. */
+  const fixtureCustomModels: CustomModelView[] = []
+  /** Masked invitation rows for the signed-in fixture account. */
+  const fixtureInvitations: Array<{
+    invitationId: string
+    code: string | null
+    codeMask: string
+    createdAt: number
+    expiresAt: number
+    consumedAt: number | null
+    redeemedBy: string | null
+  }> = []
+  /** Shared catalog plus installation state for the fixture's signed-in account. */
+  const fixtureAccountPlugins: ResponseValue<'account.plugins.list'>['items'] = [
+    {
+      pluginId: 'core-tools', title: 'Core tools', description: 'Built in',
+      version: '1', systemDefault: true, installed: true,
+    },
+    {
+      pluginId: 'editor', title: 'Editor', description: 'Optional editor tools',
+      version: '1', systemDefault: false, installed: false,
+    },
+  ]
   /**
    * Preset compositions the fixture serves. Held as state rather than
    * constants so the settings editor's save and delete are exercisable: the
@@ -2508,6 +2531,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         const userText = content.map(b => (b.type === 'text' ? b.text : '')).join('')
         const durable: ContentBlock[] = content.map((block) => {
           if (block.type === 'text') return block
+          if (block.type === 'file') return { type: 'text', text: `[uploaded-file name=${block.name ?? '(unnamed)'} kind=${block.kind}]` }
           const attachment: ImageAttachmentRef = {
             attachmentId: `fixture:${randomUuid()}` as AttachmentIdType,
             mediaType: block.mediaType,
@@ -2662,6 +2686,22 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         items: workspaces.map(w => ({ ...w })),
         archivedSessionIds: [...archivedSessionIds],
       }),
+      importDirectory: (request) => {
+        const existing = workspaces.find(workspace => workspace.path === `/imports/${request.payload.importId}`)
+        if (existing !== undefined) return ok(request, { workspace: { ...existing }, created: false })
+        const now = new Date().toISOString()
+        const created: WorkspaceView = {
+          workspaceId: wid(`fx-ws-${nextWorkspace++}`),
+          path: `/imports/${request.payload.importId}`,
+          title: `${request.payload.title.trim()}（导入副本）`,
+          sessionIds: [],
+          createdAt: now,
+          updatedAt: now,
+        }
+        workspaces.unshift(created)
+        emitHost({ type: 'host/workspace-changed', workspace: { ...created } })
+        return ok(request, { workspace: { ...created }, created: true })
+      },
       create: (request) => {
         const { path } = request.payload
         const existing = workspaces.find(w => w.path === path)
@@ -3056,7 +3096,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         models: fixtureModelGroups().flatMap(group => group.models.map(model => ({ id: model.id, name: model.name }))),
       }),
     },
-    // workbuddy multi-user account seam — fixture surfaces a synthetic
+    // xiaowei multi-user account seam — fixture surfaces a synthetic
     // signed-in view so auth-aware UI can exercise flows without a backend.
     account: {
       signup: request => ok(request, {
@@ -3066,6 +3106,46 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         expiresAt: Date.now() + 86_400_000,
       }),
       emailCode: request => ok(request, { expiresInSeconds: 600, retryAfterSeconds: 0 }),
+      invites: {
+        create: (request) => {
+          const sequence = fixtureInvitations.length + 1
+          const code = `fixture-invitation-${String(sequence)}`
+          const createdAt = Date.now()
+          const value: ResponseValue<'account.invites.create'> = {
+            invitationId: `fx-invitation-${String(sequence)}`,
+            code,
+            codeMask: `••••${String(sequence).padStart(4, '0')}`,
+            createdAt,
+            expiresAt: createdAt + 7 * 86_400_000,
+            consumedAt: null,
+            redeemedBy: null,
+          }
+          fixtureInvitations.push(value)
+          return ok(request, value)
+        },
+        list: request => ok(request, {
+          items: fixtureInvitations.map(({
+            invitationId, code, codeMask, createdAt, expiresAt, consumedAt, redeemedBy,
+          }) => ({ invitationId, code, codeMask, createdAt, expiresAt, consumedAt, redeemedBy })),
+        }),
+        rotate: (request: RpcRequest<{ invitationId: string }>) => {
+          const item = fixtureInvitations.find(value => value.invitationId === request.payload.invitationId)
+          const code = `fixture-regenerated-${request.payload.invitationId}`
+          if (item === undefined) {
+            return ok(request, {
+              invitationId: request.payload.invitationId,
+              code,
+              codeMask: `••••${code.slice(-4)}`,
+              createdAt: Date.now(),
+              expiresAt: Date.now() + 7 * 86_400_000,
+              consumedAt: null,
+              redeemedBy: null,
+            })
+          }
+          item.code = code
+          return ok(request, { ...item, code })
+        },
+      },
       signin: request => ok(request, {
         userId: 'fx-user',
         displayName: null,
@@ -3078,6 +3158,43 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         displayName: null,
         expiresAt: Date.now() + 86_400_000,
       }),
+    },
+    customModels: {
+      create: (request) => {
+        const value: CustomModelView = {
+          customModelId: `cm_${String(fixtureCustomModels.length + 1).padStart(16, '0')}`,
+          label: request.payload.label,
+          api: request.payload.api,
+          baseURL: request.payload.baseURL,
+          upstreamModel: request.payload.upstreamModel,
+          created: Date.now(),
+          revoked: null,
+        }
+        fixtureCustomModels.unshift(value)
+        return ok(request, value)
+      },
+      list: request => ok(request, { items: [...fixtureCustomModels] }),
+      remove: (request) => {
+        const index = fixtureCustomModels.findIndex(item => item.customModelId === request.payload.customModelId)
+        if (index < 0) return ok(request, { removed: false })
+        fixtureCustomModels.splice(index, 1)
+        return ok(request, { removed: true })
+      },
+    },
+    accountPlugins: {
+      list: request => ok(request, { items: fixtureAccountPlugins.map(item => ({ ...item })) }),
+      install: (request) => {
+        const plugin = fixtureAccountPlugins.find(item => item.pluginId === request.payload.pluginId)
+        if (plugin === undefined) return Promise.reject(new Error(`unknown fixture plugin ${request.payload.pluginId}`))
+        plugin.installed = true
+        return ok(request, { ...plugin })
+      },
+      uninstall: (request) => {
+        const plugin = fixtureAccountPlugins.find(item => item.pluginId === request.payload.pluginId)
+        if (plugin === undefined) return Promise.reject(new Error(`unknown fixture plugin ${request.payload.pluginId}`))
+        plugin.installed = plugin.systemDefault
+        return ok(request, { ...plugin })
+      },
     },
     wallet: {
       get: request => ok(request, { userId: 'fx-user', balanceMicros: 0, updatedAt: Date.now() }),
@@ -3114,6 +3231,21 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       }),
       remove: request => ok(request, { removed: true }),
     },
+    userContext: {
+      list: request => ok(request, { items: [] }),
+      get: request => ok(request, { missing: true }),
+      set: request => ok(request, {
+        entry: {
+          kind: request.payload.kind,
+          key: request.payload.key,
+          workspaceId: request.payload.workspaceId ?? null,
+          value: request.payload.value,
+          updatedAt: Date.now(),
+          createdAt: Date.now(),
+        },
+      }),
+      delete: request => ok(request, { removed: false }),
+    },
     respond(message: ClientResponse): Promise<RpcReceipt> {
       // Same routing discipline as the host: rpcId first, then the payload's
       // audit correlation; a settled or unknown id is not-pending.
@@ -3142,6 +3274,12 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     // Satisfies the ApiProxy contract type only: the browser export button
     // hands GET /api/session.export to the native download manager, so this
     // stub is never reached through the fixture's dispatch.
+    accountInference: {
+      async *stream() {
+        yield { version: 1, type: 'chunk', chunk: { type: 'finish', reason: { kind: 'stop' } } }
+        yield { version: 1, type: 'done' }
+      },
+    },
     downloads: {
       sessionLog: () => Promise.resolve(new Response('fixture mode does not serve session export', { status: 404 })),
     },
@@ -3255,6 +3393,7 @@ export class FixtureApiClient extends AbstractApiClient {
       case 'host.createDirectory': return this.api.host.createDirectory(request)
       case 'host.openPath': return this.api.host.openPath(request, new AbortController().signal)
       case 'workspace.list': return this.api.workspace.list(request)
+      case 'workspace.importDirectory': return this.api.workspace.importDirectory(request)
       case 'workspace.create': return this.api.workspace.create(request)
       case 'workspace.rename': return this.api.workspace.rename(request)
       case 'workspace.delete': return this.api.workspace.delete(request)
@@ -3287,9 +3426,18 @@ export class FixtureApiClient extends AbstractApiClient {
       case 'llm.discoverModels': return this.api.llm.discoverModels(request, signal)
       case 'account.signup': return this.api.account.signup(request)
       case 'account.emailCode': return this.api.account.emailCode(request)
+      case 'account.invites.create': return this.api.account.invites.create(request)
+      case 'account.invites.list': return this.api.account.invites.list(request)
+      case 'account.invites.rotate': return this.api.account.invites.rotate(request)
       case 'account.signin': return this.api.account.signin(request)
       case 'account.signout': return this.api.account.signout(request)
       case 'account.state': return this.api.account.state(request)
+      case 'account.customModels.create': return this.api.customModels.create(request)
+      case 'account.customModels.list': return this.api.customModels.list(request)
+      case 'account.customModels.remove': return this.api.customModels.remove(request)
+      case 'account.plugins.list': return this.api.accountPlugins.list(request)
+      case 'account.plugins.install': return this.api.accountPlugins.install(request)
+      case 'account.plugins.uninstall': return this.api.accountPlugins.uninstall(request)
       case 'account.wallet.get': return this.api.wallet.get(request)
       case 'account.wallet.credit': return this.api.wallet.credit(request)
       case 'account.wallet.debit': return this.api.wallet.debit(request)
@@ -3303,6 +3451,10 @@ export class FixtureApiClient extends AbstractApiClient {
       case 'artifact.list': return this.api.artifactRegistry.list(request)
       case 'artifact.read': return this.api.artifactRegistry.read(request)
       case 'artifact.remove': return this.api.artifactRegistry.remove(request)
+      case 'userContext.list': return this.api.userContext.list(request)
+      case 'userContext.get': return this.api.userContext.get(request)
+      case 'userContext.set': return this.api.userContext.set(request)
+      case 'userContext.delete': return this.api.userContext.delete(request)
     }
   }
 

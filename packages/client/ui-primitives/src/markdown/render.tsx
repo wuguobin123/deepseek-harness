@@ -33,6 +33,8 @@ export interface MarkdownCodeLabels {
   copyLabel?: string | undefined
   /** Copy-button label during the post-copy confirmation window. */
   copiedLabel?: string | undefined
+  /** Footnote section heading. */
+  footnotesLabel?: string | undefined
 }
 
 function sanitizeUrl(url: string): string {
@@ -597,7 +599,7 @@ export function renderFootnoteSection(context: MarkdownRenderContext): ReactNode
   if (items.length === 0) return null
   return (
     <section key="footnotes" data-footnotes className="footnotes">
-      <h2 id="footnote-label" className="sr-only">Footnotes</h2>
+      <h2 id="footnote-label" className="sr-only">{context.codeLabels?.footnotesLabel ?? 'Footnotes'}</h2>
       <ol>{items}</ol>
     </section>
   )

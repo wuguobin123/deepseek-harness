@@ -16,9 +16,10 @@
 #   apps/desktop/scripts/publish-client-release.sh --dry-run  # print plan only
 #   apps/desktop/scripts/publish-client-release.sh --skip-cos # rsync only
 #
-# Required for COS leg:
-#   COS_SECRET_ID / COS_SECRET_KEY / COSCLI (path to coscli binary)
-#   Without them, --skip-cos is the right move.
+# COS credentials are resolved in this order:
+#   1. COS_SECRET_ID / COS_SECRET_KEY environment variables (one-off override)
+#   2. macOS Keychain entries configured by configure-cos-credentials.sh
+# COSCLI still names the optional coscli binary path.
 set -euo pipefail
 
 DEPLOY_SSH="${DEPLOY_SSH:-root@119.45.252.25}"
@@ -26,6 +27,7 @@ RELEASES_DIR="${RELEASES_DIR:-/var/lib/xiaowei-workbench/releases}"
 RELEASE_NOTES="${RELEASE_NOTES:-}"
 COS_BUCKET="${COS_BUCKET:-wgb123-1257121815}"
 COS_REGION="${COS_REGION:-ap-beijing}"
+COS_KEYCHAIN_SERVICE="${COS_KEYCHAIN_SERVICE:-com.deepseek-harness.desktop.release.cos}"
 DRY_RUN=0
 SKIP_COS=0
 for arg in "$@"; do
@@ -39,25 +41,47 @@ done
 step() { printf '\n\033[1;34m== %s ==\033[0m\n' "$*"; }
 fail() { printf '\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 
+load_cos_credentials() {
+  if [ -n "${COS_SECRET_ID:-}" ] || [ -n "${COS_SECRET_KEY:-}" ]; then
+    { [ -n "${COS_SECRET_ID:-}" ] && [ -n "${COS_SECRET_KEY:-}" ]; } \
+      || fail "COS_SECRET_ID 与 COS_SECRET_KEY 必须同时设置"
+    return
+  fi
+
+  if [ "$(uname -s)" = "Darwin" ] && command -v security >/dev/null 2>&1; then
+    COS_SECRET_ID="$(security find-generic-password \
+      -s "$COS_KEYCHAIN_SERVICE" -a COS_SECRET_ID -w 2>/dev/null || true)"
+    COS_SECRET_KEY="$(security find-generic-password \
+      -s "$COS_KEYCHAIN_SERVICE" -a COS_SECRET_KEY -w 2>/dev/null || true)"
+  fi
+
+  { [ -n "${COS_SECRET_ID:-}" ] && [ -n "${COS_SECRET_KEY:-}" ]; } \
+    || fail "没有可用的 COS 凭证；首次运行 scripts/configure-cos-credentials.sh，或临时设置 COS_SECRET_ID / COS_SECRET_KEY"
+}
+
 DESKTOP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$DESKTOP_DIR/../.." && pwd)"
 cd "$DESKTOP_DIR"
 
 VERSION="$(node -p "require('./package.json').version")"
 [ -n "$VERSION" ] || fail "无法从 package.json 读取 version"
 
 # electron-builder artifactName is ${productName}-${version}-${arch}.${ext}
-PRODUCT="DeepSeek Harness"
+PRODUCT="小薇"
 MAC_ARM64_DMG="$(ls release/"${PRODUCT}-${VERSION}-arm64.dmg" 2>/dev/null | head -1 || true)"
 MAC_X64_DMG="$(ls release/"${PRODUCT}-${VERSION}-x64.dmg" 2>/dev/null | head -1 || true)"
 WIN_X64_EXE="$(ls release/"${PRODUCT}-${VERSION}-x64.exe" 2>/dev/null | head -1 || true)"
 LINUX_X64_APPIMAGE="$(ls release/"${PRODUCT}-${VERSION}.AppImage" 2>/dev/null | head -1 || true)"
 
-PACKAGES=()
-[ -n "$MAC_ARM64_DMG" ]         && PACKAGES+=("$MAC_ARM64_DMG")
-[ -n "$MAC_X64_DMG" ]           && PACKAGES+=("$MAC_X64_DMG")
-[ -n "$WIN_X64_EXE" ]           && PACKAGES+=("$WIN_X64_EXE")
-[ -n "$LINUX_X64_APPIMAGE" ]    && PACKAGES+=("$LINUX_X64_APPIMAGE")
-[ "${#PACKAGES[@]}" -gt 0 ] || fail "release/ 下没有匹配版本 $VERSION 的安装包（先跑 package-release.sh）"
+MISSING_PACKAGES=()
+[ -n "$MAC_ARM64_DMG" ]      || MISSING_PACKAGES+=("mac-arm64")
+[ -n "$MAC_X64_DMG" ]        || MISSING_PACKAGES+=("mac-x64")
+[ -n "$WIN_X64_EXE" ]        || MISSING_PACKAGES+=("win-x64")
+[ -n "$LINUX_X64_APPIMAGE" ] || MISSING_PACKAGES+=("linux-x64")
+[ "${#MISSING_PACKAGES[@]}" -eq 0 ] \
+  || fail "release/ 下版本 $VERSION 的四平台安装包不完整，缺少：${MISSING_PACKAGES[*]}（先跑 package-release.sh）"
+
+PACKAGES=("$MAC_ARM64_DMG" "$MAC_X64_DMG" "$WIN_X64_EXE" "$LINUX_X64_APPIMAGE")
 # 一键安装脚本随每次发布同步（去 quarantine / 绕过未签名 "已损坏" 误报）
 [ -f scripts/install-mac.sh ]   && PACKAGES+=("scripts/install-mac.sh")
 [ -f scripts/install-win.bat ]  && PACKAGES+=("scripts/install-win.bat")
@@ -101,19 +125,24 @@ LINK_CMDS="${LINK_CMDS% && }"
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "[dry-run] ssh $DEPLOY_SSH 'mkdir -p $RELEASES_DIR'"
-  echo "[dry-run] rsync -az $LATEST_JSON ${PACKAGES[*]} $DEPLOY_SSH:$RELEASES_DIR/"
+  echo "[dry-run] rsync -az ${PACKAGES[*]} $DEPLOY_SSH:$RELEASES_DIR/"
   echo "[dry-run] ssh $DEPLOY_SSH 'chmod 0644 $RELEASES_DIR/*'"
   echo "[dry-run] ssh $DEPLOY_SSH 'cd $RELEASES_DIR && $LINK_CMDS'"
+  echo "[dry-run] rsync -az $LATEST_JSON $DEPLOY_SSH:$RELEASES_DIR/latest.json"
 else
   SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=8"
   ssh $SSH_OPTS "$DEPLOY_SSH" "mkdir -p '$RELEASES_DIR'" \
     || fail "无法 SSH 到 ${DEPLOY_SSH}（需免密或 ssh-agent）"
-  rsync -az --progress "$LATEST_JSON" "${PACKAGES[@]}" "$DEPLOY_SSH:$RELEASES_DIR/"
+  rsync -az --progress "${PACKAGES[@]}" "$DEPLOY_SSH:$RELEASES_DIR/"
   ssh $SSH_OPTS "$DEPLOY_SSH" "chmod 0644 '$RELEASES_DIR'/*"
   if [ -n "$LINK_CMDS" ]; then
     ssh $SSH_OPTS "$DEPLOY_SSH" "cd '$RELEASES_DIR' && $LINK_CMDS" \
       || fail "固定别名软链创建失败"
   fi
+  # Publish the manifest last so readers never observe a version whose
+  # packages and stable aliases have not finished uploading.
+  rsync -az "$LATEST_JSON" "$DEPLOY_SSH:$RELEASES_DIR/latest.json"
+  ssh $SSH_OPTS "$DEPLOY_SSH" "chmod 0644 '$RELEASES_DIR/latest.json'"
   echo "已发布。验证：curl -fsS http://119.45.252.25:18080/releases/latest.json"
   echo "固定下载链接："
   for pair in "${LINK_PAIRS[@]}"; do echo "  /releases/${pair##*|}"; done
@@ -127,19 +156,21 @@ else
   COS_FILES=()
   for pair in "${LINK_PAIRS[@]}"; do
     src="${pair%%|*}"; dst="${pair##*|}"
+    COS_FILES+=("release/$src|$src")
     COS_FILES+=("release/$src|$dst")
   done
-  COS_FILES+=("$LATEST_JSON|latest.json")
   [ -f scripts/install-mac.sh ]  && COS_FILES+=("scripts/install-mac.sh|install-mac.sh")
   [ -f scripts/install-win.bat ] && COS_FILES+=("scripts/install-win.bat|install-win.bat")
+  # Keep latest.json last: its versioned URLs and stable aliases must already
+  # resolve when clients observe the new manifest.
+  COS_FILES+=("$LATEST_JSON|latest.json")
   if [ "$DRY_RUN" -eq 1 ]; then
     for item in "${COS_FILES[@]}"; do
       echo "[dry-run] coscli cp ${item%%|*} cos://$COS_BUCKET/${item##*|}"
     done
   else
     [ -x "$COSCLI" ] || fail "coscli 不可用：${COSCLI}（下载到 .tools/ 或显式 --skip-cos）"
-    { [ -n "${COS_SECRET_ID:-}" ] && [ -n "${COS_SECRET_KEY:-}" ]; } \
-      || fail "缺少 COS_SECRET_ID / COS_SECRET_KEY（或显式 --skip-cos）"
+    load_cos_credentials
     for item in "${COS_FILES[@]}"; do
       "$COSCLI" cp "${item%%|*}" "cos://$COS_BUCKET/${item##*|}" \
         -i "$COS_SECRET_ID" -k "$COS_SECRET_KEY" \

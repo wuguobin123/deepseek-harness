@@ -22,9 +22,9 @@ import type { ComposerSubmitGesture, InputSubmitMode } from './composer-submissi
 import type { ChatNode, ChatNodeKind } from './chat-nodes.ts'
 import type { CallId, SelectionTarget, ViewTab } from './views.ts'
 
-/** Browser-owned image that has not crossed the durable host boundary. */
+/** Browser-owned image or Office/PDF file that has not crossed the durable host boundary. */
 export interface ComposerAttachment {
-  kind: 'image'
+  kind: 'image' | 'file'
   id: DraftAttachmentId
   file: File
   previewUrl: string
@@ -32,11 +32,11 @@ export interface ComposerAttachment {
 
 /** Input state handed to the optional attachment presentation plugin. */
 export interface ComposerAttachmentsOwnerProps {
-  /** Browser-owned draft images in input order. */
+  /** Browser-owned draft attachments in input order. */
   attachments: readonly ComposerAttachment[]
-  /** Whether a document-level file drop may add images now. */
+  /** Whether a document-level file drop or picker may add attachments now. */
   canAcceptDrop: boolean
-  /** Add one dropped batch through the composer's validation path. */
+  /** Add one selected or dropped batch through the composer's validation path. */
   onAddImages: (files: readonly File[]) => void
   /** Remove one draft image through the conversation service. */
   onRemoveImage: (id: DraftAttachmentId) => void
@@ -161,6 +161,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * instead; this one is the whole panel.
      */
     'conversation.details.tool': { kind: 'single'; scope: 'session'; owner: DetailsToolOwnerProps }
+    /** Artifact viewer selected from a generated-artifact card. */
+    'conversation.details.artifact': { kind: 'single'; scope: 'session'; owner: DetailsArtifactOwnerProps }
     /**
      * The composer takeover chain: entries are selector-routed replacements
      * of the default InputBar. Declared by this package's 'conversation'
@@ -181,12 +183,6 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * package's `conversation` entry; the shell supplies a fish fallback.
      */
     'conversation.hero.brand.mark': { kind: 'single'; scope: 'root'; owner: HeroBrandMarkOwnerProps }
-    /**
-     * The agent-preset chip beside the workspace picker on the new-session
-     * screen. Root scope: no session exists yet, so the choice is staged for
-     * the next one rather than applied to a current one.
-     */
-    'conversation.hero.agentPreset': { kind: 'single'; scope: 'root'; owner: HeroAgentPresetOwnerProps }
     // 'conversation.input.overlay' merges in ui-input-trigger (the dependency
     // direction is the hard constraint — ui-input-trigger cannot import
     // this package, while this package's input contract already imports
@@ -288,12 +284,6 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     useInput: MaybeSnapshotSelectorHook<InputState>
     inputActions: InputActions | undefined
   }
-}
-
-/** Owner share of the hero agent-preset chip: the shell supplies nothing. */
-export interface HeroAgentPresetOwnerProps {
-  /** Marker field: the chip owns its own roster, staging, and menu state. */
-  children?: never
 }
 
 /** Owner share of the strict session content seat. */
@@ -424,6 +414,8 @@ export interface ChatNodeOwnerProps {
   /** Render a historical image group through the attachment slot. */
   renderMessageImages: RenderMessageImages
   fileMentions: (owner: TurnTailOwnerProps) => MarkdownFileMentions | undefined
+  /** Select an artifact and open the shared details surface. */
+  openArtifact: (artifactId: string) => void
 }
 
 /** Full props of one registered keyed Chat business renderer. */
@@ -436,6 +428,11 @@ export interface DetailsToolOwnerProps {
   block: ToolCallBlock
   /** Session workspace root for card cwd and relative-path display. */
   cwd?: string | undefined
+}
+
+/** Owner currency for the optional artifact viewer mounted in DetailsPanel. */
+export interface DetailsArtifactOwnerProps {
+  artifactId: string
 }
 
 /**
@@ -645,7 +642,6 @@ export type ConversationSlotProps =
     | 'conversation.input.left' | 'conversation.input.right'
     | 'conversation.hero.brand.mark'
     | 'conversation.hero.workspace'
-    | 'conversation.hero.agentPreset'
   >
   & InjectFace<ConversationInjected>
   & PropsLocale<'conversation'>
@@ -750,6 +746,8 @@ export interface ChatScrollPosition {
 export interface ChatViewInjected {
   /** Selection write + details panel opening in one gesture (store action + layout orchestration). */
   openDetails: (target: SelectionTarget) => void
+  /** Select an artifact and open the shared details surface. */
+  openArtifact: (artifactId: string) => void
   /**
    * Open a tool-arg filesystem path with the host OS default application
    * (relative paths resolve against the session cwd). Always returns a
@@ -758,6 +756,8 @@ export interface ChatViewInjected {
    */
   openFile: (path: string) => Promise<void>
   loadOlder: () => void
+  /** Retry a failed initial history pull. */
+  retryHistory: () => void
   /** Resolve a session-authorized historical image for inline display. */
   loadImage: (attachment: ImageAttachmentRef) => Promise<string>
   /** Hand a call off to the trajectory view: write the one-shot inspect target and switch tabs. */
@@ -807,7 +807,7 @@ export interface DetailsInjected {
 }
 
 /** Full details-slot props: selection store, Tool output seat, injected close callback, and locale. */
-export type DetailsSlotProps = PropsRuntime<'details'> & PropsRenderSlots<'conversation.details.tool'>
+export type DetailsSlotProps = PropsRuntime<'details'> & PropsRenderSlots<'conversation.details.tool' | 'conversation.details.artifact'>
   & PropsStore<ChatStore> & DetailsInjected & PropsLocale<'conversation'>
 
 /** Owner share common to the hero / New-Session Workspace pickers. */

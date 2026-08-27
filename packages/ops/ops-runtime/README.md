@@ -12,14 +12,14 @@ Function plugin with no `inject` and no runtime state.
 
 ## When to land content here
 
-A scenario enters this package when it needs its own multi-turn loop, dedicated tool set, or persona. The decision boundary is documented in the [scenario integration contract](../../../../docs/ops/scenario-integration-contract.md):
+A scenario enters this package when it needs its own multi-turn loop, dedicated tool set, or persona. The decision boundary is documented in the [scenario integration contract](../../../docs/ops/scenario-integration-contract.md):
 
 - **Use Skill** if the work is one prompt-shaped directive the parent model should read inline. The Skill ships under [`@deepseek-ai/dsh-ops-skill`](../ops-skill/README.md), not here.
 - **Use Subagent** if the work needs its own session, tools, persona, or recursion budget. The Subagent ships as one provider + one agent preset mounted beside [`@deepseek-ai/dsh-ops-subagent-python`](../ops-subagent-python/README.md).
 
 ## OPDCA explicitly deferred
 
-Per the [OPDCA deferral decision](../../../../docs/ops/decisions/0001-agent-handoff-event-deferred.md) context, OPDCA orchestrators (`route_work`, `capability_runner`, `evidence_validator`) do **not** ship with the plan. They land when a scenario explicitly requires them.
+Per the [OPDCA deferral decision](../../../docs/ops/decisions/0001-agent-handoff-event-deferred.md) context, OPDCA orchestrators (`route_work`, `capability_runner`, `evidence_validator`) do **not** ship with the plan. They land when a scenario explicitly requires them.
 
 ## Config
 
@@ -27,7 +27,11 @@ Empty. Config lands with the first orchestrator scenario.
 
 ## Model Experience
 
-None. The plugin registers no service and emits no event; mounting it does not change the model's request prefix.
+None, as the current skeleton registers no service, event, prompt, or tool.
+
+#### KV Cache effect
+
+None. Mounting the skeleton does not change the request prefix.
 
 ## Known Limitations and Deferred Work
 

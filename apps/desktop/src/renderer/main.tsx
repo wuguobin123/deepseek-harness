@@ -1,28 +1,30 @@
-import React from 'react';
-import { createRoot } from 'react-dom/client';
-import { HashRouter } from 'react-router-dom';
-import { App } from './app';
-import { buildDevBridge } from './dev-bridge';
-import './api'; // ensures the Window.workbenchApi type augmentation is loaded
+import React from 'react'
+import { createRoot } from 'react-dom/client'
+import { HashRouter } from 'react-router-dom'
+import { App } from './app'
+import { buildDevBridge } from './dev-bridge'
+import './api' // ensures the Window.workbenchApi type augmentation is loaded
 
-const container = document.getElementById('root');
-if (!container) throw new Error('root element not found');
+const container = document.getElementById('root')
+if (!container) throw new Error('root element not found')
 
+// Preload makes this required in packaged builds; the Vite dev runtime starts without it.
+// oxlint-disable-next-line typescript/no-unnecessary-condition
 if (!window.workbenchApi) {
   if (window.__WORKBENCH_API_OVERRIDE__) {
-    window.workbenchApi = window.__WORKBENCH_API_OVERRIDE__;
+    window.workbenchApi = window.__WORKBENCH_API_OVERRIDE__
   } else {
     // Vite dev server has no preload script. Install a dev bridge that
     // talks to the backend via fetch / EventSource so the rest of the
     // UI is exercisable end-to-end from the browser.
-    window.workbenchApi = buildDevBridge();
+    window.workbenchApi = buildDevBridge()
   }
 }
 
 // macOS builds run with a hiddenInset titlebar; flag the platform so the
 // stylesheet can clear the traffic-light buttons in the sidebar.
 if (/Mac OS X|Macintosh/.test(navigator.userAgent)) {
-  document.body.classList.add('is-mac');
+  document.body.classList.add('is-mac')
 }
 
 // The packaged app is loaded via file:// (win.loadFile). On Windows,
@@ -30,16 +32,16 @@ if (/Mac OS X|Macintosh/.test(navigator.userAgent)) {
 // so BrowserRouter's initial <Navigate to="/"> never resolves and every
 // routed page stays blank. Hash routing keeps all navigation inside the
 // URL fragment and never touches the History API.
-const root = createRoot(container);
+const root = createRoot(container)
 root.render(
   <React.StrictMode>
     <HashRouter
       future={{
         v7_relativeSplatPath: true,
-        v7_startTransition: true
+        v7_startTransition: true,
       }}
     >
       <App />
     </HashRouter>
-  </React.StrictMode>
-);
+  </React.StrictMode>,
+)

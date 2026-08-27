@@ -9,6 +9,7 @@ import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import { apply, inject, NS } from '../src/client/index.ts'
 import { PluginInventorySettingsTab } from '../src/client/PluginInventorySettingsTab.tsx'
 import type { PluginInventorySettingsTabInjected } from '../src/client/PluginInventorySettingsTab.tsx'
+import { PluginFactorySettingsTab } from '../src/client/PluginFactorySettingsTab.tsx'
 
 usePinnedBrowserLanguages('zh-CN')
 afterEach(cleanup)
@@ -18,7 +19,7 @@ type ListResult =
   | { readonly ok: true; readonly value: typeof EMPTY }
   | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } }
 
-async function bench() {
+async function bench(isLoopback = true, api: object = {}) {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
   const locale = new LocaleRuntime(ctx)
@@ -29,6 +30,7 @@ async function bench() {
     }
   }
   new RemoteService(ctx)
+  ctx.provide('connection', { isLoopback, api } as never)
   const list = vi.fn<() => Promise<ListResult>>()
     .mockResolvedValue({ ok: true, value: EMPTY })
   ctx.provide('remote.pluginInventory', { list })
@@ -44,7 +46,25 @@ function declare(slots: SlotRegistry): () => void {
 
 describe('ui-settings-plugin-inventory browser plugin', () => {
   it('declares only the services used by the Settings Remote contribution', () => {
-    expect(inject).toEqual(['slots', 'locale', 'remote', 'remote.pluginInventory'])
+    expect(inject).toEqual(['slots', 'locale', 'connection', 'remote', 'remote.pluginInventory'])
+  })
+
+  it('uses the authenticated account factory on a remote connection', async () => {
+    const accountPlugins = {
+      list: vi.fn(async () => ({ result: { ok: true as const, value: { items: [] } } })),
+      install: vi.fn(async () => ({ result: { ok: true as const, value: {} } })),
+      uninstall: vi.fn(async () => ({ result: { ok: true as const, value: {} } })),
+    }
+    const b = await bench(false, { accountPlugins })
+    declare(b.slots)
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    const entry = b.slots.entries('settings.plugins.tab')[0]!
+    expect(entry.component).toBe(PluginFactorySettingsTab)
+    expect(resolveSlotLabel(entry.options.label)).toBe('插件工厂')
+    const injected = (entry.inject as unknown as () => { list(): Promise<unknown[]> })()
+    await expect(injected.list()).resolves.toEqual([])
+    expect(accountPlugins.list).toHaveBeenCalledOnce()
+    await b.ctx.fiber.dispose()
   })
 
   it('registers a localized tab without reading the Remote eagerly', async () => {

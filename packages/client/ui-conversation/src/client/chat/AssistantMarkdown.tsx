@@ -37,7 +37,9 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
 }: AssistantMarkdownProps) {
   // Stable per locale revision (t identity changes on switch): a fresh object
   // per render would rebuild MarkdownText's component table every chunk.
-  const codeLabels = useMemo(() => ({ copyLabel: t('copy'), copiedLabel: t('copied') }), [t])
+  const codeLabels = useMemo(() => ({
+    copyLabel: t('copy'), copiedLabel: t('copied'), footnotesLabel: t('markdown.footnotes'),
+  }), [t])
   const last = blocks.length - 1
   // Tool-call heads render as tool rows in the chat view's grouping pass, so
   // a node that is only those heads (or empty) would paint an empty root

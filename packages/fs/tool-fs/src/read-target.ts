@@ -7,21 +7,23 @@ import type { Context } from '@deepseek-ai/cordis'
 import { FsError } from '@deepseek-ai/dsh-fs'
 import type { FsInfo, FsTarget } from '@deepseek-ai/dsh-fs'
 import type { ToolExecution } from '@deepseek-ai/dsh-tools'
-import { sessionResolveOptions } from './session-cwd.ts'
+import { resolveSessionTarget } from './session-cwd.ts'
 
 /**
  * Resolve a model-supplied path, observe absence, and require a regular file.
  * @param ctx - the plugin context providing filesystem resolution and observation events.
  * @param exec - the current tool execution, including session cwd and cancellation.
  * @param requestedPath - the raw path supplied to the tool.
+ * @param workspaceOnly - whether the path must stay within the session cwd.
  * @returns the resolved target and its single stat result.
  */
 export async function resolveRegularReadTarget(
   ctx: Context,
   exec: ToolExecution,
   requestedPath: string,
+  workspaceOnly = false,
 ): Promise<{ target: FsTarget; info: FsInfo }> {
-  const target = await ctx.fs.resolve(requestedPath, sessionResolveOptions(exec, requestedPath))
+  const target = await resolveSessionTarget(ctx, exec, requestedPath, workspaceOnly)
   const info = await ctx.fs.stat(target, exec.signal)
   if (info === undefined) {
     ctx.emit('fs/observed', target, { kind: 'absent' }, exec)

@@ -14,7 +14,7 @@ Status: implemented
 
 根目录的 [`.oxlintrc.json`](../../../../.oxlintrc.json) 是仓库类型感知 lint 配置的权威来源。不加载项目的 [`.oxlintrc.staged.json`](../../../../.oxlintrc.staged.json) 配置继承其源码规则，为有界的 pre-commit 路径禁用类型分析，并重新纳入类型感知后端无法分析但需保留的 TypeGraph fixture（测试前置数据）。`lint` 与 `lint:fix` 包脚本、门禁调度器、CI 和 lefthook 通过 [`scripts/run-oxlint.ts`](../../../../scripts/run-oxlint.ts) 调用 Oxlint；[仅使用 Oxlint 的修复工作流](2026-08-09-oxlint-only-fix-workflow.zh.md)负责多轮插件修复，并取代单独的格式化回退路径。
 
-`options.typeAware` 启用 `oxlint-tsgolint`。其后端按文件发现 TypeScript 项目：包源码使用各自的包项目，host 测试、示例和网站使用 `tsconfig.host.json`，client 测试及 `scripts/client-bundle-purity.spec.ts` 使用 `tsconfig.client.json`。不含程序的根解决方案绝不会被扁平化。Oxlint 的 `--tsconfig` 覆盖项会影响导入解析，但类型感知 lint 会忽略它，因此本仓库不设置该选项。该配置显式载入迁移后的严格类型检查规则和仓库覆盖配置，而不启用内容可能发生变化的 Oxlint 宽泛类别。`typescript/no-unnecessary-condition` 仍从 Oxlint 的 nursery 规则集中启用，因为它在迁移前就是仓库强制执行的规则。
+`options.typeAware` 启用 `oxlint-tsgolint`。其后端按文件发现 TypeScript 项目：包源码使用各自的包项目，host 测试、示例和网站使用 `tsconfig.host.json`，client 测试及 `scripts/client-bundle-purity.spec.ts` 使用 `tsconfig.client.json`。不含程序的根解决方案绝不会被扁平化。client 编译器基础配置启用 `disableSourceOfProjectReferenceRedirect`，使分析器读取被引用项目的声明产物，而不是载入 host 项目源码并把 host 专属 Cordis 服务合并进 client `Context`。Oxlint 的 `--tsconfig` 覆盖项会影响导入解析，但类型感知 lint 会忽略它，因此本仓库不设置该选项。该配置显式载入迁移后的严格类型检查规则和仓库覆盖配置，而不启用内容可能发生变化的 Oxlint 宽泛类别。`typescript/no-unnecessary-condition` 仍从 Oxlint 的 nursery 规则集中启用，因为它在迁移前就是仓库强制执行的规则。
 
 Oxlint 的 JavaScript 插件兼容层运行 `@stylistic/eslint-plugin` 和 `eslint-plugin-sonarjs`，从而继续强制执行现有的格式和文件内重复逻辑规则。兼容层会报告 `@stylistic` 违规并执行其安全修复；`max-len` 仍仅用于验证。自有源码中的抑制指令使用 `oxlint-*` 指令和 `typescript/*` 命名空间，未使用的指令仍作为警告报告；vendor 源码保留其上游指令，因为 Oxlint 会排除 `vendor/**`。
 
@@ -24,7 +24,7 @@ CI 不恢复或保存 lint 结果缓存。`DSH_OXLINT_THREADS` 使共享运行�
 
 解决两处分析器差异后，迁移后的配置报告与迁移前一致的自有源码无问题基线：移除了一项冗余测试断言，而 `tsc` 要求的一处结构性类型转换使用了窄范围的 Oxlint 抑制指令。以已删除 ESLint 配置的精确 blob 为基准进行的一次性审核在完成规则名映射后确认：源码为 88 项对 88 项，示例为 87 项对 87 项，测试为 83 项对 83 项。已提交的指纹锁定这些经审核的 Oxlint 规则配置及完整的覆盖结构；它既不执行已删除的配置，也不纳入后续的上游预设变更。对 `typescript-eslint@8.61.0` 的评估还确认，`strictTypeChecked` 并未启用 `@typescript-eslint/no-empty-function`；已删除、仅用于测试的 `off` 条目不起作用。
 
-可执行约定测试要求包、host 和 client 项目产生类型感知诊断，断言 client 专用脚本所用的项目，拒绝未匹配的回退分析，并检验 Stylistic、SonarJS 和 nursery 兼容路径。它们还锁定暂存配置不加载项目的继承行为与 TypeGraph fixture 覆盖、未使用抑制指令的报告行为、仅选择已忽略暂存文件的情况、完整的 Stylistic 规则集，以及收敛后最终格式化的字节。运行器测试锁定两项工作线程控制，类型检查则确认迁移引发的源码改动没有破坏 TypeScript 程序。
+可执行约定测试要求包、host 和 client 项目产生类型感知诊断，断言 client 专用脚本所用的项目，拒绝未匹配的回退分析，并检验 Stylistic、SonarJS 和 nursery 兼容路径。client 配置测试锁定基于被引用声明的分析方式，防止 client 包把 `ctx.sessions` 静默解析为 host `SessionStore`。这些测试还锁定暂存配置不加载项目的继承行为与 TypeGraph fixture 覆盖、未使用抑制指令的报告行为、仅选择已忽略暂存文件的情况、完整的 Stylistic 规则集，以及收敛后最终格式化的字节。运行器测试锁定两项工作线程控制，类型检查则确认迁移引发的源码改动没有破坏 TypeScript 程序。
 
 ## 考虑过的替代方案
 

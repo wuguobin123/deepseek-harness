@@ -6,6 +6,8 @@
 
 该包实现一个 skill（技能）来源。它扫描本地项目、自定义和用户 skill 根目录，解析 `SKILL.md` 或平铺 Markdown skill 文件，并将提供方注册到 `ctx.skills`。注册表仍位于 `@deepseek-ai/dsh-skill`；持久化会话目录和面向模型的 loader 工具仍位于 `@deepseek-ai/dsh-tool-skill`。
 
+当查询包含认证 `ownerId` 时，发现逻辑切换到账号视图：配置的系统根目录、内置根目录，以及 `<dshHome>/accounts/<sha256(ownerId)>/skills`。它会明确排除项目根目录、共享 `<dshHome>/skills` 与 `<agentsHome>/skills`，避免服务端账号继承其他本地用户可写的 Skill 目录。
+
 ## 插件
 
 需要 `ctx.skills`（`inject: ['skills']`）。

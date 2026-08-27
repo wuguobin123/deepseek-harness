@@ -74,7 +74,7 @@ export interface ArtifactView {
 export interface ArtifactsApi {
   /**
    * Lists durable artifact views in newest-first order. Optional ownership
-   * filters narrow the listing to one workspace and/or one session. An
+   * filters narrow the listing to one workspace, session, and/or product kind. An
    * absent workspace filter includes artifacts written outside any workspace
    * so a multi-tenant deployment can serve its full registry.
    *
@@ -84,6 +84,7 @@ export interface ArtifactsApi {
   list(request: RpcRequest<{
     workspaceId?: WorkspaceId
     sessionId?: SessionId
+    kind?: ArtifactKind
   }>): Promise<RpcResponse<{ items: ArtifactView[] }>>
 
   /**

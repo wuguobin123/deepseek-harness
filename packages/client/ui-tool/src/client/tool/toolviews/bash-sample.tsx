@@ -134,7 +134,7 @@ export function BashRow({ toolName, block, sessionId, useSessions, inspect, t }:
               <div className={css.ioCard}>
                 {model.body !== null && (
                   <div className={css.ioSection}>
-                    <span className={css.ioLabel}>IN</span>
+                    <span className={css.ioLabel}>{t('details.input')}</span>
                     <span className={css.ioText}>{model.body}</span>
                   </div>
                 )}
@@ -143,7 +143,7 @@ export function BashRow({ toolName, block, sessionId, useSessions, inspect, t }:
                 )}
                 {model.output !== null && (
                   <div className={css.ioSection}>
-                    <span className={css.ioLabel}>OUT</span>
+                    <span className={css.ioLabel}>{t('details.output')}</span>
                     <span className={css.ioText} data-error>
                       {model.output}
                     </span>

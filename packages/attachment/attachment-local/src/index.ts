@@ -11,16 +11,18 @@ import type {
   RequestImageAttachment,
   SaveImageAttachment,
   StoredImageAttachment,
+  DocumentAttachmentRef, SaveDocumentAttachment, StoredDocumentAttachment,
+  DocumentAttachmentLimits,
 } from '@deepseek-ai/dsh-attachment'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type { NormalizationPolicy } from './normalization.ts'
 import { CompressionLimiter } from './compression-limiter.ts'
-import { commitPreparedImageFile, prepareImageFile, readImageFile, validateImageFile } from './store.ts'
+import { commitPreparedImageFile, prepareImageFile, readImageFile, validateImageFile, saveDocumentFile, readDocumentFile } from './store.ts'
 import { readRequestImageFile, requestImageVariantId } from './request-image.ts'
 
 export { canPassThroughNormalization, normalizeImage } from './normalization.ts'
 export type { NormalizedImage, NormalizationPolicy } from './normalization.ts'
-export { commitPreparedImageFile, prepareImageFile, readImageFile, saveImageFile, validateImageFile } from './store.ts'
+export { commitPreparedImageFile, prepareImageFile, readImageFile, saveImageFile, validateImageFile, saveDocumentFile, readDocumentFile } from './store.ts'
 export type { PreparedImageFile } from './store.ts'
 export { readRequestImageFile, requestImageDimensions, requestImageVariantId } from './request-image.ts'
 
@@ -46,11 +48,19 @@ export const DEFAULT_NORMALIZED_IMAGE_MAX_BYTES = 4 * 1024 * 1024
 export const DEFAULT_IMAGE_COMPRESSION_CONCURRENCY = 2
 /** Maximum configurable native image transformations per store. */
 export const MAX_IMAGE_COMPRESSION_CONCURRENCY = 8
+/** Default maximum encoded bytes for one PDF or modern Office file. */
+export const DEFAULT_MAX_DOCUMENT_BYTES = 32 * 1024 * 1024
+/** Default maximum documents in one prompt. */
+export const DEFAULT_MAX_DOCUMENTS_PER_MESSAGE = 8
+/** Default maximum aggregate document bytes in one prompt. */
+export const DEFAULT_MAX_MESSAGE_DOCUMENT_BYTES = 128 * 1024 * 1024
 
 /** Local attachment backend configuration. */
 export interface Config {
   /** Explicit harness home; omitted follows `DSH_HOME`, then `~/.dsh`. */
   dshHome?: string
+  /** Whether PDF and Office uploads are available. Default: true. */
+  documents?: boolean
   /** Maximum encoded bytes accepted for one submitted image. Default: 20 MiB. */
   maxImageBytes?: number
   /** Maximum image count accepted in one submitted message. Default: 20. */
@@ -67,6 +77,12 @@ export interface Config {
   normalizedImageMaxBytes?: number
   /** Maximum simultaneous normalization or request-image transformations in this service instance. */
   imageCompressionConcurrency?: number
+  /** Maximum encoded bytes accepted for one PDF or Office file. */
+  maxDocumentBytes?: number
+  /** Maximum PDF and Office file count accepted in one message. */
+  maxDocumentsPerMessage?: number
+  /** Maximum aggregate PDF and Office bytes accepted in one message. */
+  maxMessageDocumentBytes?: number
 }
 
 function abortReason(signal: AbortSignal): Error {
@@ -134,6 +150,7 @@ class SharedRequest<T> {
 export class LocalAttachmentStore extends AttachmentStore {
   static Config: z<Config> = z.object({
     dshHome: z.string(),
+    documents: z.boolean().default(true),
     maxImageBytes: z.number().step(1).min(1).default(DEFAULT_MAX_IMAGE_BYTES),
     maxImagesPerMessage: z.number().step(1).min(1).default(DEFAULT_MAX_IMAGES_PER_MESSAGE),
     maxMessageImageBytes: z.number().step(1).min(1).default(DEFAULT_MAX_MESSAGE_IMAGE_BYTES),
@@ -143,17 +160,22 @@ export class LocalAttachmentStore extends AttachmentStore {
     normalizedImageMaxBytes: z.number().step(1).min(1).default(DEFAULT_NORMALIZED_IMAGE_MAX_BYTES),
     imageCompressionConcurrency: z.number().step(1).min(1).max(MAX_IMAGE_COMPRESSION_CONCURRENCY)
       .default(DEFAULT_IMAGE_COMPRESSION_CONCURRENCY),
+    maxDocumentBytes: z.number().step(1).min(1).default(DEFAULT_MAX_DOCUMENT_BYTES),
+    maxDocumentsPerMessage: z.number().step(1).min(1).default(DEFAULT_MAX_DOCUMENTS_PER_MESSAGE),
+    maxMessageDocumentBytes: z.number().step(1).min(1).default(DEFAULT_MAX_MESSAGE_DOCUMENT_BYTES),
   })
 
   /** Absolute versioned storage root. */
   readonly root: string
   readonly imageLimits: ImageAttachmentLimits
+  override readonly documentLimits: DocumentAttachmentLimits
   /** Resolved provider-independent normalization policy. */
   readonly normalizationPolicy: Readonly<NormalizationPolicy>
   /** Resolved instance-level compression limit. */
   readonly imageCompressionConcurrency: number
   private readonly compression: CompressionLimiter
   private readonly requestInflight = new Map<string, SharedRequest<RequestImageAttachment>>()
+  private readonly documentsEnabled: boolean
 
   constructor(ctx: Context, config: Config) {
     super(ctx)
@@ -166,6 +188,25 @@ export class LocalAttachmentStore extends AttachmentStore {
       maxImageDimension: config.maxImageDimension ?? DEFAULT_MAX_IMAGE_DIMENSION,
       mediaTypes: Object.freeze(['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const),
     })
+    this.documentsEnabled = config.documents !== false
+    this.documentLimits = this.documentsEnabled
+      ? Object.freeze({
+        maxDocumentBytes: config.maxDocumentBytes ?? DEFAULT_MAX_DOCUMENT_BYTES,
+        maxDocumentsPerMessage: config.maxDocumentsPerMessage ?? DEFAULT_MAX_DOCUMENTS_PER_MESSAGE,
+        maxMessageDocumentBytes: config.maxMessageDocumentBytes ?? DEFAULT_MAX_MESSAGE_DOCUMENT_BYTES,
+        mediaTypes: Object.freeze([
+          'application/pdf',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        ] as const),
+      })
+      : Object.freeze({
+        maxDocumentBytes: 0,
+        maxDocumentsPerMessage: 0,
+        maxMessageDocumentBytes: 0,
+        mediaTypes: Object.freeze([]),
+      })
     this.normalizationPolicy = Object.freeze({
       maxDimension: config.normalizedImageMaxDimension ?? DEFAULT_NORMALIZED_IMAGE_MAX_DIMENSION,
       maxBytes: config.normalizedImageMaxBytes ?? DEFAULT_NORMALIZED_IMAGE_MAX_BYTES,
@@ -205,6 +246,16 @@ export class LocalAttachmentStore extends AttachmentStore {
 
   async readImage(ref: ImageAttachmentRef, signal?: AbortSignal): Promise<StoredImageAttachment> {
     return readImageFile(this.root, ref, signal)
+  }
+
+  override async saveDocument(input: SaveDocumentAttachment): Promise<DocumentAttachmentRef> {
+    if (!this.documentsEnabled) return super.saveDocument(input)
+    return saveDocumentFile(this.root, input, this.documentLimits)
+  }
+
+  override async readDocument(ref: DocumentAttachmentRef, signal?: AbortSignal): Promise<StoredDocumentAttachment> {
+    if (!this.documentsEnabled) return super.readDocument(ref, signal)
+    return readDocumentFile(this.root, ref, signal)
   }
 
   override async readImageRequest(

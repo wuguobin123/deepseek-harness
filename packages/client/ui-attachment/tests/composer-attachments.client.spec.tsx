@@ -31,6 +31,9 @@ const t = ((key: string, params?: Readonly<Record<string, unknown>>): string => 
     'image.scrollRight': '向右滚动图片',
     'image.dropBlocked': '当前无法添加图片',
     'image.dropTitle': '图片拖动到此处即可添加',
+    'file.add': '添加文件',
+    'file.addHint': '上传 PDF、Word、Excel、PPT 或图片',
+    'file.close': '关闭文件信息',
   }
   if (key === 'image.remove') {
     const name = params?.name
@@ -53,6 +56,15 @@ function attachment(id: string, name = `${id}.png`): ComposerAttachment {
   }
 }
 
+function documentAttachment(id: string, name = `${id}.xlsx`): ComposerAttachment {
+  return {
+    kind: 'file',
+    id: id as ComposerAttachment['id'],
+    file: new File([Uint8Array.of(1)], name, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+    previewUrl: '',
+  }
+}
+
 function props(overrides: Partial<ComposerAttachmentsOwnerProps> = {}): ComposerAttachmentsProps {
   return {
     attachments: [],
@@ -65,6 +77,28 @@ function props(overrides: Partial<ComposerAttachmentsOwnerProps> = {}): Composer
 }
 
 describe('ComposerAttachments', () => {
+  it('opens a file picker for images and modern Office/PDF files', () => {
+    const onAddImages = vi.fn()
+    const view = render(<ComposerAttachments {...props({ onAddImages })} />)
+    const picker = view.container.querySelector('input[type="file"]') as HTMLInputElement
+    expect(picker.accept).toContain('.xlsx')
+    expect(picker.accept).toContain('.pdf')
+    const file = new File([Uint8Array.of(1)], 'report.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    fireEvent.change(picker, { target: { files: [file] } })
+    expect(onAddImages).toHaveBeenCalledWith([file])
+  })
+
+  it('renders Office drafts as file tiles instead of broken images', () => {
+    const file = documentAttachment('sales', 'sales.xlsx')
+    const view = render(<ComposerAttachments {...props({ attachments: [file] })} />)
+    expect(view.getByLabelText('sales.xlsx')).toBeTruthy()
+    expect(view.container.querySelector('img')).toBeNull()
+    fireEvent.click(view.getByTitle('查看原图'))
+    expect(view.getByRole('dialog', { name: 'sales.xlsx' })).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: '关闭文件信息' }))
+    expect(view.queryByRole('dialog', { name: 'sales.xlsx' })).toBeNull()
+  })
+
   it('accepts file drops anywhere on the document and keeps non-file drags native', () => {
     const onAddImages = vi.fn()
     const view = render(<ComposerAttachments {...props({

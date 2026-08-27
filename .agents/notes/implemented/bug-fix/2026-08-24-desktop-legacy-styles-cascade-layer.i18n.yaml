@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-24-desktop-legacy-styles-cascade-layer.md
+2026-08-24-desktop-legacy-styles-cascade-layer.md: 8a2d0ace735c96f059a2f4384fa2696d0fbec15f
+2026-08-24-desktop-legacy-styles-cascade-layer.zh.md: 9c92a312ef8dc69e36fd2928ce4e3eeb9ce75fae

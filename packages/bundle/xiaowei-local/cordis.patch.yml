@@ -1,0 +1,79 @@
+# Local Xiaowei: base + web-app, with a loopback-only, no-cloud agent roster.
+- id: web-runtime
+  config:
+    openBrowser: !!js "false"
+    printUrl: true
+    surfaceContext: true
+    trustedHosts: ['127.0.0.1', 'localhost']
+
+- id: webserver
+  config:
+    host: '127.0.0.1'
+    port: !!js "Number(process.env.DSH_LOCAL_PORT ?? 0)"
+
+# Host rows from web-app are disabled; local sessions mount their own tools.
+- id: session-telemetry-otel
+  disabled: true
+- id: code-runtime
+  disabled: true
+- id: sandbox
+  disabled: true
+- id: bash-sandbox
+  disabled: true
+- id: pwsh-sandbox
+  disabled: true
+- id: shell-env
+  disabled: true
+- id: permission
+  disabled: true
+- id: ui-permission
+  disabled: true
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: tool-jobs
+  disabled: true
+- id: tool-fs
+  disabled: true
+- id: tool-fs-search
+  disabled: true
+- id: skill-filesystem
+  disabled: true
+- id: tool-skill
+  disabled: true
+- id: tool-web
+  disabled: true
+- id: tool-str-replace-editor
+  disabled: true
+- id: tool-goal
+  disabled: true
+- id: plan-mode
+  disabled: true
+- id: compaction-basic
+  disabled: true
+- id: command-compact
+  disabled: true
+- id: tool-result-pruner
+  disabled: true
+- id: tool-subagent-control
+  disabled: true
+- id: tool-subagent-list-agents
+  disabled: true
+- id: tool-subagent
+  disabled: true
+- id: tool-subagent-fork
+  disabled: true
+- id: workflow-worker-thread
+  disabled: true
+- id: tool-workflow
+  disabled: true
+- id: tool-ralph
+  disabled: true
+- id: tool-todo
+  disabled: true
+- id: agent-instructions
+  disabled: true
+- id: agent-presets
+  config:
+    default: xiaowei-local-safe

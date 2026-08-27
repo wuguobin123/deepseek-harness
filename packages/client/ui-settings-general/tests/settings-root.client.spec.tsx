@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import type { SettingsLauncherOwnerProps } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { SettingsRootComponentProps } from '../src/client/shell-contract.ts'
 import { SettingsRoot } from '../src/client/SettingsRoot.tsx'
 
@@ -21,22 +22,38 @@ const SEAT_CONTENT: Record<string, string> = {
 function mount({
   wide = true,
   onboardingActive = true,
+  customLauncher = false,
   rows = [
     { id: 'general', order: 0, label: 'General' },
     { id: 'models', order: 10, label: 'Models' },
-    { id: 'agent-presets', order: 20, label: 'Agent presets' },
   ],
   steps = [
     { id: 'welcome', order: -100 },
     { id: 'credential', order: 0 },
   ],
-}: { wide?: boolean; onboardingActive?: boolean; rows?: Row[]; steps?: Step[] } = {}) {
+}: { wide?: boolean; onboardingActive?: boolean; customLauncher?: boolean; rows?: Row[]; steps?: Step[] } = {}) {
   // Mutable row source standing in for the bound useSections hook; bump()
   // plays a ledger change through the same observable contract.
   let current = rows
   const listeners = new Set<() => void>()
   const renderSlot = vi.fn(
-    ((key: string, _owner: unknown, opts?: { only?: string }) => {
+    ((key: string, owner: unknown, opts?: { only?: string; fallback?: ReactNode }) => {
+      if (key === 'settings.launcher') {
+        if (!customLauncher) return opts?.fallback
+        const launcher = owner as {
+          isOpen: boolean
+          openSection: (id: string) => void
+        }
+        return (
+          <button
+            type="button"
+            aria-expanded={launcher.isOpen}
+            onClick={() => { launcher.openSection('models') }}
+          >
+            Account launcher
+          </button>
+        )
+      }
       if (key === 'settings.section') return <div data-testid={`section-${opts?.only ?? 'all'}`} />
       return SEAT_CONTENT[key]
     }) as SettingsRootComponentProps['renderSlot'],
@@ -94,6 +111,26 @@ describe('SettingsRoot trigger', () => {
   it('hands the rail state to the trigger seat', () => {
     const { renderSlot } = mount({ wide: false })
     expect(renderSlot).toHaveBeenCalledWith('settings.trigger', { wide: false })
+  })
+
+  it('lets a product launcher replace the fallback and open a selected section', () => {
+    const { renderSlot } = mount({ customLauncher: true })
+    expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull()
+    const launcher = screen.getByRole('button', { name: 'Account launcher' })
+    expect(launcher.getAttribute('aria-expanded')).toBe('false')
+
+    fireEvent.click(launcher)
+
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    expect(screen.getByTestId('section-models')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Account launcher' }).getAttribute('aria-expanded')).toBe('true')
+    const launcherCall = renderSlot.mock.calls.filter(call => call[0] === 'settings.launcher').at(-1)!
+    const owner = launcherCall[1] as SettingsLauncherOwnerProps
+    expect(owner.wide).toBe(true)
+    expect(owner.isOpen).toBe(true)
+    expect(typeof owner.openSettings).toBe('function')
+    expect(typeof owner.openSection).toBe('function')
+    expect(launcherCall[2]?.fallback).toBeTruthy()
   })
 })
 
@@ -175,21 +212,20 @@ describe('SettingsPanel navigation', () => {
       rows: [
         { id: 'general', order: 0, label: 'General' },
         { id: 'models', order: 10, label: 'Models' },
-        { id: 'agent-presets', order: 20, label: 'Agent presets' },
         { id: 'plugins', order: 30, label: 'Plugins' },
         { id: 'contributed', order: 40, label: 'Contributed' },
       ],
     })
     openPanel()
     // Glyphs carry no id of their own, so the drawn paths are what tells them apart.
-    const glyphs = ['General', 'Models', 'Agent presets', 'Plugins', 'Contributed']
+    const glyphs = ['General', 'Models', 'Plugins', 'Contributed']
       .map(name => screen.getByRole('button', { name }).querySelector('svg')?.innerHTML)
 
     expect(glyphs.every(glyph => glyph !== undefined && glyph !== '')).toBe(true)
-    // The three ids the shell names get their own glyph; every other section —
+    // The two ids the shell names get their own glyph; every other section —
     // including one this package never heard of — shares the gear.
-    expect(new Set(glyphs.slice(0, 4)).size).toBe(4)
-    expect(glyphs[4]).toBe(glyphs[0])
+    expect(new Set(glyphs.slice(0, 3)).size).toBe(3)
+    expect(glyphs[3]).toBe(glyphs[0])
   })
 
   it('switches the rendered section on nav click', () => {

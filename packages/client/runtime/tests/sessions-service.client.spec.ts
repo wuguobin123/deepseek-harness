@@ -79,8 +79,8 @@ describe('list store projection', () => {
 
     // A confirmed switch moves the preset alone: the row keeps its updatedAt,
     // title, running, and blank bits, so an identity guard blind to the preset
-    // would serve the old row forever — and every reader (the hero chip's own
-    // no-op check, the header label) would keep the composition it replaced.
+    // would serve the old row forever, so the header label would keep naming
+    // the composition this switch replaced.
     b.svc.noteAgentPreset(sid('s1'), 'minimal')
     await Promise.resolve()
 
@@ -485,11 +485,12 @@ describe('create', () => {
   it('resolves with the session already listed and binding-resolvable (no flush wait)', async () => {
     const b = bench()
     b.api.onCreate = () => Promise.resolve(ok({ sessionId: sid('born') }))
-    const born = await b.svc.create({ workspaceId: 'ws' as never })
+    const born = await b.svc.create({ workspaceId: 'ws' as never, cwd: '/w/ws' })
     // Synchronously after resolution — the draft hand-off contract: the
     // create echo IS the entity entering the client's view (blank row +
     // resolvable scope/binding), no notifier flush in between.
-    expect(b.svc.list.getSnapshot().byId[born]).toMatchObject({ id: 'born', blank: true })
+    expect(b.svc.list.getSnapshot().byId[born]).toMatchObject({ id: 'born', blank: true, cwd: '/w/ws' })
+    expect(b.api.callsOf('session.create')).toEqual([{ workspaceId: 'ws' }])
     expect(b.svc.binding(born)).toBeDefined()
     expect(b.svc.scope(born)).toBeDefined()
   })

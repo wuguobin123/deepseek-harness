@@ -3,7 +3,7 @@ import { type SessionEvent } from '@deepseek-ai/dsh-session'
 import { parseSessionLog } from '@deepseek-ai/dsh-llm-replay'
 import { canonicalSessionFixture } from './session-fixture-layout.ts'
 
-const HEADER = '  {"type":"session","version":0,"id":"fixture","createdAt":1,"delegationDepth":0}  '
+const HEADER = '  {"type":"session","version":1,"id":"fixture","createdAt":1,"delegationDepth":0}  '
 
 function chunkRun(): SessionEvent[] {
   return Array.from({ length: 4 }, (_, index) => ({

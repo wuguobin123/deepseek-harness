@@ -32,6 +32,7 @@ Node 部署在受支持的 macOS、Linux 与 Windows x64/arm64 目标上获得 `
 | `timeoutMs` | `30000` | 附加到两个工具定义上的协作式工具调用预算，由 `@deepseek-ai/dsh-tool-call-timeout-policy` 通过 `exec.signal` 强制执行；subprocess seam 的终止升级提供硬终止。 |
 | `graceMs` | `3000` | subprocess seam 在 `timeoutMs` 之外授予的终止升级宽限期须为正值；超过后搜索以 `SEARCH_ABORTED` 失败；该宽限期不得大于 [`MAX_TIMER_DELAY_MS`](../../util/timeout/README.zh.md)。 |
 | `stderrMaxBytes` | `65536` | `rg` stderr 的诊断尾部预算，经 subprocess seam 的 collect 形态捕获；lossy 读取只保留尾部（标记 `[stderr truncated]`）。 |
+| `workspaceOnly` | `false` | 为 true 时，显式或默认搜索根规范化后必须位于调用会话 cwd 下；父级遍历、workspace 外绝对路径和符号链接逃逸会在 ripgrep 启动前失败。多用户 preset 应启用此项。 |
 
 ## 工具
 

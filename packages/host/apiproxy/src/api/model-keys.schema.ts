@@ -1,12 +1,7 @@
 /**
  * account.modelKeys.* zod schemas (names derived from map keys).
  *
- * `KeyId` rides the wire as `mk_<hex>` (16 hex chars), `KeyValue` as
- * `sk_<base64url>` (32 base64url chars). The schema does NOT enforce those
- * literal shapes — the host seam validates them through `mintKeyId` /
- * `mintKeyValue`. Re-validating here would duplicate the seam's contract
- * and risk drift. The wire schema only requires non-empty strings; the
- * host's call site re-brands.
+ * Upstream bearer tokens are never represented by these schemas.
  */
 
 import { z } from 'zod'
@@ -21,11 +16,10 @@ const opaqueIdSchema = z.string().min(1)
 const keyIdSchema = z.string().regex(/^mk_[a-f0-9]+$/i)
 
 /** `sk_<base64url>` plaintext bearer. */
-const keyValueSchema = z.string().regex(/^sk_[A-Za-z0-9_-]+$/)
 
 /** account.modelKeys.provision request payload. */
 export const accountModelKeysProvisionRequestSchema = z.object({
-  userId: opaqueIdSchema,
+  userId: opaqueIdSchema.optional(),
   label: z.string().min(1).max(64).optional(),
 }) satisfies z.ZodType<Wire<RequestPayload<'account.modelKeys.provision'>>>
 
@@ -35,12 +29,11 @@ export const accountModelKeysProvisionValueSchema = z.object({
   userId: opaqueIdSchema,
   label: z.string().min(1).max(64),
   createdAt: z.number().int().positive(),
-  keyValue: keyValueSchema,
 }) satisfies z.ZodType<Wire<ResponseValue<'account.modelKeys.provision'>>>
 
 /** account.modelKeys.list request payload. */
 export const accountModelKeysListRequestSchema = z.object({
-  userId: opaqueIdSchema,
+  userId: opaqueIdSchema.optional(),
 }) satisfies z.ZodType<Wire<RequestPayload<'account.modelKeys.list'>>>
 
 /** Single metadata row. */
@@ -51,6 +44,11 @@ const modelKeyViewSchema: z.ZodType<Wire<ModelKeyView>> = z.object({
   createdAt: z.number().int().positive(),
   lastUsedAt: z.number().int().positive().nullable(),
   revokedAt: z.number().int().positive().nullable(),
+  providerRoute: opaqueIdSchema,
+  apiBaseUrl: z.string(),
+  model: opaqueIdSchema,
+  inputPriceMicrosPerToken: z.number().int().nonnegative(),
+  outputPriceMicrosPerToken: z.number().int().nonnegative(),
 })
 
 /** account.modelKeys.list response value. */

@@ -32,6 +32,7 @@
 
 `WorkflowError` 携带一个代码和 `fatal` 标志。致命错误总会逸出 `parallel()` 和 `pipeline()`，而不会变成普通的逐项 `null`：
 
+- `ACCOUNT_HOST_EXECUTION_DENIED`：带账户所有者的父 agent 不能启动此宿主 worker 引擎，除非组合了账户隔离提供方；
 - `SCRIPT_PARSE` / `META_INVALID`：工作流无法启动；
 - `INVALID_ARGUMENT` / `UNSUPPORTED_OPTION` / `UNSUPPORTED_SCHEMA`：钩子调用违反引擎契约；
 - `AGENT_CAP` / `ITEM_CAP`：超过已配置的安全上限；

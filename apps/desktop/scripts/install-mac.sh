@@ -10,8 +10,10 @@
 set -euo pipefail
 
 BASE_URL="${DSH_RELEASES_URL:-https://wgb123-1257121815.cos.ap-beijing.myqcloud.com}"
-APP_NAME="DeepSeek Harness"
+APP_NAME="小薇"
 APP_PATH="/Applications/${APP_NAME}.app"
+LEGACY_APP_NAME="DeepSeek Harness"
+LEGACY_APP_PATH="/Applications/${LEGACY_APP_NAME}.app"
 
 ARCH="$(uname -m)"
 case "$ARCH" in
@@ -34,11 +36,13 @@ mkdir -p "$MOUNT_DIR"
 hdiutil attach -nobrowse -readonly -mountpoint "$MOUNT_DIR" "$DMG" >/dev/null
 [ -d "$MOUNT_DIR/$APP_NAME.app" ] || { echo "dmg 中未找到 $APP_NAME.app" >&2; exit 1; }
 
-if [ -d "$APP_PATH" ]; then
+if [ -d "$APP_PATH" ] || [ -d "$LEGACY_APP_PATH" ]; then
   echo "==> 已存在旧版本，退出正在运行的实例并替换"
   osascript -e "tell application \"$APP_NAME\" to quit" >/dev/null 2>&1 || true
+  osascript -e "tell application \"$LEGACY_APP_NAME\" to quit" >/dev/null 2>&1 || true
   sleep 1
-  rm -rf "$APP_PATH"
+  [ ! -d "$APP_PATH" ] || rm -rf "$APP_PATH"
+  [ ! -d "$LEGACY_APP_PATH" ] || rm -rf "$LEGACY_APP_PATH"
 fi
 
 echo "==> 安装到 /Applications"

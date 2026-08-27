@@ -6,8 +6,8 @@
  */
 
 import { expect } from 'vitest'
-import { FiberState, Inject, RegistryService, ValidationError } from '@deepseek-ai/cordis'
-import type { Context, Plugin } from '@deepseek-ai/cordis'
+import { Inject, RegistryService, ValidationError } from '@deepseek-ai/cordis'
+import type { Context, FiberState, Plugin } from '@deepseek-ai/cordis'
 import { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import type {
   ImageAttachmentLimits,
@@ -61,6 +61,12 @@ type PluginFiber = ReturnType<RegistryService['plugin']>
 type PluginCallback = Plugin.Function | Plugin.Constructor
 
 const hosts = new WeakMap<Context, InvariantHost>()
+// Cordis exposes FiberState as a const enum, so test transforms cannot import a runtime value.
+const FIBER_STATE = {
+  PENDING: 0 as FiberState.PENDING,
+  LOADING: 1 as FiberState.LOADING,
+  ACTIVE: 2 as FiberState.ACTIVE,
+} as const
 // oxlint-disable-next-line typescript/unbound-method -- every call below supplies its RegistryService receiver explicitly.
 const originalPlugin = RegistryService.prototype.plugin
 
@@ -92,7 +98,7 @@ RegistryService.prototype.plugin = function(plugin: Plugin, config?: unknown, ge
     config,
     getOuterStack,
   )
-  const initiallyPending = fiber.ctx.fiber.state === FiberState.PENDING
+  const initiallyPending = fiber.ctx.fiber.state === FIBER_STATE.PENDING
   host.barrierOwners.add(fiber.ctx.fiber)
   return joinInvariantStartup(fiber, host.ready, initiallyPending)
 }
@@ -215,7 +221,7 @@ function hasBarrierOwner(host: InvariantHost, ctx: Context): boolean {
   while (true) {
     if (
       host.barrierOwners.has(fiber)
-      && (fiber.state === FiberState.LOADING || fiber.state === FiberState.ACTIVE)
+      && (fiber.state === FIBER_STATE.LOADING || fiber.state === FIBER_STATE.ACTIVE)
     ) {
       return true
     }
@@ -227,7 +233,7 @@ function hasBarrierOwner(host: InvariantHost, ctx: Context): boolean {
 
 async function requireActive(fiber: PluginFiber, label: string): Promise<void> {
   await fiber.await()
-  if (fiber.state !== FiberState.ACTIVE) {
+  if (fiber.state !== FIBER_STATE.ACTIVE) {
     throw new Error(`test invariants: ${label} settled without becoming active`)
   }
 }

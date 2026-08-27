@@ -17,11 +17,19 @@ import { app, BrowserWindow, session } from 'electron'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { createRequire } from 'node:module'
 import { ApiClient } from './api-client'
 import { CredentialStore } from './credential-store'
 import { UpdateChecker } from './update-checker'
+import { ArtifactFileActions } from './artifact-files'
 import { createIpcHandlers, installSecurityGuards } from './ipc-handlers'
 import { AuthStateSchema, IpcChannels, type AuthState } from '../shared/contracts'
+import { registerArtifactPreviewProtocol, registerArtifactPreviewScheme } from './artifact-preview-protocol'
+import { LocalRuntimeSupervisor } from './local-runtime-supervisor'
+import { DualHostRouter } from './dual-host-router'
+import { parseAccountInferenceRequest } from '@deepseek-ai/dsh-llm-account-inference'
+
+registerArtifactPreviewScheme()
 
 function configuredBaseUrl(): string {
   const environmentUrl = process.env.WORKBENCH_API_BASE_URL
@@ -57,23 +65,60 @@ async function bootstrap(): Promise<void> {
   const apiClient = new ApiClient({
     baseUrl: credentialStore.snapshot().baseUrl || DEFAULT_BASE_URL,
   })
-  // Bootstrap the bearer token from the persisted v3 blob (workbuddy
+  const localBin = app.isPackaged
+    ? path.join(process.resourcesPath, 'local-runtime', 'bin', 'xiaowei-device-runtime.mjs')
+    : path.join(path.dirname(createRequire(__filename).resolve('@deepseek-ai/dsh-xiaowei-device-runtime/package.json')), 'bin', 'xiaowei-device-runtime.mjs')
+  const localSupervisor = new LocalRuntimeSupervisor({
+    userDataPath: app.getPath('userData'),
+    runtimeBin: localBin,
+    inferenceBridge: {
+      stream(request, signal) {
+        return apiClient.streamAccountInference(parseAccountInferenceRequest(request), signal)
+      },
+    },
+  })
+  let localClient: ApiClient | null = null
+  const ensureLocal = async (): Promise<ApiClient> => {
+    if (localClient) return localClient
+    localClient = new ApiClient({ baseUrl: await localSupervisor.start() })
+    return localClient
+  }
+  // The cloud Host is the default product view. The loopback Host is started
+  // only when a local resource is selected or a local RPC is first addressed.
+  const router = new DualHostRouter(apiClient, () => localClient, ensureLocal)
+  // Bootstrap the bearer token from the persisted v3 blob (xiaowei
   // multi-user backend). When the user signs in via SignInCard, the IPC
   // handlers update this same token and broadcast a fresh AuthState.
   const persistedToken = credentialStore.snapshot().sessionToken
   if (persistedToken !== undefined && persistedToken.length > 0) {
     apiClient.setToken(persistedToken)
   }
+  registerArtifactPreviewProtocol(artifactId => router.call('artifact.read', { artifactId }))
 
-  // Stub update checker (always up-to-date until dsh-ops exposes a releases endpoint).
   const updateChecker = new UpdateChecker({
+    baseUrl: () => credentialStore.snapshot().baseUrl || DEFAULT_BASE_URL,
     currentVersion: app.getVersion(),
     onStateChange: (state) => {
       mainWindow?.webContents.send(IpcChannels.AppUpdateStateEvent, state)
     },
   })
   updateChecker.start()
-  app.on('will-quit', () => updateChecker.stop())
+  app.on('will-quit', () => { updateChecker.stop() })
+
+  const artifactFiles = new ArtifactFileActions({
+    readArtifact: artifactId => router.call('artifact.read', { artifactId }),
+    downloadsDirectory: app.getPath('downloads'),
+    temporaryDirectory: app.getPath('temp'),
+  })
+  let artifactCleanupComplete = false
+  app.on('will-quit', (event) => {
+    if (artifactCleanupComplete) return
+    event.preventDefault()
+    void Promise.all([artifactFiles.dispose(), localSupervisor.stop()]).finally(() => {
+      artifactCleanupComplete = true
+      app.quit()
+    })
+  })
 
   /** Validate and forward AuthState changes to every renderer window. */
   function broadcastAuthState(state: AuthState): void {
@@ -86,10 +131,14 @@ async function bootstrap(): Promise<void> {
   mainWindow = createMainWindow()
   const ipc = createIpcHandlers({
     apiClient,
+    router,
     credentialStore,
     baseUrl: () => credentialStore.snapshot().baseUrl || DEFAULT_BASE_URL,
     updateChecker: () => updateChecker,
+    artifactFiles,
+    mainWindow: () => mainWindow,
     broadcastAuthState,
+    cancelLocalInferenceStreams: (code, message) => localSupervisor.cancelInferenceStreams(code, message),
   })
   ipc.install()
 
@@ -104,10 +153,14 @@ async function bootstrap(): Promise<void> {
       mainWindow = createMainWindow()
       const fresh = createIpcHandlers({
         apiClient,
+        router,
         credentialStore,
         baseUrl: () => credentialStore.snapshot().baseUrl || DEFAULT_BASE_URL,
         updateChecker: () => updateChecker,
+        artifactFiles,
+        mainWindow: () => mainWindow,
         broadcastAuthState,
+        cancelLocalInferenceStreams: (code, message) => localSupervisor.cancelInferenceStreams(code, message),
       })
       fresh.install()
       installSecurityGuards(mainWindow)
@@ -127,7 +180,7 @@ function createMainWindow(): BrowserWindow {
     minHeight: 640,
     show: false,
     backgroundColor: '#0b0d12',
-    title: 'DeepSeek Harness',
+    title: '小薇',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
@@ -150,7 +203,7 @@ function createMainWindow(): BrowserWindow {
   const rendererIndex = path.join(__dirname, '../../renderer/index.html')
   void win.loadFile(rendererIndex)
 
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () =>{  win.show() })
 
   win.webContents.on('will-navigate', (event, url) => {
     if (!url.startsWith('file://')) event.preventDefault()
@@ -161,7 +214,7 @@ function createMainWindow(): BrowserWindow {
 }
 
 function registerSecurityHeaders(): void {
-  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+  session.defaultSession.webRequest.onHeadersReceived({ urls: ['file://*/*'] }, (details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
@@ -173,7 +226,7 @@ function registerSecurityHeaders(): void {
             "connect-src 'self'; " +
             "font-src 'self'; " +
             "object-src 'none'; " +
-            "frame-src 'self' blob:; " +
+            "frame-src 'self' blob: xiaowei-artifact:; " +
             "frame-ancestors 'none'; " +
             "base-uri 'self'",
         ],
@@ -192,8 +245,8 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-app.whenReady().then(() => {
-  bootstrap().catch((err) => {
+void app.whenReady().then(() => {
+  bootstrap().catch((err: unknown) => {
     console.error('failed to bootstrap workbench desktop:', err)
     app.exit(1)
   })

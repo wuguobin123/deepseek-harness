@@ -1,5 +1,7 @@
 # Skill Scenario Template
 
+English | [中文](README.zh.md)
+
 Copy this directory next to your profile's `cordis.yml`, rename `hello-scenario/` to your scenario's kebab-case name, and edit `SKILL.md`. The provider `dsh-skill-filesystem` discovers the directory and registers the Skill on `ctx.skills` once `customSkillDirs` points at it.
 
 ## Files

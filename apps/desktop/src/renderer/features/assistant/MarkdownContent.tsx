@@ -7,26 +7,26 @@
  * renderer from reaching `shell.openExternal` directly, so the in-app
  * webview stays on its CSP-restricted origin.
  */
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 function safeMarkdownUri(value: string | undefined): string | null {
-  if (!value) return null;
+  if (!value) return null
   try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null
   } catch {
-    return null;
+    return null
   }
 }
 
 export function MarkdownContent({
   children,
-  className = ''
+  className = '',
 }: {
-  children: string;
-  className?: string;
-}): JSX.Element {
+  children: string
+  className?: string
+}): React.JSX.Element {
   return (
     <div className={`assistant-markdown ${className}`.trim()}>
       <ReactMarkdown
@@ -34,26 +34,26 @@ export function MarkdownContent({
         skipHtml
         components={{
           a({ children: linkChildren, href }) {
-            const safeUri = safeMarkdownUri(href);
+            const safeUri = safeMarkdownUri(href)
             return safeUri ? (
               <a href={safeUri} target="_blank" rel="noopener noreferrer">
                 {linkChildren}
               </a>
             ) : (
               <span>{linkChildren}</span>
-            );
+            )
           },
           table({ children: tableChildren }) {
             return (
               <div className="assistant-markdown__table">
                 <table>{tableChildren}</table>
               </div>
-            );
-          }
+            )
+          },
         }}
       >
         {children}
       </ReactMarkdown>
     </div>
-  );
+  )
 }

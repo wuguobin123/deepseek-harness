@@ -5,7 +5,7 @@
  */
 
 import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
-import type { AttachmentIdType, ImageAttachmentLimits, ImageAttachmentRef, ImageMediaType } from '@deepseek-ai/dsh-attachment'
+import type { AttachmentIdType, ImageAttachmentLimits, ImageAttachmentRef, ImageMediaType, DocumentAttachmentRef, DocumentMediaType } from '@deepseek-ai/dsh-attachment'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm/types'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session/types'
 // The pure-type outlet: api/ is browser-importable, and the package root's
@@ -56,7 +56,7 @@ declare module '@deepseek-ai/dsh-llm' {
      * carries no transport vocabulary; rpcId and the optional Host-validated browser zone are
      * durable JSON fields passed back to the client with the event.
      */
-    'user-rpc': { kind: 'user'; rpcId: RpcId; clientTimeZone?: string }
+    'user-rpc': { kind: 'user'; rpcId: RpcId; clientTimeZone?: string; files?: readonly Pick<DocumentAttachmentRef, 'attachmentId' | 'mediaType' | 'bytes' | 'name' | 'kind' | 'summary'>[] }
   }
 }
 
@@ -91,6 +91,7 @@ export interface SessionProjectionsBlock {
 export type PromptContentPart =
   | { type: 'text'; text: string }
   | { type: 'image'; mediaType: ImageMediaType; data: string; name?: string }
+  | { type: 'file'; mediaType: DocumentMediaType; data: string; name?: string; kind: DocumentAttachmentRef['kind']; summary?: string }
 
 /** Complete model selection for one session. */
 export interface ModelSelection {

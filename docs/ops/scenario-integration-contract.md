@@ -173,4 +173,3 @@ The drop-in scaffolds live beside this contract and verify both接入 shapes key
 - Python Subagent provider: [`@deepseek-ai/dsh-ops-subagent-python`](../../packages/ops/ops-subagent-python/README.md).
 - User approval extension point: [`@deepseek-ai/dsh-interaction-user-approval`](../../packages/interaction/user-approval/README.md).
 - Loop hygiene: [`@deepseek-ai/dsh-guard-repeat-tool-reminder`](../../packages/guard/repeat-tool-reminder/README.md).
-- Plan and roadmap: [`hashed-cooking-quill.md`](../../.claude/plans/hashed-cooking-quill.md) Phase 0 P0.6-P0.9.

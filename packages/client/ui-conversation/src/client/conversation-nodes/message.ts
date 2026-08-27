@@ -3,7 +3,8 @@ import type {
   ContextMessageNode, ConversationNodeDefinition, SteeringMessageNode, UserMessageNode,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import {
-  contextForm, contextProvenance, isAppendSurfaceEvent, isReplacementSurfaceEvent,
+  contextForm, contextProvenance, isAppendSurfaceEvent, isMaxTokenContinuationSource,
+  isReplacementSurfaceEvent,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type { InboxState } from './inbox.ts'
 import { chatNode } from './common.ts'
@@ -43,6 +44,7 @@ export const messageDefinition: ConversationNodeDefinition<MessageNode> = {
   target: 'chat',
   match: event => event.type === 'user/message'
     && isAppendSurfaceEvent(event)
+    && !isMaxTokenContinuationSource(event.data.source)
     && !isCompactionCheckpoint(event)
     ? { id: String(event.data.id), role: 'start' }
     : null,

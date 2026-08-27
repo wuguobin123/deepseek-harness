@@ -151,6 +151,10 @@ export class FakeApiClient implements IApiClient {
 
   readonly workspace: IApiClient['workspace'] = {
     list: (payload: unknown) => this.record('workspace.list', payload, Promise.resolve(ok({ items: [], archivedSessionIds: [] }))),
+    importDirectory: (payload: unknown) => this.record('workspace.importDirectory', payload, Promise.resolve(ok({
+      workspace: { workspaceId: 'fk-import' as never, path: '/f/import', title: 'import（导入副本）', sessionIds: [], createdAt: '0', updatedAt: '0' },
+      created: true,
+    }))),
     create: (payload: unknown) => this.record('workspace.create', payload, Promise.resolve(ok({
       workspace: { workspaceId: 'fk-ws' as never, path: '/f/ws', title: 'ws', sessionIds: [], createdAt: '0', updatedAt: '0' },
       created: true,
@@ -236,6 +240,19 @@ export class FakeApiClient implements IApiClient {
       expiresInSeconds: 600,
       retryAfterSeconds: 0,
     }))),
+    invites: {
+      create: (payload: unknown) => this.record('account.invites.create', payload, Promise.resolve(ok({
+        invitationId: 'fk-invitation',
+        code: 'fk-share-code',
+        codeMask: '••••code',
+        createdAt: 1,
+        expiresAt: 2,
+        consumedAt: null,
+        redeemedBy: null,
+      }))),
+      list: (payload: unknown) => this.record('account.invites.list', payload, Promise.resolve(ok({ items: [] }))),
+      rotate: (payload: unknown) => this.record('account.invites.rotate', payload, Promise.resolve(ok({ invitationId: 'fk-invitation', code: 'fk-share-code', codeMask: '••••code', createdAt: 1, expiresAt: 2, consumedAt: null, redeemedBy: null }))),
+    },
     signin: (payload: unknown) => this.record('account.signin', payload, Promise.resolve(ok({
       userId: 'fk-user' as never,
       displayName: null,
@@ -296,6 +313,30 @@ export class FakeApiClient implements IApiClient {
     revoke: (payload: unknown) => this.record('account.modelKeys.revoke', payload, Promise.resolve(ok({ revoked: true }))),
   }
 
+  readonly customModels: IApiClient['customModels'] = {
+    create: payload => this.record('account.customModels.create', payload, Promise.resolve(ok({
+      customModelId: 'cm_0000000000000000',
+      label: 'Fixture model',
+      api: 'openai-completions' as const,
+      baseURL: 'https://api.example.com/v1',
+      upstreamModel: 'fixture-model',
+      created: Date.now(),
+      revoked: null,
+    }))),
+    list: payload => this.record('account.customModels.list', payload, Promise.resolve(ok({ items: [] }))),
+    remove: payload => this.record('account.customModels.remove', payload, Promise.resolve(ok({ removed: true }))),
+  }
+
+  readonly accountPlugins: IApiClient['accountPlugins'] = {
+    list: payload => this.record('account.plugins.list', payload, Promise.resolve(ok({ items: [] }))),
+    install: payload => this.record('account.plugins.install', payload, Promise.resolve(ok({
+      pluginId: payload.pluginId, title: 'Fixture', description: 'Fixture plugin', version: '1', systemDefault: false, installed: true,
+    }))),
+    uninstall: payload => this.record('account.plugins.uninstall', payload, Promise.resolve(ok({
+      pluginId: payload.pluginId, title: 'Fixture', description: 'Fixture plugin', version: '1', systemDefault: false, installed: false,
+    }))),
+  }
+
   readonly artifactRegistry: IApiClient['artifactRegistry'] = {
     list: (payload: unknown) => this.record('artifact.list', payload, Promise.resolve(ok({ items: [] }))),
     read: (payload: unknown) => this.record('artifact.read', payload, Promise.resolve(ok({
@@ -310,6 +351,19 @@ export class FakeApiClient implements IApiClient {
       bytesBase64: '',
     }))),
     remove: (payload: unknown) => this.record('artifact.remove', payload, Promise.resolve(ok({ removed: true as const }))),
+  }
+
+  readonly userContext: IApiClient['userContext'] = {
+    list: (payload: unknown) => this.record('userContext.list', payload, Promise.resolve(ok({ items: [] }))),
+    get: (payload: unknown) => this.record('userContext.get', payload, Promise.resolve(ok({ missing: true as const }))),
+    set: (payload: { kind: 'preference' | 'working' | 'profile'; key: string; workspaceId?: string | null; value: string }) =>
+      this.record('userContext.set', payload, Promise.resolve(ok({
+        entry: {
+          kind: payload.kind, key: payload.key as never, workspaceId: payload.workspaceId ?? null,
+          value: payload.value, updatedAt: 0, createdAt: 0,
+        },
+      }))),
+    delete: (payload: unknown) => this.record('userContext.delete', payload, Promise.resolve(ok({ removed: false }))),
   }
 
   /** When true, streams never fire onOpen (misbehaving-carrier material for the handshake timeout guard). */

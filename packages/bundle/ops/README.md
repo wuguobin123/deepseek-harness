@@ -31,7 +31,7 @@ The patch rides directly over `dsh-base`. It inserts:
 
 ## Model Experience
 
-The optional foreground task is submitted as an ordinary user message; the persistent service adds nothing to the request prefix when no task is provided.
+Indirectly, through the composed plugins that own every prompt, tool, and result visible to the model.
 
 #### KV Cache effect
 

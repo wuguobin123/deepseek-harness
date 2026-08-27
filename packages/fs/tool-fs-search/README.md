@@ -32,6 +32,7 @@ Node deployments receive the `@vscode/ripgrep` platform package on supported mac
 | `timeoutMs` | `30000` | Cooperative tool-call budget attached to both tool definitions, enforced by `@deepseek-ai/dsh-tool-call-timeout-policy` through `exec.signal`; the subprocess seam's terminate escalation is the hard kill. |
 | `graceMs` | `3000` | Positive terminate-escalation grace the subprocess seam grants past `timeoutMs` before the search fails as `SEARCH_ABORTED`; it cannot exceed [`MAX_TIMER_DELAY_MS`](../../util/timeout/README.md). |
 | `stderrMaxBytes` | `65536` | Diagnostic-tail budget for `rg` stderr, captured through the subprocess seam's collect disposition; a lossy read keeps only the tail (marked `[stderr truncated]`). |
+| `workspaceOnly` | `false` | When true, an explicit or default search root must canonicalize below the calling session cwd; traversal, absolute paths outside the workspace, and symlink escapes fail before ripgrep starts. Multi-user presets should enable this. |
 
 ## Tools
 

@@ -10,6 +10,7 @@
  */
 
 import { access, lstat, readdir, readFile, stat } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { unwatchFile, watchFile, type Stats } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { homedir } from 'node:os'
@@ -71,6 +72,8 @@ export interface Config {
   watchFollowSymlinks?: boolean
   /** Bundled skill root; defaults to `$DSH_BUNDLED_SKILL_DIR` when default roots are included, otherwise mounts none. */
   bundledSkillDir?: string
+  /** Additional read-only roots used for account-scoped lookup. */
+  systemSkillDirs?: string[]
 }
 
 export const Config: Schema<Config> = z.object({
@@ -86,6 +89,7 @@ export const Config: Schema<Config> = z.object({
   watchMaxProjects: z.number().default(DEFAULT_WATCH_MAX_PROJECTS),
   watchFollowSymlinks: z.boolean().default(true),
   bundledSkillDir: z.string(),
+  systemSkillDirs: z.array(z.string()).default([]),
 })
 
 interface SkillRoot {
@@ -151,6 +155,7 @@ export class FileSystemSkillProvider implements SkillProvider {
   private readonly customSkillDirs: string[]
   private readonly watchManager: SkillWatchManager
   private readonly bundledSkillDir: string | undefined
+  private readonly systemSkillDirs: string[]
   private disposal: Promise<void> | undefined
 
   constructor(
@@ -163,6 +168,7 @@ export class FileSystemSkillProvider implements SkillProvider {
     this.dshHome = resolveDshHome(config.dshHome)
     this.agentsHome = resolve(config.agentsHome ?? process.env.DSH_AGENTS_HOME ?? join(homedir(), '.agents'))
     this.customSkillDirs = (config.customSkillDirs ?? []).map(root => resolve(root))
+    this.systemSkillDirs = (config.systemSkillDirs ?? []).map(root => resolve(root))
     this.watchManager = new SkillWatchManager(ctx, control.invalidate, resolveWatchConfig(config))
     control.signal.addEventListener('abort', () => { void this.dispose() }, { once: true })
     // The environment bundled root is a default root: an isolated provider
@@ -180,7 +186,7 @@ export class FileSystemSkillProvider implements SkillProvider {
    *   failure returns readable candidates as an incomplete observation.
    */
   async list(options: SkillLookupOptions): Promise<SkillCandidate[] | SkillProviderObservation> {
-    const roots = await this.roots(options.cwd)
+    const roots = await this.roots(options.cwd, options.ownerId)
     let complete = true
     try {
       await this.watchManager.observeRoots(roots)
@@ -238,8 +244,16 @@ export class FileSystemSkillProvider implements SkillProvider {
     return this.disposal
   }
 
-  private async roots(cwd: string | undefined): Promise<SkillRoot[]> {
+  private async roots(cwd: string | undefined, ownerId: string | undefined): Promise<SkillRoot[]> {
     const roots: SkillRoot[] = []
+    if (ownerId !== undefined) {
+      if (ownerId.length === 0) return roots
+      const ownerHash = createHash('sha256').update(ownerId).digest('hex')
+      roots.push(...this.systemSkillDirs.map(path => ({ path, source: 'custom' as const, rank: CUSTOM_RANK, skipSystem: true })))
+      if (this.bundledSkillDir !== undefined) roots.push({ path: this.bundledSkillDir, source: 'bundled', rank: BUNDLED_SKILL_RANK, trustedHost: true })
+      roots.push({ path: join(this.dshHome, 'accounts', ownerHash, 'skills'), source: 'user-dsh', rank: USER_DSH_RANK, skipSystem: true })
+      return roots
+    }
     if (this.includeDefaultRoots && cwd !== undefined) {
       const projectRoot = await findProjectRoot(resolve(cwd), optionalFileSystem(this.ctx))
       roots.push(

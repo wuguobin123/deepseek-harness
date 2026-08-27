@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {
   ConversationMatch, ConversationNodeContext, ConversationNodeDefinition, TurnMaxTokensNode,
 } from '@deepseek-ai/dsh-client-runtime/client'
+import { isMaxTokenContinuationSource } from '@deepseek-ai/dsh-client-runtime/client'
 import { CHAT_SYNTHETIC_SEQ_OFFSETS, chatNode } from './common.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
@@ -15,6 +16,8 @@ interface TurnMaxTokensState {
   readonly turn: number
   readonly seq: number
   readonly time: number
+  readonly ordinal?: number
+  readonly limit?: number
 }
 
 function lastStep(context: ConversationNodeContext<TurnMaxTokensState>): number {
@@ -39,8 +42,16 @@ function noticeAnchor(context: ConversationNodeContext<TurnMaxTokensState>, seq:
 }
 
 function stateFrom(match: ConversationMatch): TurnMaxTokensState | undefined {
-  if (match.event.type !== 'turn/end' || match.event.data.reason.kind !== 'max-tokens') return undefined
-  return { turn: match.event.data.turn, seq: match.event.seq, time: match.event.time }
+  if (match.event.type === 'turn/end' && match.event.data.reason.kind === 'max-tokens') {
+    return { turn: match.event.data.turn, seq: match.event.seq, time: match.event.time }
+  }
+  if (match.event.type !== 'user/message') return undefined
+  const source = match.event.data.source
+  if (!isMaxTokenContinuationSource(source)) return undefined
+  return {
+    turn: source.fromTurn, seq: match.event.seq, time: match.event.time,
+    ordinal: source.ordinal, limit: source.limit,
+  }
 }
 
 /** Notice Definition for a turn the provider ended at its output-token cap. */
@@ -51,6 +62,10 @@ export const turnMaxTokensDefinition: ConversationNodeDefinition<TurnMaxTokensSt
     if (event.type === 'turn/end' && event.data.reason.kind === 'max-tokens') {
       return { id: String(event.data.turn), role: 'start' }
     }
+    if (event.type === 'user/message') {
+      const source = event.data.source
+      if (isMaxTokenContinuationSource(source)) return { id: String(source.fromTurn), role: 'update' }
+    }
     return null
   },
   start: (_context, match) => {
@@ -58,7 +73,15 @@ export const turnMaxTokensDefinition: ConversationNodeDefinition<TurnMaxTokensSt
     if (state === undefined) throw new Error('turn-max-tokens start requires a max-tokens turn/end')
     return state
   },
-  update: context => context.state,
+  update: (context, match) => {
+    const next = stateFrom(match)
+    if (next === undefined) return context.state
+    return {
+      ...context.state,
+      ...(match.event.type === 'turn/end' ? { seq: next.seq, time: next.time } : {}),
+      ...(next.ordinal === undefined ? {} : { ordinal: next.ordinal, limit: next.limit }),
+    }
+  },
   buildViewNode: (context) => {
     const state = context.state
     if (state === undefined) return null
@@ -68,6 +91,8 @@ export const turnMaxTokensDefinition: ConversationNodeDefinition<TurnMaxTokensSt
       time: state.time,
       turn: state.turn,
       step: lastStep(context),
+      ...(state.ordinal === undefined || state.limit === undefined
+        ? {} : { continuation: { ordinal: state.ordinal, limit: state.limit } }),
     }
     return chatNode(context, 'turn-max-tokens', noticeAnchor(context, state.seq), node)
   },

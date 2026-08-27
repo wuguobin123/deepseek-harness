@@ -7,6 +7,8 @@
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
   'group.ungrouped': '未分组',
+  'group.local': '本机工作区',
+  'group.cloud': '云端工作区',
   'session.new': '新会话',
   'section.workspaces': '工作区',
   'section.sessions': '会话',
@@ -31,6 +33,8 @@ export const zh = {
   'search.noMatches': '无匹配会话',
   'search.hasMore': '仅显示前 {n} 条结果，请缩小搜索范围。',
   'menu.addWorkspace': '添加工作区…',
+  'menu.openLocalWorkspace': '打开本机文件夹（实时，不上传）',
+  'menu.importCloudCopy': '导入云端副本（独立副本）',
   'picker.loading': '正在加载工作区…',
   'conflict.named': '已存在名为“{name}”的工作区。',
   'folderError.title': '无法打开文件夹',
@@ -76,6 +80,8 @@ export type WorkspaceKey = keyof typeof zh
 /** English dictionary, checked complete against the zh key set. */
 export const en = {
   'group.ungrouped': 'Ungrouped',
+  'group.local': 'Local workspaces',
+  'group.cloud': 'Cloud workspaces',
   'session.new': 'New Session',
   'section.workspaces': 'Workspaces',
   'section.sessions': 'Sessions',
@@ -100,6 +106,8 @@ export const en = {
   'search.noMatches': 'No matching sessions',
   'search.hasMore': 'Showing the first {n} results. Narrow your search.',
   'menu.addWorkspace': 'Add workspace…',
+  'menu.openLocalWorkspace': 'Open local folder (live, not uploaded)',
+  'menu.importCloudCopy': 'Import cloud copy (independent copy)',
   'picker.loading': 'Loading workspaces…',
   'conflict.named': 'A workspace named “{name}” already exists.',
   'folderError.title': 'Couldn’t open folder',

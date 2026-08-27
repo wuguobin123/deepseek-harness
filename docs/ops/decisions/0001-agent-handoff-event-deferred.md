@@ -1,8 +1,8 @@
 # 0001 — `agent/handoff` session event deferred
 
-Status: deferred
-Date: 2026-08-22
-Owner: ops-runtime (future)
+English | [中文](0001-agent-handoff-event-deferred.zh.md)
+
+Status: deferred Date: 2026-08-22 Owner: ops-runtime (future)
 
 ## Context
 
@@ -14,7 +14,7 @@ Defer. The event will be added when a real producer lands, not before.
 
 ## Why
 
-`KNOWN_SESSION_EVENT_TYPES` is generated from `SessionEventMap` declaration merging across the repo. The persistence read path refuses to interpret any event type outside that set unless the envelope carries `ignorable: true` ([mechanism](../../.agents/notes/implemented/architecture/2026-08-10-session-log-version-mechanism.md)). A new event type without a producer declaration:
+`KNOWN_SESSION_EVENT_TYPES` is generated from `SessionEventMap` declaration merging across the repo. The persistence read path refuses to interpret any event type outside that set unless the envelope carries `ignorable: true` ([mechanism](../../../.agents/notes/implemented/architecture/2026-08-10-session-log-version-mechanism.md)). A new event type without a producer declaration:
 
 1. Would be a dangling declaration; the catalog verifier `verify-persistence-catalog` rejects declarations that no `SessionEventMap` member produces.
 2. Could not be safely emitted by any code path that does not yet exist.
@@ -26,7 +26,7 @@ The pre-release stance in [`AGENTS.md`](../../../AGENTS.md) — "prefer the corr
 
 `packages/ops/ops-runtime` (when a business scenario decides to use an orchestrator-driven handoff). The candidate shape:
 
-```ts
+```ts ignore-check
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
     'agent/handoff'(

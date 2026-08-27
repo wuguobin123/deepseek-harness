@@ -108,8 +108,9 @@ const turnError = (seq: number, code?: string): TurnErrorNode => ({
   message: seq === 2 ? 'API key is invalid' : 'plugin exploded',
   ...(code === undefined ? {} : { code }),
 })
-const turnMaxTokens = (seq: number): TurnMaxTokensNode => ({
+const turnMaxTokens = (seq: number, continuation?: TurnMaxTokensNode['continuation']): TurnMaxTokensNode => ({
   kind: 'turn-max-tokens', seq, time: seq * 1_000, turn: 1, step: 0,
+  ...(continuation === undefined ? {} : { continuation }),
 })
 const toolResult = (seq: number, callId: string, name = 'bash'): ToolResultNode => ({
   kind: 'tool-result', seq, time: seq * 1_000, callId,
@@ -154,6 +155,7 @@ function makeHarness(init?: Partial<ConversationSnapshot>) {
   const openDetails = vi.fn<(t: SelectionTarget) => void>()
   const openFile = vi.fn<(path: string) => Promise<void>>().mockResolvedValue(undefined)
   const loadOlder = vi.fn()
+  const retryHistory = vi.fn()
   const inspectCall = vi.fn<(callId: string) => void>()
   // In-memory scroll memory matching the apply.ts per-session map contract.
   let savedScroll: ReturnType<ChatViewSlotProps['chatScroll']['read']> = null
@@ -281,8 +283,10 @@ function makeHarness(init?: Partial<ConversationSnapshot>) {
     renderSlot,
     SessionProvider: SessionProviderStub,
     openDetails,
+    openArtifact: () => {},
     openFile,
     loadOlder,
+    retryHistory,
     loadImage: vi.fn(() => Promise.reject(new Error('not used'))),
     inspectCall,
     chatScroll,
@@ -294,7 +298,7 @@ function makeHarness(init?: Partial<ConversationSnapshot>) {
   }
   const setSelection = (next: SelectionTarget | null): void => { chat.actions.select(next) }
   return {
-    set, ChatView, props, openDetails, openFile, loadOlder, inspectCall,
+    set, ChatView, props, openDetails, openFile, loadOlder, retryHistory, inspectCall,
     chatScroll, forkAt, setSelection, toolOwners,
   }
 }
@@ -595,9 +599,18 @@ describe('ChatView', () => {
     const view = render(<h.ChatView {...h.props} />)
     const statuses = view.getAllByRole('status')
     expect(statuses.map(status => status.textContent)).toEqual([
-      '已达到输出 token 上限回答被截断，已有输出保留在对话中。发送“继续”可让模型接着输出。',
+      '已达到输出 token 上限回答被截断，已有输出保留在对话中。你可以手动发送消息继续。',
     ])
     expect(view.queryByText('本轮运行失败')).toBeNull()
+  })
+
+  it('renders metadata-confirmed continuation progress without the manual hint', () => {
+    const h = makeHarness({
+      nodes: [user(1, 'try'), assistant(2, 'truncated'), turnMaxTokens(3, { ordinal: 3, limit: 3 })],
+    })
+    const view = render(<h.ChatView {...h.props} />)
+    expect(view.getByRole('status').textContent).toBe('已自动续写 3/3模型将自动接着输出。')
+    expect(view.queryByText(/手动发送消息继续/)).toBeNull()
   })
 
   it('hands the trajectory callback to the Tool seat', () => {
@@ -1340,6 +1353,8 @@ describe('ChatView', () => {
     })
     const view = render(<h.ChatView {...h.props} />)
     expect(view.getByText(/历史加载失败：boom/)).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: '重试加载' }))
+    expect(h.retryHistory).toHaveBeenCalledOnce()
     const loading = makeHarness({ openState: 'loading' })
     const lv = render(<loading.ChatView {...loading.props} />)
     expect(lv.getByText('载入历史…')).toBeTruthy()

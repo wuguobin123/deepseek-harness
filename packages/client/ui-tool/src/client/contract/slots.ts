@@ -41,6 +41,8 @@ export interface ToolCallOwnerProps {
   openFile: (path: string) => void
   /** Inspect this call in the trajectory view when available. */
   inspect?: (() => void) | undefined
+  /** Open the artifact details surface for a generated artifact. */
+  openArtifact?: ((artifactId: string) => void) | undefined
 }
 
 /** Full props of a registered atomic Tool view. */

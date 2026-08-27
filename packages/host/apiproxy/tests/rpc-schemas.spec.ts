@@ -77,6 +77,9 @@ describe('rpcErrorSchema', () => {
     expect(rpcErrorSchema.parse({ code: 'command-error', message: 'm', details: {} }).code).toBe('command-error')
     expect(rpcErrorSchema.parse({ code: 'unknown-command', message: 'm', details: {} }).code).toBe('unknown-command')
     expect(rpcErrorSchema.parse({ code: 'title-invalid', message: 'm', details: { sessionId: 's' } }).code).toBe('title-invalid')
+    expect(rpcErrorSchema.parse({ code: 'invitation-invalid', message: 'm', details: {} }).code).toBe('invitation-invalid')
+    expect(rpcErrorSchema.parse({ code: 'invitation-limit', message: 'm', details: {} }).code).toBe('invitation-limit')
+    expect(rpcErrorSchema.parse({ code: 'user-limit', message: 'm', details: {} }).code).toBe('user-limit')
     // The credentials producer still emits this code, so the branch has to stay.
     expect(rpcErrorSchema.parse({ code: 'credential-rejected', message: 'm', details: { ref: 'r' } }).code).toBe('credential-rejected')
     expect(rpcErrorSchema.parse({ code: 'internal', message: 'm', details: {} }).code).toBe('internal')
@@ -265,6 +268,23 @@ describe('sessions domain schemas', () => {
     expect(sessionPromptRequestSchema.parse({
       sessionId: 's1', mode: 'queue', content: [],
     }).clientTimeZone).toBeUndefined()
+    const documentPrompt = sessionPromptRequestSchema.parse({
+      sessionId: 's1',
+      mode: 'queue',
+      content: [{
+        type: 'file',
+        mediaType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        kind: 'xlsx',
+        name: 'sales.xlsx',
+        data: 'UEsDBA==',
+      }],
+    })
+    expect(documentPrompt.content[0]).toMatchObject({ type: 'file', kind: 'xlsx', name: 'sales.xlsx' })
+    expect(() => sessionPromptRequestSchema.parse({
+      sessionId: 's1',
+      mode: 'queue',
+      content: [{ type: 'file', mediaType: 'text/plain', kind: 'xlsx', data: 'eA==' }],
+    })).toThrow()
     expect(() => sessionPromptRequestSchema.parse({ sessionId: 's1', mode: 'inject', content: [] })).toThrow()
     expect(sessionPromptValueSchema.parse({ accepted: true }).accepted).toBe(true)
     // The command slot appears only when the prompt dispatched a slash command.

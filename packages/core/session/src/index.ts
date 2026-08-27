@@ -104,6 +104,9 @@ function validateSessionHeader(id: SessionId, input: unknown): SessionHeader {
   if (record.id !== id) {
     throw new Error(`session header id "${String(record.id)}" does not match session id "${id}"`)
   }
+  if (record.ownerId !== undefined && (typeof record.ownerId !== 'string' || record.ownerId.length === 0)) {
+    throw new Error('session header ownerId must be a non-empty string')
+  }
   if (typeof record.createdAt !== 'number'
     || !Number.isSafeInteger(record.createdAt)
     || record.createdAt < 0) {
@@ -884,6 +887,7 @@ export class SessionStore extends Service {
       ...meta?.origin === undefined ? {} : { origin: meta.origin },
       ...meta?.delegationDepth === undefined ? {} : { delegationDepth: meta.delegationDepth },
       ...meta?.agentPreset === undefined ? {} : { agentPreset: meta.agentPreset },
+      ...meta?.ownerId === undefined ? {} : { ownerId: meta.ownerId },
     }
     return Session.create(sessionId, seed, header)
   }
@@ -1090,6 +1094,7 @@ export class SessionStore extends Service {
         ...liveSource.header.cwd !== undefined ? { cwd: liveSource.header.cwd } : {},
         parentSession: liveSource.id,
         seedLength: seed.length,
+        ...liveSource.header.ownerId === undefined ? {} : { ownerId: liveSource.header.ownerId },
       },
     })
   }

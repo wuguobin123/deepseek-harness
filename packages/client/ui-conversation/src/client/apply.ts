@@ -208,7 +208,6 @@ export function apply(ctx: Context): void {
       'conversation.input.right': { kind: 'list', scope: 'session' },
       'conversation.hero.brand.mark': { kind: 'single', scope: 'root' },
       'conversation.hero.workspace': { kind: 'single', scope: 'root' },
-      'conversation.hero.agentPreset': { kind: 'single', scope: 'root' },
     },
     inject: (sessionId: SessionId | undefined): ConversationInjected => ({
       hooks: { composerBlock: sessionId === undefined ? ABSENT_BLOCK : composerBlocks.storeFor(sessionId) },
@@ -310,9 +309,11 @@ export function apply(ctx: Context): void {
         keyboard: shell,
         addImages: (files) => {
           try {
-            const images = conversation.createDraftImages(files)
-            if (!shell.addImages(images.map(image => image.id))) {
-              conversation.releaseDraftImages(images)
+            const attachments = files.flatMap(file => /\.(pdf|docx|xlsx|pptx)$/i.test(file.name)
+              ? conversation.createDraftFiles([file])
+              : conversation.createDraftImages([file]))
+            if (!shell.addImages(attachments.map(attachment => attachment.id))) {
+              conversation.releaseDraftImages(attachments)
             }
             return null
           } catch (error: unknown) {
@@ -393,7 +394,12 @@ export function apply(ctx: Context): void {
       const scoped = scopedConversation(sessions, sessionId)
       return {
         openDetails: (target) => {
+          actions.setArtifact(null)
           actions.select(target)
+          layout.openDetails()
+        },
+        openArtifact: (artifactId) => {
+          actions.setArtifact(artifactId)
           layout.openDetails()
         },
         fileMentions: owner => ctx.get('chatFileMentions')?.forClosing(owner),
@@ -402,6 +408,7 @@ export function apply(ctx: Context): void {
           return workspaces.openPath(resolveWorkspacePath(cwd, path))
         },
         loadOlder: () => { void scoped.loadOlder() },
+        retryHistory: () => { void scoped.retryHistory() },
         loadImage: attachment => conversation.resolveImage(sessionId, attachment),
         // Unregistered 'trajectory' id is safe: the tab ring falls back to
         // the first view, and the untouched inspect target stays inert.
@@ -448,10 +455,11 @@ export function apply(ctx: Context): void {
     locale: NS,
     children: {
       'conversation.details.tool': { kind: 'single', scope: 'session' },
+      'conversation.details.artifact': { kind: 'single', scope: 'session' },
     },
     store: chatStore,
-    inject: (): DetailsInjected => ({
-      closeDetails: () => { layout.closeDetails() },
+    inject: (_sessionId: SessionId, actions: BoundActions<typeof chatStore>): DetailsInjected => ({
+      closeDetails: () => { actions.setArtifact(null); layout.closeDetails() },
     }),
   }, DetailsPanel)
 

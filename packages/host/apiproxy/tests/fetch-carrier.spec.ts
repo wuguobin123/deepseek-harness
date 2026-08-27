@@ -1,12 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { ApiProxy, HostFrame, MuxFrame } from '../src/api/index.ts'
+import type { AccountInferenceFrame, ApiProxy, HostFrame, MuxFrame } from '../src/api/index.ts'
 import type { ClientResponse, RpcMessage, RpcReceipt, RpcRequest } from '../src/api/rpc.ts'
 import { RpcId } from '../src/api/rpc.ts'
 import { toFetchHandler } from '../src/fetch/handler.ts'
 import { AbstractApiClient, InProcessApiClient } from '../src/fetch/client.ts'
 
 /** Minimal in-memory ApiProxy: echoes rpcIds, scripts one frame per stream. */
-function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFrame[]; crashOn: string }> = {}): ApiProxy {
+function fakeApi(overrides: Partial<{
+  muxFrames: MuxFrame[]
+  hostFrames: HostFrame[]
+  accountFrames: AccountInferenceFrame[]
+  crashOn: string
+}> = {}): ApiProxy {
   const muxFrames = overrides.muxFrames ?? [{ type: 'session/subscribed', sessionId: 's1' as never, lastSeq: -1 }]
   const hostFrames = overrides.hostFrames ?? [{ type: 'host/session-removed', sessionId: 's1' as never }]
   async function * stream<F>(frames: F[], signal: AbortSignal): AsyncGenerator<RpcRequest<F>> {
@@ -161,6 +166,12 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
       },
     },
     workspace: {
+      async importDirectory(request) {
+        return {
+          rpcId: request.rpcId,
+          result: { ok: true, value: { workspace: { workspaceId: 'w1' as never, path: '/w', title: 'w', sessionIds: [], createdAt: 't', updatedAt: 't' }, created: true } },
+        }
+      },
       async list(request) {
         return { rpcId: request.rpcId, result: { ok: true, value: { items: [], archivedSessionIds: [] } } }
       },
@@ -286,12 +297,43 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
       mux: (_request, signal) => stream(muxFrames, signal),
       host: (_request, signal) => stream(hostFrames, signal),
     },
+    accountInference: {
+      async * stream(_request, signal) {
+        for (const frame of overrides.accountFrames ?? [
+          { version: 1, type: 'chunk', chunk: { type: 'finish', reason: { kind: 'stop' } } },
+          { version: 1, type: 'done' },
+        ]) {
+          if (signal.aborted) return
+          yield frame
+        }
+      },
+    },
     account: {
       async signup(request) {
         return { rpcId: request.rpcId, result: { ok: true, value: { userId: 'u-test', displayName: null, sessionToken: 'tok-test', expiresAt: 0 } } }
       },
       async emailCode(request) {
         return { rpcId: request.rpcId, result: { ok: true, value: { expiresInSeconds: 600, retryAfterSeconds: 60 } } }
+      },
+      invites: {
+        async create(request) {
+          return {
+            rpcId: request.rpcId,
+            result: {
+              ok: true,
+              value: {
+                invitationId: 'inv-test', code: 'share-code', codeMask: '••••code',
+                createdAt: 1, expiresAt: 2, consumedAt: null, redeemedBy: null,
+              },
+            },
+          }
+        },
+        async list(request) {
+          return { rpcId: request.rpcId, result: { ok: true, value: { items: [] } } }
+        },
+        async rotate(request) {
+          return { rpcId: request.rpcId, result: { ok: true, value: { invitationId: 'inv-test', code: 'share-code', codeMask: '••••code', createdAt: 1, expiresAt: 2, consumedAt: null, redeemedBy: null } } }
+        },
       },
       async signin(request) {
         return { rpcId: request.rpcId, result: { ok: true, value: { userId: 'u-test', displayName: null, sessionToken: 'tok-test', expiresAt: 0 } } }
@@ -328,13 +370,49 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
     },
     modelKeys: {
       async provision(request) {
-        return { rpcId: request.rpcId, result: { ok: true, value: { keyId: 'mk_test', userId: 'u-test', label: 'workbuddy', createdAt: 0, keyValue: 'sk_test' } } }
+        return { rpcId: request.rpcId, result: { ok: true, value: { keyId: 'mk_test', userId: 'u-test', label: 'xiaowei', createdAt: 0, keyValue: 'sk_test' } } }
       },
       async list(request) {
         return { rpcId: request.rpcId, result: { ok: true, value: { items: [] } } }
       },
       async revoke(request) {
         return { rpcId: request.rpcId, result: { ok: true, value: { revoked: true } } }
+      },
+    },
+    customModels: {
+      async create(request) {
+        return {
+          rpcId: request.rpcId,
+          result: {
+            ok: true,
+            value: {
+              customModelId: 'cm_0123456789abcdef',
+              label: request.payload.label,
+              api: request.payload.api,
+              baseURL: request.payload.baseURL,
+              upstreamModel: request.payload.upstreamModel,
+              created: 1,
+              revoked: null,
+            },
+          },
+        }
+      },
+      async list(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { items: [] } } }
+      },
+      async remove(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { removed: false } } }
+      },
+    },
+    accountPlugins: {
+      async list(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { items: [] } } }
+      },
+      async install(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { pluginId: request.payload.pluginId, title: 'Stub', description: 'Fixture', version: '1', systemDefault: false, installed: true } } }
+      },
+      async uninstall(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { pluginId: request.payload.pluginId, title: 'Stub', description: 'Fixture', version: '1', systemDefault: false, installed: false } } }
       },
     },
     artifactRegistry: {
@@ -355,6 +433,35 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
       },
       async remove(request) {
         return { rpcId: request.rpcId, result: { ok: true, value: { removed: true as const } } }
+      },
+    },
+    userContext: {
+      async list(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { items: [] } } }
+      },
+      async get(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { missing: true as const } } }
+      },
+      async set(request) {
+        return {
+          rpcId: request.rpcId,
+          result: {
+            ok: true,
+            value: {
+              entry: {
+                kind: request.payload.kind,
+                key: request.payload.key,
+                workspaceId: request.payload.workspaceId ?? null,
+                value: request.payload.value,
+                updatedAt: 0,
+                createdAt: 0,
+              },
+            },
+          },
+        }
+      },
+      async delete(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { removed: false } } }
       },
     },
     async respond(message: ClientResponse): Promise<RpcReceipt> {
@@ -717,6 +824,48 @@ describe('handler carrier-layer statuses', () => {
   })
 })
 
+describe('account inference carrier', () => {
+  const body = JSON.stringify({ version: 1, model: 'MiniMax-M3', messages: [] })
+
+  it('requires an authenticated account principal even on an in-process carrier', async () => {
+    const response = await toFetchHandler(fakeApi()).fetch(new Request('http://x/api/account.inference.stream', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body,
+    }))
+    expect(response.status).toBe(403)
+  })
+
+  it('streams strict NDJSON under the authenticated owner without an RPC session', async () => {
+    const api = fakeApi()
+    const seen = vi.fn()
+    api.accountInference.stream = async function* (request) {
+      seen(request.principal, request.payload)
+      yield { version: 1, type: 'chunk', chunk: { type: 'finish', reason: { kind: 'stop' } } }
+      yield { version: 1, type: 'done' }
+    }
+    const response = await toFetchHandler(api, { kind: 'account', userId: 'user-local' as never }).fetch(new Request('http://x/api/account.inference.stream', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body,
+    }))
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toBe('application/x-ndjson')
+    expect((await response.text()).trim().split('\n').map(line => JSON.parse(line))).toEqual([
+      { version: 1, type: 'chunk', chunk: { type: 'finish', reason: { kind: 'stop' } } },
+      { version: 1, type: 'done' },
+    ])
+    expect(seen).toHaveBeenCalledWith(
+      { kind: 'account', userId: 'user-local' },
+      { version: 1, model: 'MiniMax-M3', messages: [] },
+    )
+  })
+
+  it('rejects local paths and other fields outside the versioned protocol', async () => {
+    const response = await toFetchHandler(fakeApi(), { kind: 'account', userId: 'user-local' as never }).fetch(new Request('http://x/api/account.inference.stream', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ version: 1, model: 'MiniMax-M3', messages: [], cwd: '/Users/alice/private' }),
+    }))
+    expect(response.status).toBe(400)
+  })
+})
+
 describe('SSE streams through the carrier', () => {
   it('yields mux frames as ServerRequest narrow forms and completes', async () => {
     const ac = new AbortController()
@@ -836,6 +985,43 @@ describe('envelope observation', () => {
     await new Promise((resolve) => { setTimeout(resolve, 0) })
     const total = batches.reduce((n, batch) => n + batch.length, 0)
     expect(total).toBe(4)
+  })
+
+  it('redacts custom-model API keys from observed outgoing envelopes', async () => {
+    const api = fakeApi()
+    api.customModels = {
+      create: async request => ({
+        rpcId: request.rpcId,
+        result: {
+          ok: true,
+          value: {
+            customModelId: 'cm_0123456789abcdef',
+            label: request.payload.label,
+            api: request.payload.api,
+            baseURL: request.payload.baseURL,
+            upstreamModel: request.payload.upstreamModel,
+            created: 1,
+            revoked: null,
+          },
+        },
+      }),
+      list: async request => ({ rpcId: request.rpcId, result: { ok: true, value: { items: [] } } }),
+      remove: async request => ({ rpcId: request.rpcId, result: { ok: true, value: { removed: false } } }),
+    }
+    const c = client(api)
+    const seen: RpcMessage[] = []
+    c.subscribeEnvelopes((batch) => { seen.push(...batch) })
+    await c.customModels.create({
+      label: 'private',
+      api: 'openai-responses',
+      baseURL: 'https://api.example.com/v1',
+      upstreamModel: 'model-a',
+      apiKey: 'sk-not-observable',
+    })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const outgoing = seen.find(message => message.type === 'client-request')
+    expect(outgoing?.payload).toMatchObject({ apiKey: '[redacted]' })
+    expect(JSON.stringify(seen)).not.toContain('sk-not-observable')
   })
 })
 

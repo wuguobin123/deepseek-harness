@@ -1,0 +1,403 @@
+# The dsh-xiaowei bundle patch: the multi-user capability layer over
+# dsh-base + dsh-headless. Applied after dsh-base's insert; rows here
+# override base rows by id, with the profile's own cordis.patch.yml and
+# any --patch overlays still to come.
+#
+# The xiaowei profile is the long-running surface the desktop / web
+# clients connect to. Each account.signup creates one row in
+# `<dshHome>/identity.sqlite`, fires a 20-CNY welcome bonus to the matching
+# wallet row, and provisions one AES-256-GCM-encrypted user-model-key —
+# the bootstrap chain lives entirely in the api-proxy host-side glue; the
+# services mounted below just expose the seams. Sandbox mode defaults to
+# `'e2b'` so any tool-bash invocation routes through the E2B provider when
+# the bundle mounts one.
+
+# ── xiaowei persona: multi-user product surface ───────────────────────────
+
+- id: system-prompt
+  config:
+    persona: >-
+      You are the xiaowei assistant. Default to read-only skills; ask before
+      invoking business write-side operations. Your working directory is {{cwd}}.
+
+# ── host-owned search and guarded public fetch ──────────────────────────
+# Firecrawl search returns main-content Markdown alongside each result; a
+# missing key falls back to loopback SearXNG. Fetch uses DNS-pinned public HTTP
+# first and tries Firecrawl only for a safely retrieved 403 or 429 response.
+# Search and fetch providers stay independent of the conversation model.
+
+- id: web
+  config:
+    searchProvider: firecrawl
+    searchCredentialFallbackProvider: searxng
+    fetchProvider: http
+    fetchFallbackProvider: firecrawl
+
+- insert:
+    - id: web-provider-firecrawl
+      name: '@deepseek-ai/dsh-web-provider-firecrawl'
+
+    - id: web-search-searxng
+      name: '@deepseek-ai/dsh-web-search-searxng'
+
+    - id: web-fetch-http
+      name: '@deepseek-ai/dsh-web-fetch-http'
+
+# ── swap dsh-headless's one-shot startup/runner for xiaowei's long-lived ──
+# dsh-headless (the second bundle in PROFILE_TEMPLATES.xiaowei) mounts
+# `headless-startup` (which `program.error`s on empty argv) and a `headless-runner`
+# driven by it. The xiaowei surface is a long-lived HTTP /api carrier —
+# `pnpm dsh --profile xiaowei` with no positional argument must keep the
+# webserver bound, not fail with "a task is required". Disabling both rows
+# leaves the headless core (agent / session / llm) intact; only its one-shot
+# runner and CLI arg-validator go away.
+
+- id: headless-startup
+  disabled: true
+
+- id: headless-runner
+  disabled: true
+
+# ── disable HMR for the long-running multi-user surface ──────────────────────
+# dsh-base enables the `hmr` plugin which restarts the agent on file
+# changes. Multi-user sessions must not silently lose sessions; restarts
+# also tear down the bound HTTP socket.
+
+- id: hmr
+  disabled: true
+
+# ── account / wallet / model-keys / artifact services ───────────────────────
+# Each service owns one SQLite file under DSH_HOME. Single-file-per-capability
+# keeps backup granularity and lifecycle independent.
+
+- insert:
+    # 1. Storage layers (needed by session-persistence-sqlite and friends).
+    - id: storage
+      name: '@deepseek-ai/dsh-storage'
+
+    - id: storage-json
+      name: '@deepseek-ai/dsh-storage-json'
+      config:
+        root: !!js "dshHomePath('storages')"
+
+    - id: storage-domain
+      name: '@deepseek-ai/dsh-storage-domain'
+      config:
+        backend: json
+
+    - id: message-feedback
+      name: '@deepseek-ai/dsh-message-feedback'
+      config:
+        maxNoteBytes: 8192
+
+    - id: workspace
+      name: '@deepseek-ai/dsh-workspace'
+
+    - id: session-projection-cache
+      name: '@deepseek-ai/dsh-session-projection-cache'
+      config:
+        writeEveryEvents: 200
+        writeIntervalMs: 5000
+
+    - id: session-reference
+      name: '@deepseek-ai/dsh-session-reference'
+
+    - id: file-reference-local
+      name: '@deepseek-ai/dsh-file-reference-local'
+
+    - id: session-stats
+      name: '@deepseek-ai/dsh-session-stats'
+
+    # A provider output ceiling ends only the current model turn. Queue a
+    # bounded internal continuation so long product tasks keep moving without
+    # requiring the user to send "继续" after every truncated response.
+    - id: max-token-continuation
+      name: '@deepseek-ai/dsh-max-token-continuation'
+      config:
+        maxContinuations: !!js "Number(process.env.XIAOWEI_MAX_TOKEN_CONTINUATIONS ?? 8)"
+
+    - id: directory-picker
+      name: '@deepseek-ai/dsh-host-directory-picker-auto'
+
+    # 2. Identity seam (single SQLite file under DSH_HOME).
+    - id: identity
+      name: '@deepseek-ai/dsh-account-identity'
+      config:
+        path: !!js "dshHomePath('identity.sqlite')"
+        sessionTtlSeconds: !!js "Number(process.env.XIAOWEI_SESSION_TTL_SECONDS ?? 86400)"
+        invitationPepper: !!js "process.env.XIAOWEI_INVITATION_PEPPER ?? ''"
+        maxUsers: !!js "Number(process.env.XIAOWEI_MAX_USERS ?? 100)"
+        maxInvitationsPerUser: !!js "Number(process.env.XIAOWEI_MAX_INVITATIONS_PER_USER ?? 3)"
+        invitationTtlSeconds: !!js "Number(process.env.XIAOWEI_INVITATION_TTL_SECONDS ?? 604800)"
+        bootstrap:
+          email: !!js "process.env.XIAOWEI_ADMIN_EMAIL ?? ''"
+          password: !!js "process.env.XIAOWEI_ADMIN_PASSWORD ?? ''"
+          displayName: !!js "process.env.XIAOWEI_ADMIN_DISPLAY_NAME ?? ''"
+
+    # 3. Email verification codes (TTL / cooldown / lockout + SMTP transport).
+    # Env var names mirror the my-agents `APP_EMAIL_SMTP_*` convention so an
+    # operator who already has SMTP credentials for one project can copy them
+    # across without re-reading the docs. Defaults:
+    #   - port 587 + useTls=true   (SendGrid / Gmail submission)
+    #   - port 465 + useSsl=true   (163 / QQ / generic SMTPS)
+    # Set `XIAOWEI_SMTP_HOST` (or its my-agents alias `XIAOWEI_EMAIL_SMTP_HOST`)
+    # to a non-empty value to flip `transportKind` from `'logging'` (codes land
+    # in stderr only) to `'smtp'` (codes deliver via the relay). With SMTP the
+    # renderer no longer echoes the raw code — the user reads it from their
+    # mailbox instead.
+    - id: email-verification
+      name: '@deepseek-ai/dsh-account-email-verification'
+      config:
+        path: !!js "dshHomePath('email-verification.sqlite')"
+        enabled: !!js "process.env.XIAOWEI_EMAIL_VERIFICATION !== 'false'"
+        ttlSeconds: !!js "Number(process.env.XIAOWEI_CODE_TTL_SECONDS ?? 600)"
+        resendCooldownSeconds: !!js "Number(process.env.XIAOWEI_RESEND_COOLDOWN_SECONDS ?? 60)"
+        maxSendsPerHour: !!js "Number(process.env.XIAOWEI_MAX_SENDS_PER_HOUR ?? 10)"
+        maxAttemptsBeforeLock: !!js "Number(process.env.XIAOWEI_MAX_ATTEMPTS ?? 5)"
+        lockoutSeconds: !!js "Number(process.env.XIAOWEI_LOCKOUT_SECONDS ?? 1800)"
+        # !!js scalars MUST be double-quoted when the JS expression body
+        # contains `:` followed by whitespace — YAML otherwise reads it as a
+        # mapping key/value separator and the whole row collapses into
+        # {"[object Object]": ...}. See PR #2 Agent Note for the parsing
+        # rationale.
+        transportKind: !!js "((process.env.XIAOWEI_SMTP_HOST ?? process.env.XIAOWEI_EMAIL_SMTP_HOST ?? '') ? 'smtp' : 'logging')"
+        smtpHost: !!js "process.env.XIAOWEI_SMTP_HOST ?? process.env.XIAOWEI_EMAIL_SMTP_HOST ?? ''"
+        smtpPort: !!js "Number(process.env.XIAOWEI_SMTP_PORT ?? process.env.XIAOWEI_EMAIL_SMTP_PORT ?? 587)"
+        # `useSsl=true` (port 465 SMTPS) wins over `useTls=true` (port 587
+        # STARTTLS) — same precedence as my-agents' `SmtpEmailSender`.
+        smtpUseSsl: !!js "(process.env.XIAOWEI_SMTP_USE_SSL ?? process.env.XIAOWEI_EMAIL_SMTP_USE_SSL ?? 'false') === 'true'"
+        smtpUseTls: !!js "(process.env.XIAOWEI_SMTP_USE_TLS ?? process.env.XIAOWEI_EMAIL_SMTP_USE_TLS ?? 'true') === 'true'"
+        smtpUsername: !!js "process.env.XIAOWEI_SMTP_USER ?? process.env.XIAOWEI_SMTP_USERNAME ?? process.env.XIAOWEI_EMAIL_SMTP_USERNAME ?? ''"
+        smtpPassword: !!js "process.env.XIAOWEI_SMTP_PASSWORD ?? process.env.XIAOWEI_EMAIL_SMTP_PASSWORD ?? ''"
+        smtpFromAddress: !!js "process.env.XIAOWEI_SMTP_FROM ?? process.env.XIAOWEI_SMTP_FROM_ADDRESS ?? process.env.XIAOWEI_EMAIL_SMTP_FROM_ADDRESS ?? ''"
+        smtpTimeoutSeconds: !!js "Number(process.env.XIAOWEI_SMTP_TIMEOUT_SECONDS ?? process.env.XIAOWEI_EMAIL_SMTP_TIMEOUT_SECONDS ?? 10)"
+
+    # 4. Wallet (per-user balance in micros). Registration grants a one-time
+    # 20-CNY platform-model credit. Optional daily refresh is disabled unless
+    # the deployment explicitly configures it.
+    - id: wallet
+      name: '@deepseek-ai/dsh-account-wallet'
+      config:
+        path: !!js "dshHomePath('wallet.sqlite')"
+        welcomeBonusMicros: !!js "Number(process.env.XIAOWEI_WELCOME_BONUS_MICROS ?? 20_000_000)"
+        dailyRefreshMicros: !!js "Number(process.env.XIAOWEI_DAILY_REFRESH_MICROS ?? 0)"
+        reservationTtlSeconds: !!js "Number(process.env.XIAOWEI_RESERVATION_TTL_SECONDS ?? 3600)"
+
+    # 5. User-model-keys (AES-256-GCM, 32-byte master key from env).
+    - id: user-model-keys
+      name: '@deepseek-ai/dsh-account-model-keys'
+      config:
+        path: !!js "dshHomePath('user-model-keys.sqlite')"
+        masterKey: !!js "process.env.XIAOWEI_MASTER_KEY ?? ''"
+        maxCustomModels: !!js "Number(process.env.XIAOWEI_MAX_CUSTOM_MODELS ?? 32)"
+        newApi:
+          # ADMIN_URL includes the New-API `/api` prefix. MODEL_BASE_URL is
+          # the OpenAI-compatible data-plane `/v1` endpoint; a New-API token
+          # must never be sent directly to api.minimaxi.com.
+          adminUrl: !!js "process.env.XIAOWEI_NEW_API_ADMIN_URL ?? ''"
+          apiBaseUrl: !!js "process.env.XIAOWEI_MODEL_BASE_URL ?? ''"
+          username: !!js "process.env.XIAOWEI_NEW_API_USERNAME ?? ''"
+          password: !!js "process.env.XIAOWEI_NEW_API_PASSWORD ?? ''"
+          displayName: xiaowei
+          userGroup: !!js "process.env.XIAOWEI_NEW_API_GROUP ?? 'default'"
+          tokenQuota: !!js "Number(process.env.XIAOWEI_NEW_API_TOKEN_QUOTA ?? 0)"
+          tokenUnlimitedQuota: !!js "(process.env.XIAOWEI_NEW_API_TOKEN_UNLIMITED ?? 'true') === 'true'"
+          tokenExpiresDays: !!js "Number(process.env.XIAOWEI_NEW_API_TOKEN_EXPIRES_DAYS ?? 0)"
+          modelLimitsEnabled: true
+          route: xiaowei-minimax
+          model: MiniMax-M3
+          inputPriceMicrosPerToken: !!js "Number(process.env.XIAOWEI_INPUT_PRICE_MICROS_PER_TOKEN ?? 1)"
+          outputPriceMicrosPerToken: !!js "Number(process.env.XIAOWEI_OUTPUT_PRICE_MICROS_PER_TOKEN ?? 8)"
+          timeoutMs: !!js "Number(process.env.XIAOWEI_NEW_API_TIMEOUT_MS ?? 10000)"
+          retries: !!js "Number(process.env.XIAOWEI_NEW_API_RETRIES ?? 2)"
+
+    # 6. Account-scoped extension state. The plugin catalog is deployment
+    # owned; installed rows are keyed by the authenticated user. Skill files
+    # live below a hashed account directory and are never read from another
+    # account's root.
+    - id: account-plugin-factory
+      name: '@deepseek-ai/dsh-account-plugin-factory'
+      config:
+        path: !!js "dshHomePath('account-plugins.sqlite')"
+        catalog:
+          - pluginId: core-tools
+            title: 基础工具
+            description: 系统预装的安全对话与办公能力。
+            version: '1'
+            systemDefault: true
+            activationId: core-tools
+
+    - id: account-skill-store
+      name: '@deepseek-ai/dsh-account-skill-store'
+      config:
+        dshHome: !!js "dshHomePath()"
+
+    # 7. Artifact registry (content-addressed on disk; sha256-keyed).
+    - id: artifact-store-fs
+      name: '@deepseek-ai/dsh-artifact-store-fs'
+      config:
+        dshHome: !!js "process.env.DSH_HOME ?? ''"
+
+    # 8. Read-only projection of current Loader entries for trusted client RPCs
+    # (the desktop Settings → Plugins → inventory tab reads it).
+    - id: plugin-inventory
+      name: '@deepseek-ai/dsh-host-plugin-inventory'
+
+    # 9. The api-proxy (apigateway + account/wallet/modelKeys/artifact wire).
+    - id: api-gateway
+      name: '@deepseek-ai/dsh-host-apiproxy'
+      config:
+        accountWorkspaceRoot: !!js "process.env.XIAOWEI_ACCOUNT_WORKSPACE_ROOT ?? dshHomePath('account-workspaces')"
+        accountAgentPreset: xiaowei-safe
+
+    # 10. HTTP/WS carrier that binds /api and the SSE downlinks.
+    - id: connection
+      name: '@deepseek-ai/dsh-client-connection'
+      config:
+        maxRequestBodyBytes: 314572800
+        # Loopback covers direct host calls and the desktop client through
+        # nginx at :18080 → :18000. Production deployments override via
+        # `XIAOWEI_TRUSTED_HOSTS` (comma-separated).
+        trustedHosts: !!js "(process.env.XIAOWEI_TRUSTED_HOSTS ?? '127.0.0.1,localhost').split(',').map(s => s.trim()).filter(Boolean)"
+
+    # 11. webserver (long-running HTTP / SSE binding).
+    - id: webserver
+      name: '@deepseek-ai/dsh-host-webserver'
+      config:
+        host: !!js "process.env.XIAOWEI_HOST ?? '127.0.0.1'"
+        port: !!js "Number(process.env.XIAOWEI_PORT ?? 18000)"
+
+    - id: xiaowei-webserver
+      name: '@deepseek-ai/dsh-xiaowei/webserver'
+
+    # 12. SPA fallback (only if the deployment has built the web bundle).
+    - id: frontend-static
+      name: '@deepseek-ai/dsh-host-frontend-static'
+      disabled: !!js "(process.env.XIAOWEI_SERVE_FRONTEND ?? 'true') === 'false'"
+      config:
+        distIndex: !!js "process.env.XIAOWEI_FRONTEND_INDEX ?? (process.cwd() + '/apps/web/dist/index.html')"
+
+    # 13. Startup + runner. The runner is a no-op when no task is given;
+    # the HTTP /api endpoint is what serves the desktop clients.
+    - id: xiaowei-startup
+      name: '@deepseek-ai/dsh-xiaowei/startup'
+
+    - id: xiaowei-runner
+      name: '@deepseek-ai/dsh-xiaowei'
+      inject: [xiaoweiStartup]
+      config:
+        task: !!js "ctx.xiaoweiStartup.task"
+
+# ── xiaowei agent plane ───────────────────────────────────────────────────
+# Xiaowei is a multi-session surface, so model-visible capability rows are
+# composed by the selected agent preset rather than globally on the host.
+# Keep host registries and services mounted by base; disable only their
+# model-facing consumers, matching the web-app composition.
+# The selected `standard` agent preset mounts all five artifact producers
+# (`tool-html`, `tool-slides`, `tool-doc`, `tool-sheet`, `tool-chart`) once the
+# host artifact registry below is available; this profile deliberately keeps
+# them agent-scoped so every write carries the producing session id.
+
+- id: tool-bash
+  disabled: true
+
+- id: tool-pwsh
+  disabled: true
+
+- id: tool-jobs
+  disabled: true
+
+- id: tool-fs
+  disabled: true
+
+- id: tool-fs-search
+  disabled: true
+
+- id: tool-str-replace-editor
+  disabled: true
+
+- id: skill-filesystem
+  disabled: true
+
+- id: tool-skill
+  disabled: true
+
+- id: tool-goal
+  disabled: true
+
+- id: plan-mode
+  disabled: true
+
+- id: compaction-basic
+  disabled: true
+
+- id: command-compact
+  disabled: true
+
+- id: tool-result-pruner
+  disabled: true
+
+- id: tool-subagent-control
+  disabled: true
+
+- id: tool-subagent-list-agents
+  disabled: true
+
+- id: tool-subagent
+  disabled: true
+
+- id: tool-subagent-fork
+  disabled: true
+
+- id: workflow-worker-thread
+  disabled: true
+
+- id: tool-workflow
+  disabled: true
+
+- id: tool-ralph
+  disabled: true
+
+- id: agent-instructions
+  disabled: true
+
+- id: tool-todo
+  disabled: true
+
+- id: tool-web
+  disabled: true
+
+- insert:
+    - id: agent-presets
+      name: '@deepseek-ai/dsh-agent-presets'
+      config:
+        default: xiaowei-safe
+
+- id: llm-pi-ai
+  config:
+    providers:
+      xiaowei-minimax:
+        displayName: Xiaowei MiniMax
+        api: openai-completions
+        baseURLEnv: XIAOWEI_MODEL_BASE_URL
+        models:
+          - id: MiniMax-M3
+            name: MiniMax-M3
+            contextWindow: !!js "Number(process.env.XIAOWEI_MODEL_CONTEXT_WINDOW ?? 131072)"
+            maxTokens: !!js "Number(process.env.XIAOWEI_MODEL_MAX_OUTPUT_TOKENS ?? 32768)"
+            input: [text]
+
+- id: agent-default-model
+  config:
+    provider: xiaowei-minimax
+    model: MiniMax-M3
+
+- insert:
+    - id: account-platform
+      name: '@deepseek-ai/dsh-llm-account-platform'
+      config:
+        route: xiaowei-minimax
+        model: MiniMax-M3
+        customModelAllowedHosts: !!js "(process.env.XIAOWEI_CUSTOM_MODEL_ALLOWED_HOSTS ?? '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean)"
+        missingUsagePolicy: !!js "process.env.XIAOWEI_MISSING_USAGE_POLICY ?? 'reserve'"
+        fallbackMaxOutputTokens: !!js "Number(process.env.XIAOWEI_MODEL_MAX_OUTPUT_TOKENS ?? 32768)"

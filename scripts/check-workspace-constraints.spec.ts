@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import {
   checkExperimentalDependencyIsolation,
   checkExperimentalManifest,
+  expectedDshPackageFiles,
   type WorkspaceManifest,
 } from './check-workspace-constraints.ts'
 
@@ -71,6 +72,24 @@ describe('experimental workspace constraints', () => {
 
     expect(checkExperimentalDependencyIsolation(manifests)).toEqual([
       '@deepseek-ai/dsh-python-runtime: dependencies.@deepseek-ai/dsh-experimental-prototype must not reference an experimental package',
+    ])
+  })
+})
+
+describe('published package files', () => {
+  it('includes a separately bundled webserver export', () => {
+    expect(expectedDshPackageFiles({
+      exports: {
+        './webserver': {
+          types: './lib/types/webserver.d.ts',
+          default: './lib/webserver.js',
+        },
+      },
+    })).toEqual([
+      'lib/index.js',
+      'lib/invariant.js',
+      'lib/webserver.js',
+      'lib/types/**/*.d.ts',
     ])
   })
 })

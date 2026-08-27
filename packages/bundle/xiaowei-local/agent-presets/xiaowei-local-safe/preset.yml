@@ -1,0 +1,3 @@
+name: 本机工作区
+description: 在原始本机目录中运行的完整 Agent，支持 Shell、文件、计划、任务、工作流、子代理和本机 Skill。
+order: 1

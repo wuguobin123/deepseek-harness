@@ -92,7 +92,7 @@ export interface RpcErrorDetailsMap {
   'subagent-not-resumable': { childSessionId: SessionId }
   'subagent-unauthorized': { childSessionId: SessionId }
   'subagent-delivery-unavailable': { childSessionId: SessionId }
-  // ---- workbuddy multi-user account seam ----
+  // ---- xiaowei multi-user account seam ----
   /** An account.signin failed because the email is unknown OR the password is wrong.
    *  The seam collapses both to one code so a wire-side observer cannot tell
    *  which it was. The message is the seam's own text. */
@@ -111,13 +111,16 @@ export interface RpcErrorDetailsMap {
   'verification-code-required': {}
   /** account.signup hit an email that is already registered. */
   'email-taken': {}
+  /** Signup or email-code preflight received an unusable invitation. */
+  'invitation-invalid': {}
+  /** An account has already issued its three lifetime invitations. */
+  'invitation-limit': {}
+  /** The deployment has reached its configured account population limit. */
+  'user-limit': {}
   /** account.wallet.debit would drive the balance below zero. */
   'insufficient-balance': { userId: string; balanceMicros: number; attemptedMicros: number }
   /** An account.modelKeys call named an unknown keyId. */
   'model-key-not-found': { keyId: string }
-  /** An account.modelKeys.provision hit the one-active-key policy and the user
-   *  already has a live key. The caller should revoke the existing key first. */
-  'model-key-revoked': { userId: string; existingKeyId: string }
   /** An artifact.read named an unknown artifactId. */
   'artifact-not-found': { artifactId: string }
   /** An artifact.read's stored bytes no longer match its declared reference. */
@@ -161,7 +164,14 @@ export function transportError<T>(error: unknown): RpcResult<T> {
 export interface RpcRequest<P> {
   rpcId: RpcId
   payload: P
+  /** Authenticated account identity attached by the transport carrier. */
+  principal?: RpcPrincipal
 }
+
+/** Identity established by the HTTP or WebSocket carrier. */
+export type RpcPrincipal =
+  | { kind: 'account'; userId: string }
+  | { kind: 'local' }
 
 /** Signature-layer narrow form, response side: rpcId always echoes the matching request. */
 export interface RpcResponse<T> {

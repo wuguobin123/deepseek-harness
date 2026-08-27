@@ -12,7 +12,7 @@ import { stat } from 'node:fs/promises'
 import type { SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type { WorkspaceRecord } from './spec.ts'
-import type { Workspace, WorkspaceId } from './types.ts'
+import type { Workspace, WorkspaceAccess, WorkspaceId } from './types.ts'
 import { realpathNormalize } from './paths.ts'
 
 /** An insertSessionBefore request named a session or anchor not on the account (storage failures stay plain errors). */
@@ -45,6 +45,13 @@ export interface WorkspaceEntityHost {
    * missing or its cwd cannot identify an existing directory.
    */
   sessionPath(id: SessionId): string | undefined
+
+  /**
+   * Read the durable owner marker paired with the indexed session header.
+   * @param id - Session whose owner is requested.
+   * @returns the owner id, or `undefined` for an unowned local session.
+   */
+  sessionOwner(id: SessionId): string | undefined
 
   /**
    * Read one stored session header for attach validation.
@@ -86,6 +93,10 @@ export class WorkspaceEntity implements Workspace {
     return this.record.path
   }
 
+  get owner(): WorkspaceAccess {
+    return this.record.owner
+  }
+
   get title(): string {
     return this.record.title
   }
@@ -99,7 +110,10 @@ export class WorkspaceEntity implements Workspace {
   }
 
   get sessionIds(): readonly SessionId[] {
-    return this.record.sessionIds.filter(id => this.host.sessionPath(id) === this.record.path)
+    return this.record.sessionIds.filter(id => this.host.sessionPath(id) === this.record.path
+      && (this.record.owner.kind === 'local'
+        ? this.host.sessionOwner(id) === undefined
+        : this.host.sessionOwner(id) === this.record.owner.userId))
   }
 
   async setTitle(title: string): Promise<void> {
@@ -140,6 +154,10 @@ export class WorkspaceEntity implements Workspace {
           `cannot attach session '${sessionId}' to workspace '${this.record.path}': `
           + `its cwd resolves to '${cwd}'`,
         )
+      }
+      const owner = this.host.sessionOwner(sessionId)
+      if (this.record.owner.kind === 'local' ? owner !== undefined : owner !== this.record.owner.userId) {
+        throw new Error(`cannot attach session '${sessionId}' to workspace '${this.record.path}': session owner does not match workspace owner`)
       }
       this.host.rememberSessionPath(sessionId, cwd)
     }
@@ -205,7 +223,10 @@ export class WorkspaceEntity implements Workspace {
       next = await this.host.table().update(this.id, (current) => {
         const changed = fn(current)
         const sessionIds = changed.sessionIds.filter(
-          id => this.host.sessionPath(id) === changed.path,
+          id => this.host.sessionPath(id) === changed.path
+            && (changed.owner.kind === 'local'
+              ? this.host.sessionOwner(id) === undefined
+              : this.host.sessionOwner(id) === changed.owner.userId),
         )
         if (changed === current && sessionIds.length === current.sessionIds.length) {
           throw unchangedSentinel

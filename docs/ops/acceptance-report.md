@@ -265,7 +265,6 @@ The local artifact is ad-hoc signed. Public distribution still needs an Apple De
 
 ## Cross-references
 
-- Migration plan: [`hashed-cooking-quill.md`](../../../.claude/plans/hashed-cooking-quill.md) (Phase 0/1/2 sections; Phase 3+ de-scoped)
 - Deploy skill: [`.agents/skills/dsh-deploy/SKILL.md`](../../.agents/skills/dsh-deploy/SKILL.md)
 - Deploy script: [`scripts/deploy_dsh.sh`](../../scripts/deploy_dsh.sh)
 - Profile + bundle: [`packages/bundle/ops`](../../packages/bundle/ops/README.md)

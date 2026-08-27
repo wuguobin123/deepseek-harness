@@ -1,5 +1,7 @@
 import { composeError, Context } from '@deepseek-ai/cordis'
 import { isNonNullable, type Dict } from '@deepseek-ai/cosmokit'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { Entry, type EntryOptions } from './entry.ts'
 import { EntryGroup } from './group.ts'
 
@@ -156,7 +158,8 @@ export abstract class EntryTree {
       } else if (name.startsWith('.')) {
         return await import(/* @vite-ignore */new URL(name, this.ctx.baseUrl).href)
       } else {
-        return await import(/* @vite-ignore */name)
+        const resolved = createRequire(this.ctx.baseUrl!).resolve(name)
+        return await import(/* @vite-ignore */pathToFileURL(resolved).href)
       }
     }, getOuterStack)
   }

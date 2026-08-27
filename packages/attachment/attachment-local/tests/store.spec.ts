@@ -6,9 +6,10 @@ import { dirname, join, parse, resolve } from 'node:path'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import sharp from 'sharp'
-import type { ImageAttachmentLimits } from '@deepseek-ai/dsh-attachment'
+import { strToU8, zipSync } from 'fflate'
+import type { DocumentAttachmentLimits, ImageAttachmentLimits } from '@deepseek-ai/dsh-attachment'
 import type { NormalizationPolicy } from '../src/normalization.ts'
-import { commitPreparedImageFile, prepareImageFile, readImageFile, saveImageFile } from '../src/store.ts'
+import { commitPreparedImageFile, prepareImageFile, readDocumentFile, readImageFile, saveDocumentFile, saveImageFile } from '../src/store.ts'
 
 const fsControl = vi.hoisted(() => ({
   readSignals: [] as AbortSignal[],
@@ -49,6 +50,12 @@ const LIMITS: ImageAttachmentLimits = {
   maxImageDimension: 2000,
   mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
 }
+const DOCUMENT_LIMITS: DocumentAttachmentLimits = {
+  maxDocumentBytes: 1024 * 1024,
+  maxDocumentsPerMessage: 2,
+  maxMessageDocumentBytes: 2 * 1024 * 1024,
+  mediaTypes: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+}
 
 const roots: string[] = []
 
@@ -74,6 +81,28 @@ afterEach(async () => {
 })
 
 describe('local attachment store', () => {
+  it('persists original validated Office bytes and verifies document reads', async () => {
+    const storageRoot = await root()
+    const data = zipSync({
+      '[Content_Types].xml': strToU8('<Types/>'),
+      'xl/worksheets/sheet1.xml': strToU8('<worksheet><sheetData><row><c r="A1" t="inlineStr"><is><t>销售额</t></is></c></row></sheetData></worksheet>'),
+    })
+    const ref = await saveDocumentFile(storageRoot, {
+      data,
+      mediaType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      kind: 'xlsx',
+      name: '/private/tmp/sales.xlsx',
+      summary: 'ignored',
+    }, DOCUMENT_LIMITS)
+
+    expect(ref.kind).toBe('xlsx')
+    expect(ref.name).toBe('sales.xlsx')
+    expect(ref.summary).toContain('销售额')
+    await expect(readDocumentFile(storageRoot, ref)).resolves.toEqual({ ref, data })
+    await expect(saveDocumentFile(storageRoot, { data, mediaType: ref.mediaType, kind: 'docx', summary: '' }, DOCUMENT_LIMITS))
+      .rejects.toMatchObject({ code: 'DOCUMENT_INVALID' })
+  })
+
   it.skipIf(process.platform === 'win32')('syncs every object ancestor up to the durable boundary before returning', async () => {
     const storageRoot = await root()
     const base = join(storageRoot, '..', '..')

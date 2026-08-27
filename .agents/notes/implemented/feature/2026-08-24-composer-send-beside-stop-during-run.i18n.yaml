@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-24-composer-send-beside-stop-during-run.md
+2026-08-24-composer-send-beside-stop-during-run.md: 0663360a1cb4d21c752034f805b88dca31b7b242
+2026-08-24-composer-send-beside-stop-during-run.zh.md: 6bbb11de82ec2ce4658d4e4885309cca36f79787

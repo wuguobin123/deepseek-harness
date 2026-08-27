@@ -19,7 +19,7 @@ export {
   LOCAL_FETCH_PROVIDER_ID,
   HttpFetchProvider,
 } from './provider.ts'
-export type { HttpFetchLimits } from './provider.ts'
+export type { HttpFetchDependencies, HttpFetchLimits } from './provider.ts'
 
 /** Default `User-Agent`: an explicit product agent, never a browser disguise. */
 export const DEFAULT_USER_AGENT = 'deepseek-harness/0.0.1 (+https://github.com/deepseek-ai)'
@@ -42,6 +42,8 @@ export interface Config {
   timeoutMs?: number
   /** Maximum number of same-origin redirect hops to follow. */
   maxRedirects?: number
+  /** Maximum transport attempts for one request after DNS validation. */
+  maxAttempts?: number
   /** `User-Agent` header sent on every request. */
   userAgent?: string
 }
@@ -52,6 +54,7 @@ export const Config: z<Config> = z.object({
   maxBodyChars: z.number().default(100_000),
   timeoutMs: z.number().default(30_000),
   maxRedirects: z.number().default(5),
+  maxAttempts: z.number().default(3),
   userAgent: z.string().default(DEFAULT_USER_AGENT),
 })
 
@@ -80,6 +83,13 @@ function assertNonNegativeInteger(name: string, value: number): void {
   }
 }
 
+/** A retry attempt count must be a positive integer. */
+function assertPositiveInteger(name: string, value: number): void {
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`web-fetch-http: ${name} must be a positive integer`)
+  }
+}
+
 /** Register the local HTTP(S) fetch provider with `ctx.web`. */
 export function apply(ctx: Context, config: Config): void {
   // schemastery (Config) has already filled every defaulted field.
@@ -89,12 +99,14 @@ export function apply(ctx: Context, config: Config): void {
   assertPositiveFinite('maxBodyChars', resolved.maxBodyChars)
   assertTimeoutMs(resolved.timeoutMs)
   assertNonNegativeInteger('maxRedirects', resolved.maxRedirects)
+  assertPositiveInteger('maxAttempts', resolved.maxAttempts)
   const limits: HttpFetchLimits = {
     maxUrlLength: resolved.maxUrlLength,
     maxResponseBytes: resolved.maxResponseBytes,
     maxBodyChars: resolved.maxBodyChars,
     timeoutMs: resolved.timeoutMs,
     maxRedirects: resolved.maxRedirects,
+    maxAttempts: resolved.maxAttempts,
     userAgent: resolved.userAgent,
   }
   ctx.web.registerFetchProvider(new HttpFetchProvider(limits))

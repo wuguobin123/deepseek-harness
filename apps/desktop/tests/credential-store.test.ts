@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync, writeFileSync } from 'node:fs'
 
 interface Cipher {
   payload: string
@@ -78,6 +78,7 @@ describe('CredentialStore v3 round-trip', () => {
     const loaded = await reopened.load()
     expect(loaded).toEqual({
       baseUrl: 'http://ops.example',
+      lastLocation: 'cloud',
       sessionToken: 'tkn-1',
       userId: 'user-1',
       displayName: 'Alice',
@@ -88,6 +89,49 @@ describe('CredentialStore v3 round-trip', () => {
       userId: 'user-1',
       displayName: 'Alice',
       expiresAt: 1_700_000_000_000,
+    })
+  })
+
+  it('persists connection preferences without invoking safeStorage encryption', async () => {
+    const store = new CredentialStore('http://default')
+    await store.load()
+    await store.saveConnection({ baseUrl: 'https://cloud.example.test', lastLocation: 'cloud' })
+    expect(cipher.payload).toBe('')
+    expect(JSON.parse(readFileSync(join(userDataDir, 'connection.json'), 'utf8'))).toEqual({
+      version: 2,
+      baseUrl: 'https://cloud.example.test',
+      lastLocation: 'cloud',
+    })
+    expect(statSync(join(userDataDir, 'connection.json')).mode & 0o777).toBe(0o600)
+
+    const reopened = new CredentialStore('http://default')
+    await expect(reopened.load()).resolves.toMatchObject({
+      baseUrl: 'https://cloud.example.test',
+      lastLocation: 'cloud',
+    })
+  })
+
+  it('loads connection preferences when safeStorage is unavailable', async () => {
+    const store = new CredentialStore('http://default')
+    await store.saveConnection({ baseUrl: 'https://cloud.example.test', lastLocation: 'cloud' })
+    safeStorageAvailable = false
+    const reopened = new CredentialStore('http://default')
+    await expect(reopened.load()).resolves.toMatchObject({
+      baseUrl: 'https://cloud.example.test',
+      lastLocation: 'cloud',
+    })
+  })
+
+  it('migrates a 0.3.17/0.3.18 environment preference to lastLocation', async () => {
+    writeFileSync(join(userDataDir, 'connection.json'), JSON.stringify({
+      version: 1,
+      baseUrl: 'https://cloud.example.test',
+      environment: 'local',
+    }))
+    const store = new CredentialStore('http://default')
+    await expect(store.load()).resolves.toMatchObject({
+      baseUrl: 'https://cloud.example.test',
+      lastLocation: 'local',
     })
   })
 
@@ -104,6 +148,18 @@ describe('CredentialStore v3 round-trip', () => {
     expect(loaded.baseUrl).toBe('http://v2-only')
     expect(loaded.sessionToken).toBeUndefined()
     expect(reopened.authState()).toEqual({ signedIn: false })
+  })
+
+  it('migrates a legacy v2/v3 credential blob to cloud when no environment or connection exists', async () => {
+    const legacy = JSON.stringify({ version: 3, baseUrl: 'https://cloud.example.test', sessionToken: 'legacy-token', userId: 'legacy-user' })
+    const credentialsPath = join(userDataDir, 'credentials.bin')
+    writeFileSync(credentialsPath, Buffer.from(`enc:${legacy}`))
+    const store = new CredentialStore('http://default')
+    await expect(store.load()).resolves.toMatchObject({ baseUrl: 'https://cloud.example.test', lastLocation: 'cloud' })
+    expect(JSON.parse(readFileSync(join(userDataDir, 'connection.json'), 'utf8'))).toMatchObject({
+      baseUrl: 'https://cloud.example.test', lastLocation: 'cloud', version: 2,
+    })
+    expect(statSync(join(userDataDir, 'connection.json')).mode & 0o777).toBe(0o600)
   })
 
   it('falls back to the default baseUrl when safeStorage is unavailable', async () => {
@@ -133,7 +189,7 @@ describe('CredentialStore v3 round-trip', () => {
     await store.save({ baseUrl: 'http://x' })
     expect(store.authState()).toEqual({ signedIn: false })
     // Snapshot reads the post-save cache.
-    expect(store.snapshot()).toEqual({ baseUrl: 'http://x' })
+    expect(store.snapshot()).toEqual({ baseUrl: 'http://x', lastLocation: 'cloud' })
   })
 
   it('treats displayName === null as a real value, not absent', async () => {

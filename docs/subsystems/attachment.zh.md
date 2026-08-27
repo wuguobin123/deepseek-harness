@@ -135,6 +135,72 @@ interface RequestImageAttachment {
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.zh.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
 
+<a id="ctxartifactregistry--artifactregistry-abstract-seam"></a>
+
+### `ctx.artifactRegistry` — `ArtifactRegistry` (abstract seam)
+
+Durable, content-addressed artifact registry.
+
+Implementations validate bytes before publishing a reference, dedup on the sha256 digest (so two writes with identical bytes share one storage object), and verify reference + bytes on every read.
+
+```ts cordis-catalog
+/**
+ * Validate one artifact without persisting it.
+ * Batch callers validate every member before saving any member.
+ * @param input - encoded bytes, kind, source, declared media type, and metadata.
+ * @returns completion after admission has fully decoded and verified the bytes.
+ */
+abstract validate(input: WriteArtifactInput): Promise<void>
+
+/**
+ * Validate and durably commit one ordered artifact batch.
+ *
+ * Validation failures start no writes; storage failures return no partial
+ * references, although already published content-addressed objects may
+ * stay unreachable until a future retention policy collects them.
+ * @param inputs - artifacts in their owning-message order.
+ * @returns durable references in the exact input order.
+ */
+async writeMany(inputs: readonly WriteArtifactInput[]): Promise<readonly ArtifactView[]>
+
+/**
+ * Validate and durably commit one artifact before its owning session event
+ * is appended. The returned view describes the persisted artifact and
+ * indexes it under the calling workspace + session when supplied.
+ * @param input - encoded bytes, kind, source, declared media type, and metadata.
+ * @returns the durable content-addressed artifact view.
+ */
+abstract write(input: WriteArtifactInput): Promise<ArtifactView>
+
+/**
+ * Read one artifact and verify that bytes still match the recorded reference.
+ * @param ref - durable reference from the session log.
+ * @param signal - optional cancellation for backend read and verification work.
+ * @returns the verified bytes and full durable view.
+ * @throws the signal reason when aborted, or an {@link ArtifactError} when verification fails.
+ */
+abstract read(ref: { readonly artifactId: ArtifactView['artifactId'] }, signal?: AbortSignal): Promise<StoredArtifact>
+
+/**
+ * List durable artifact views under optional ownership filters. The session
+ * filter narrows the listing to one session; the workspace filter narrows
+ * to one workspace; both omitted lists the entire deployment root.
+ * @param filter - workspace and/or session ownership filter; both omitted is unfiltered.
+ * @returns durable artifact views in newest-first order.
+ */
+abstract list(filter?: { readonly workspaceId?: ArtifactView['workspaceId'] readonly sessionId?: ArtifactView['sessionId'] }): Promise<readonly ArtifactView[]>
+
+/**
+ * Remove one artifact from the durable index. Content-addressed bytes may
+ * remain on disk until a future retention sweep collects unreferenced
+ * objects; a removed artifactId is gone from the listing and unreadable.
+ * @param ref - durable reference to remove.
+ */
+abstract remove(ref: { readonly artifactId: ArtifactView['artifactId'] }): Promise<void>
+```
+
+Source: [`packages/artifact/artifact/src/index.ts`](../../packages/artifact/artifact/src/index.ts)
+
 <a id="ctxattachments--attachmentstore-abstract-seam"></a>
 
 ### `ctx.attachments` — `AttachmentStore` (abstract seam)
@@ -166,6 +232,28 @@ async saveImages(inputs: readonly SaveImageAttachment[]): Promise<readonly Image
  * @returns the durable content-addressed normalized image reference.
  */
 abstract saveImage(input: SaveImageAttachment): Promise<ImageAttachmentRef>
+
+/**
+ * Persist original document bytes after format admission.
+ * @param _input - verified document bytes and declaration.
+ * @returns the durable content-addressed reference.
+ */
+saveDocument(_input: SaveDocumentAttachment): Promise<DocumentAttachmentRef>
+
+/**
+ * Validate and durably commit one ordered document batch.
+ * @param inputs - decoded documents in owning-message order.
+ * @returns durable references in the same order.
+ */
+async saveDocuments(inputs: readonly SaveDocumentAttachment[]): Promise<readonly DocumentAttachmentRef[]>
+
+/**
+ * Read and integrity-check a previously persisted document.
+ * @param _ref - durable reference recorded by a Session.
+ * @param _signal - optional cancellation for storage reads.
+ * @returns verified original document bytes.
+ */
+readDocument(_ref: DocumentAttachmentRef, _signal?: AbortSignal): Promise<StoredDocumentAttachment>
 
 /**
  * Read one image and verify that bytes still match the recorded reference.

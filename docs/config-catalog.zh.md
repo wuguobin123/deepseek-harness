@@ -11,6 +11,239 @@
 
 `Requires:` 行列出插件通过 `inject` 注入的服务键：其 `cordis.yml` 树还必须加载这些服务的提供者。范围限定为 harness 层级（`packages/`）；配置树还可能加载的 vendored cordis 插件（`hmr`、控制台日志记录器等）固定为上游源代码（参见 [vendoring policy](../vendor/README.md)），未收录于此目录。
 
+<a id="deepseek-aidsh-account-email-verification"></a>
+
+## `@deepseek-ai/dsh-account-email-verification`
+
+```ts config-catalog
+/** Plugin configuration. */
+export interface Config {
+  /** Path to the SQLite database file (`:memory:` for tests). */
+  path: string
+  /** Master kill switch — `false` short-circuits `requestCode` and `verifyCode`. */
+  enabled?: boolean
+  /** Code lifetime in seconds. */
+  ttlSeconds?: number
+  /** Minimum seconds between two sends to the same email. */
+  resendCooldownSeconds?: number
+  /** Maximum number of sends per email within a rolling 1-hour window. */
+  maxSendsPerHour?: number
+  /** Wrong-code attempts before the email is locked. */
+  maxAttemptsBeforeLock?: number
+  /** Lockout duration after the attempts threshold is exceeded. */
+  lockoutSeconds?: number
+  /** Which sender to construct. 'logging' = stdout WARN; 'smtp' = nodemailer. */
+  transportKind?: 'logging' | 'smtp'
+  /** SMTP host. Required when transportKind === 'smtp'. */
+  smtpHost?: string
+  /**
+   * SMTP port. Default 587 (submission, STARTTLS) — matches the my-agents
+   * convention. Common alternatives: 465 (implicit SMTLS), 25 (plain /
+   * STARTTLS relay), 2525 (cloud submission alternative).
+   */
+  smtpPort?: number
+  /**
+   * `true` = implicit TLS (port 465, e.g. 163 / QQ / generic SMTPS).
+   * When `true`, STARTTLS is skipped — `use_ssl` wins over `use_tls` per
+   * the my-agents semantics. Default `false` because the default port
+   * is STARTTLS-based (587).
+   */
+  smtpUseSsl?: boolean
+  /**
+   * `true` = STARTTLS upgrade after connect (port 587 / 25, e.g. SendGrid /
+   * Gmail submission). Default `true` to match the my-agents default.
+   * Ignored when `smtpUseSsl` is `true`.
+   */
+  smtpUseTls?: boolean
+  /** SMTP auth username. Optional for unauthenticated relays. */
+  smtpUsername?: string
+  /** SMTP auth password. */
+  smtpPassword?: string
+  /** From-address on outgoing mails. Required when transportKind === 'smtp'. */
+  smtpFromAddress?: string
+  /** SMTP connection timeout in seconds. */
+  smtpTimeoutSeconds?: number
+}
+```
+
+来源： [`packages/account/email-verification/src/index.ts:47`](../packages/account/email-verification/src/index.ts)
+
+<a id="deepseek-aidsh-account-identity"></a>
+
+## `@deepseek-ai/dsh-account-identity`
+
+```ts config-catalog
+/** Plugin configuration. */
+export interface Config {
+  /** Path to the SQLite database file (`:memory:` for tests). */
+  path: string
+  /**
+   * Default lifetime of an issued session token, in seconds. After this
+   * window the token is rejected by `validate` regardless of row presence.
+   * Bumping this does not retroactively extend live sessions.
+   */
+  sessionTtlSeconds?: number
+  /**
+   * Bootstrap admin: when the `users` table is empty at boot, the provider
+   * creates this single account so the deployment has a known identity.
+   * Leaving the email empty disables bootstrap entirely (the deployment
+   * starts with no users — every method that needs one fails closed).
+   */
+  bootstrap?: {
+    /** Email address for the initial account. */
+    email: string
+    /** Password for the initial account. */
+    password: string
+    /** Optional display name for the initial account. */
+    displayName?: string
+  }
+  /** Secret used to derive invitation code digests. */
+  invitationPepper?: string
+  /** Maximum number of stored users, including bootstrap users. */
+  maxUsers?: number
+  /** Lifetime allowance per user. */
+  maxInvitationsPerUser?: number
+  /** Invitation lifetime in seconds. */
+  invitationTtlSeconds?: number
+}
+```
+
+来源： [`packages/account/identity/src/index.ts:31`](../packages/account/identity/src/index.ts)
+
+<a id="deepseek-aidsh-account-model-keys"></a>
+
+## `@deepseek-ai/dsh-account-model-keys`
+
+```ts config-catalog
+/** Plugin configuration. */
+export interface Config {
+  /** Path to the SQLite database file (`:memory:` for tests). */
+  path: string
+  /**
+   * 32 raw bytes, urlsafe-base64. The deployment-wide master key used to
+   * seal the on-disk secret. Presence is validated at plugin load; base64
+   * decoding and exact byte-length validation occur on first use.
+   */
+  masterKey: string
+  /** Default label attached to new keys (overridable per `provision()`). */
+  defaultLabel?: string
+  /** Maximum active custom models per account. */
+  maxCustomModels?: number
+  /** New-API management and model data-plane settings. Prices are CNY micros/token. */
+  newApi?: {
+    /** New-API administrative endpoint. */
+    adminUrl: string
+    /** New-API token issuance endpoint. */
+    apiBaseUrl: string
+    /** Administrative username. */
+    username: string
+    /** Administrative password. */
+    password: string
+    /** Display name assigned to issued tokens. */
+    displayName?: string
+    /** New-API user group for issued tokens. */
+    userGroup: string
+    /** Token quota in provider units. */
+    tokenQuota: number
+    /** Whether issued tokens have unlimited quota. */
+    tokenUnlimitedQuota: boolean
+    /** Lifetime of issued tokens in days. */
+    tokenExpiresDays: number
+    /** Whether model limits are enabled for issued tokens. */
+    modelLimitsEnabled: boolean
+    /** Provider route stored on provisioned credentials. */
+    route: string
+    /** Upstream model assigned to provisioned credentials. */
+    model: string
+    /** Input price in CNY micros per token. */
+    inputPriceMicrosPerToken: number
+    /** Output price in CNY micros per token. */
+    outputPriceMicrosPerToken: number
+    /** HTTP request timeout in milliseconds. */
+    timeoutMs: number
+    /** Number of failed HTTP request retries. */
+    retries: number
+  }
+}
+```
+
+来源： [`packages/account/model-keys/src/index.ts:40`](../packages/account/model-keys/src/index.ts)
+
+<a id="deepseek-aidsh-account-plugin-factory"></a>
+
+## `@deepseek-ai/dsh-account-plugin-factory`
+
+```ts config-catalog
+/** Plugin factory configuration. The catalog is deployment-owned and read-only at runtime. */
+export interface Config {
+  /** SQLite database path used for account installation state. */
+  path: string
+  /** Deployment-owned plugin catalog exposed to accounts. */
+  catalog?: PluginCatalogEntry[]
+  /** Programmatic extension point for deployment-owned catalog activators. */
+  activators?: Readonly<Record<string, PluginActivator>>
+}
+
+/** One server-registered plugin that accounts may install. */
+export interface PluginCatalogEntry {
+  /** Stable plugin identifier used by install requests. */
+  pluginId: string
+  /** Human-readable plugin title. */
+  title: string
+  /** Human-readable plugin description. */
+  description: string
+  /** Catalog version displayed with the plugin. */
+  version: string
+  /** System entries are enabled in every composition and cannot be removed. */
+  systemDefault: boolean
+  /** Server-owned activator key; absent only for capabilities already in the base composition. */
+  activationId?: string
+}
+
+/** One server-registered activation implementation. */
+export type PluginActivator = (ctx: Context) => Promise<void> | void
+```
+
+依赖类型： `Context` (`@deepseek-ai/cordis`)
+
+来源： [`packages/account/plugin-factory/src/index.ts:14`](../packages/account/plugin-factory/src/index.ts)
+
+<a id="deepseek-aidsh-account-skill-store"></a>
+
+## `@deepseek-ai/dsh-account-skill-store`
+
+依赖服务： `skills`
+
+```ts config-catalog
+/** Account Skill store configuration. */
+export interface Config {
+  /** Root directory containing account-owned skill data. */
+  dshHome: string
+}
+```
+
+来源： [`packages/account/skill-store/src/index.ts:18`](../packages/account/skill-store/src/index.ts)
+
+<a id="deepseek-aidsh-account-wallet"></a>
+
+## `@deepseek-ai/dsh-account-wallet`
+
+```ts config-catalog
+/** Plugin configuration. */
+export interface Config {
+  /** Path to the SQLite database file (`:memory:` for tests). */
+  path: string
+  /** Welcome bonus in micros applied at signup (default 20 CNY). */
+  welcomeBonusMicros?: number
+  /** Optional daily refresh in micros (disabled by default). */
+  dailyRefreshMicros?: number
+  /** Lifetime of an active model-usage reservation in seconds. */
+  reservationTtlSeconds?: number
+}
+```
+
+来源： [`packages/account/wallet/src/index.ts:57`](../packages/account/wallet/src/index.ts)
+
 <a id="deepseek-aidsh-acp"></a>
 
 ## `@deepseek-ai/dsh-acp`
@@ -320,6 +553,26 @@ export interface Config {
 
 来源：[`packages/core/agent-tool-presentation/src/index.ts:38`](../packages/core/agent-tool-presentation/src/index.ts)
 
+<a id="deepseek-aidsh-artifact-store-fs"></a>
+
+## `@deepseek-ai/dsh-artifact-store-fs`
+
+```ts config-catalog
+/** Local artifact registry configuration. */
+export interface Config {
+  /** Explicit harness home; omitted follows `DSH_HOME`, then `~/.dsh`. */
+  dshHome?: string
+  /** Maximum encoded bytes accepted for one artifact write. Default: 32 MiB. */
+  maxArtifactBytes?: number
+  /** Maximum artifacts one session may publish before rotation. Default: 256. */
+  maxArtifactsPerSession?: number
+  /** Maximum encoded bytes retained on disk per content-addressed object. Default: 32 MiB. */
+  maxObjectBytes?: number
+}
+```
+
+来源： [`packages/artifact/artifact-store-fs/src/index.ts:43`](../packages/artifact/artifact-store-fs/src/index.ts)
+
 <a id="deepseek-aidsh-attachment-local"></a>
 
 ## `@deepseek-ai/dsh-attachment-local`
@@ -345,6 +598,12 @@ export interface Config {
   normalizedImageMaxBytes?: number
   /** Maximum simultaneous normalization or request-image transformations in this service instance. */
   imageCompressionConcurrency?: number
+  /** Maximum encoded bytes accepted for one PDF or Office file. */
+  maxDocumentBytes?: number
+  /** Maximum PDF and Office file count accepted in one message. */
+  maxDocumentsPerMessage?: number
+  /** Maximum aggregate PDF and Office bytes accepted in one message. */
+  maxMessageDocumentBytes?: number
 }
 ```
 
@@ -595,6 +854,38 @@ export interface Config {
 
 来源：[`packages/e2b/e2b/src/index.ts:43`](../packages/e2b/e2b/src/index.ts)
 
+<a id="deepseek-aidsh-embedding"></a>
+
+## `@deepseek-ai/dsh-embedding`
+
+```ts config-catalog
+/** Runtime selection configuration. */
+export interface EmbeddingRuntimeConfig {
+  /** Explicit provider id; omitted requires exactly one usable provider. */
+  readonly provider?: string
+}
+```
+
+来源： [`packages/embedding/embedding/src/index.ts:15`](../packages/embedding/embedding/src/index.ts)
+
+<a id="deepseek-aidsh-embedding-hash-local"></a>
+
+## `@deepseek-ai/dsh-embedding-hash-local`
+
+依赖服务： `embedding`
+
+```ts config-catalog
+/** Configuration for the local hash provider. */
+export interface HashEmbeddingConfig {
+  /** Registry id. Defaults to `hash-local`. */
+  readonly id?: string
+  /** Output vector dimensions. Must be a positive integer. */
+  readonly dimensions?: number
+}
+```
+
+来源： [`packages/embedding/embedding-hash-local/src/index.ts:12`](../packages/embedding/embedding-hash-local/src/index.ts)
+
 <a id="deepseek-aidsh-experimental-agent-team"></a>
 
 ## `@deepseek-ai/dsh-experimental-agent-team`
@@ -802,6 +1093,10 @@ export interface Config {
 ```ts config-catalog
 /** Gateway plugin configuration. */
 export interface Config {
+  /** Preset permitted for authenticated account sessions. */
+  accountAgentPreset?: string
+  /** Base directory for authenticated account workspace roots. */
+  accountWorkspaceRoot?: string
   /**
    * Whether this deployment can hand paths to a native desktop opener —
    * the `hasDocument` capability the agent-preset roster reports. Absent,
@@ -907,6 +1202,74 @@ export interface Config {
 ```
 
 来源：[`packages/jobs/jobs-local/src/index.ts:31`](../packages/jobs/jobs-local/src/index.ts)
+
+<a id="deepseek-aidsh-knowledge"></a>
+
+## `@deepseek-ai/dsh-knowledge`
+
+```ts config-catalog
+/** Runtime configuration for provider selection and the enforced search bound. */
+export interface KnowledgeRuntimeConfig {
+  /** Provider id selected for knowledge operations. */
+  readonly provider?: string
+  /** Maximum number of search results returned by the runtime. */
+  readonly maxResults?: number
+  /** Maximum bytes accepted for one ingestion request. */
+  readonly maxIngestBytes?: number
+}
+```
+
+来源： [`packages/knowledge/knowledge/src/index.ts:27`](../packages/knowledge/knowledge/src/index.ts)
+
+<a id="deepseek-aidsh-knowledge-sqlite-local"></a>
+
+## `@deepseek-ai/dsh-knowledge-sqlite-local`
+
+依赖服务： `knowledge` · `embedding`
+
+```ts config-catalog
+/** Local SQLite storage, chunking, and fusion settings. */
+export interface Config {
+  /** SQLite database path; `:memory:` creates an ephemeral store. */
+  readonly path?: string
+  /** Stable provider id used for runtime selection. */
+  readonly id?: string
+  /** Maximum characters in each indexed chunk. */
+  readonly chunkChars?: number
+  /** Number of overlapping characters between adjacent chunks. */
+  readonly chunkOverlapChars?: number
+  /** Relative weight assigned to keyword relevance. */
+  readonly keywordWeight?: number
+  /** Relative weight assigned to vector similarity. */
+  readonly vectorWeight?: number
+}
+```
+
+来源： [`packages/knowledge/knowledge-sqlite-local/src/index.ts:16`](../packages/knowledge/knowledge-sqlite-local/src/index.ts)
+
+<a id="deepseek-aidsh-llm-account-platform"></a>
+
+## `@deepseek-ai/dsh-llm-account-platform`
+
+依赖服务： `llm` · `sessions` · `wallet` · `userModelKeys`
+
+```ts config-catalog
+/** Configures one account-billed model route. */
+export interface Config {
+  /** Account model route used for provider credential lookup. */
+  route: string
+  /** Default upstream model identifier. */
+  model: string
+  /** HTTPS host allow-list for account-owned custom models. */
+  customModelAllowedHosts?: string[]
+  /** Behavior when usage is unavailable after reservation. */
+  missingUsagePolicy?: 'reserve' | 'cancel'
+  /** Output-token estimate used when a request omits its limit. */
+  fallbackMaxOutputTokens?: number
+}
+```
+
+来源： [`packages/llm/account-platform/src/index.ts:73`](../packages/llm/account-platform/src/index.ts)
 
 <a id="deepseek-aidsh-llm-deepseek"></a>
 
@@ -1022,6 +1385,8 @@ export interface PiAiProviderProfile {
   api?: string
   /** Endpoint for this route's models; defaults to the installed catalog's endpoint. */
   baseURL?: string
+  /** Environment-variable name whose launch-snapshot value supplies {@link baseURL} when it is absent. */
+  baseURLEnv?: string
   /**
    * This route's model catalog. Omission serves the installed catalog for the
    * route unchanged; an explicit list replaces it, each entry defaulting its
@@ -1368,6 +1733,20 @@ export interface LspLocalServerConfig {
 
 来源：[`packages/lsp/lsp-stdio/src/index.ts:82`](../packages/lsp/lsp-stdio/src/index.ts)
 
+<a id="deepseek-aidsh-max-token-continuation"></a>
+
+## `@deepseek-ai/dsh-max-token-continuation`
+
+```ts config-catalog
+/** Plugin configuration. */
+export interface Config {
+  /** Maximum consecutive automatic continuation turns for one uninterrupted task. */
+  maxContinuations?: number
+}
+```
+
+来源： [`packages/guard/max-token-continuation/src/index.ts:24`](../packages/guard/max-token-continuation/src/index.ts)
+
 <a id="deepseek-aidsh-mcp-client"></a>
 
 ## `@deepseek-ai/dsh-mcp-client`
@@ -1456,6 +1835,58 @@ export interface Config {
 ```
 
 来源：[`packages/feedback/message-feedback/src/index.ts:49`](../packages/feedback/message-feedback/src/index.ts)
+
+<a id="deepseek-aidsh-ops"></a>
+
+## `@deepseek-ai/dsh-ops`
+
+依赖服务： `agentDefaultModel` · `agents` · `sessions` · `OPS_STARTUP_SERVICE`
+
+```ts config-catalog
+/** Plugin config: the optional one-shot task, otherwise the process idles. */
+export interface Config {
+  /** Optional prompt text for a single foreground run on startup; empty = idle. */
+  task: string
+}
+```
+
+来源： [`packages/bundle/ops/src/index.ts:39`](../packages/bundle/ops/src/index.ts)
+
+<a id="deepseek-aidsh-ops-subagent-python"></a>
+
+## `@deepseek-ai/dsh-ops-subagent-python`
+
+依赖服务： `subagents` · `subprocess`
+
+```ts config-catalog
+/** Config: how to spawn and drive the Python child process. */
+export interface Config {
+  /** Provider name on `ctx.subagents` (default `ops-python`). */
+  providerName: string
+  /** The Python interpreter to spawn (default `python3`). */
+  command: string
+  /** Python module entry point passed to the interpreter (e.g. `ops_runtime.subagent_main`). */
+  module: string
+  /** Extra arguments forwarded to the Python module. */
+  args: string[]
+  /**
+   * Working directory override for the child process. Must be non-empty;
+   * a relative path resolves against the harness launch directory at load.
+   * When omitted, each child inherits its delegating parent session's cwd.
+   */
+  cwd?: string
+  /** Environment variables for the child (forwarded on top of a credential-scrubbed parent env). */
+  env: Record<string, string>
+  /** Bound (ms) on the JSON-RPC `agent.turn` request before the parent treats it as errored. */
+  turnTimeoutMs?: number
+  /** EOF grace (ms) on dispose before the parent escalates to SIGTERM. */
+  disposeEofGraceMs?: number
+  /** SIGTERM to SIGKILL grace (ms) on dispose. */
+  disposeGraceMs?: number
+}
+```
+
+来源： [`packages/ops/ops-subagent-python/src/index.ts:45`](../packages/ops/ops-subagent-python/src/index.ts)
 
 <a id="deepseek-aidsh-permission-presets"></a>
 
@@ -2040,6 +2471,8 @@ export interface Config {
   watchFollowSymlinks?: boolean
   /** Bundled skill root; defaults to `$DSH_BUNDLED_SKILL_DIR` when default roots are included, otherwise mounts none. */
   bundledSkillDir?: string
+  /** Additional read-only roots used for account-scoped lookup. */
+  systemSkillDirs?: string[]
 }
 ```
 
@@ -2545,6 +2978,58 @@ export interface Config {
 
 来源：[`packages/shell/tool-bash-persistent/src/index.ts:432`](../packages/shell/tool-bash-persistent/src/index.ts)
 
+<a id="deepseek-aidsh-tool-chart"></a>
+
+## `@deepseek-ai/dsh-tool-chart`
+
+依赖服务： `artifactRegistry` · `systemPrompt` · `tools`
+
+```ts config-catalog
+/** Configuration for chart artifact generation and size limits. */
+export interface Config {
+  /** Max bytes per chart tool invocation. Defaults to 4 MB. */
+  maxBytes?: number
+  /** Default title when the model omits one. */
+  defaultTitle?: string
+}
+```
+
+来源： [`packages/web/tool-chart/src/index.ts:39`](../packages/web/tool-chart/src/index.ts)
+
+<a id="deepseek-aidsh-tool-doc"></a>
+
+## `@deepseek-ai/dsh-tool-doc`
+
+依赖服务： `artifactRegistry` · `systemPrompt` · `tools`
+
+```ts config-catalog
+/** Configuration for document artifact generation and size limits. */
+export interface Config {
+  /** Max bytes per doc_build invocation. Defaults to 4 MB. */
+  maxBytes?: number
+  /** Default title when the model omits one. */
+  defaultTitle?: string
+}
+```
+
+来源： [`packages/web/tool-doc/src/index.ts:36`](../packages/web/tool-doc/src/index.ts)
+
+<a id="deepseek-aidsh-tool-document"></a>
+
+## `@deepseek-ai/dsh-tool-document`
+
+依赖服务： `attachments` · `systemPrompt` · `tools`
+
+```ts config-catalog
+/** Configuration for model-facing document extraction. */
+export interface Config {
+  /** Maximum characters extracted and returned by one document read. */
+  maxCharacters?: number
+}
+```
+
+来源： [`packages/web/tool-document/src/index.ts:11`](../packages/web/tool-document/src/index.ts)
+
 <a id="deepseek-aidsh-tool-fs"></a>
 
 ## `@deepseek-ai/dsh-tool-fs`
@@ -2618,6 +3103,24 @@ export interface Config {
 
 来源：[`packages/goal/tool-goal/src/index.ts:26`](../packages/goal/tool-goal/src/index.ts)
 
+<a id="deepseek-aidsh-tool-html"></a>
+
+## `@deepseek-ai/dsh-tool-html`
+
+依赖服务： `artifactRegistry` · `systemPrompt` · `tools`
+
+```ts config-catalog
+/** Configuration for HTML artifact generation and size limits. */
+export interface Config {
+  /** Max bytes per html_build invocation. Defaults to 2 MB. */
+  maxBytes?: number
+  /** Default title when the model omits one. */
+  defaultTitle?: string
+}
+```
+
+来源： [`packages/web/tool-html/src/index.ts:27`](../packages/web/tool-html/src/index.ts)
+
 <a id="deepseek-aidsh-tool-jobs"></a>
 
 ## `@deepseek-ai/dsh-tool-jobs`
@@ -2651,6 +3154,26 @@ export type CompletionDelivery = 'quiet' | 'wakeup'
 ```
 
 来源：[`packages/jobs/tool-jobs/src/index.ts:32`](../packages/jobs/tool-jobs/src/index.ts)
+
+<a id="deepseek-aidsh-tool-knowledge"></a>
+
+## `@deepseek-ai/dsh-tool-knowledge`
+
+依赖服务： `tools` · `knowledge` · `systemPrompt`
+
+```ts config-catalog
+/** Model-facing result, timeout, and output bounds. */
+export interface Config {
+  /** Maximum number of citations returned to the model. */
+  maxResults?: number
+  /** Maximum duration of one knowledge search in milliseconds. */
+  timeoutMs?: number
+  /** Maximum characters emitted in the tool result. */
+  maxResultChars?: number
+}
+```
+
+来源： [`packages/knowledge/tool-knowledge/src/index.ts:15`](../packages/knowledge/tool-knowledge/src/index.ts)
 
 <a id="deepseek-aidsh-tool-lsp"></a>
 
@@ -2750,6 +3273,24 @@ export interface Config {
 
 来源：[`packages/session-query/tool-session-query/src/index.ts:29`](../packages/session-query/tool-session-query/src/index.ts)
 
+<a id="deepseek-aidsh-tool-sheet"></a>
+
+## `@deepseek-ai/dsh-tool-sheet`
+
+依赖服务： `artifactRegistry` · `attachments` · `systemPrompt` · `tools`
+
+```ts config-catalog
+/** Sheet artifact size and title defaults. */
+export interface Config {
+  /** Max bytes per sheet_build invocation. Defaults to 4 MB. */
+  maxBytes?: number
+  /** Default title when the model omits one. */
+  defaultTitle?: string
+}
+```
+
+来源： [`packages/web/tool-sheet/src/index.ts:38`](../packages/web/tool-sheet/src/index.ts)
+
 <a id="deepseek-aidsh-tool-skill"></a>
 
 ## `@deepseek-ai/dsh-tool-skill`
@@ -2765,6 +3306,26 @@ export interface Config {
 ```
 
 来源：[`packages/skill/tool-skill/src/index.ts:61`](../packages/skill/tool-skill/src/index.ts)
+
+<a id="deepseek-aidsh-tool-slides"></a>
+
+## `@deepseek-ai/dsh-tool-slides`
+
+依赖服务： `artifactRegistry` · `systemPrompt` · `tools`
+
+```ts config-catalog
+/** Configuration for slide-deck generation and size limits. */
+export interface Config {
+  /** Max bytes per slides_build invocation. Defaults to 4 MB (CSS + Reveal.js base). */
+  maxBytes?: number
+  /** Default title when the model omits one. */
+  defaultTitle?: string
+  /** Reveal.js theme name; inlined CSS swaps the file content. */
+  theme?: 'black' | 'white' | 'league' | 'beige' | 'sky' | 'night' | 'serif' | 'simple' | 'solarized'
+}
+```
+
+来源： [`packages/web/tool-slides/src/index.ts:39`](../packages/web/tool-slides/src/index.ts)
 
 <a id="deepseek-aidsh-tool-str-replace-editor"></a>
 
@@ -3040,6 +3601,20 @@ export type ApprovalPolicy = 'ask' | 'never'
 
 来源：[`packages/interaction/user-approval/src/index.ts:177`](../packages/interaction/user-approval/src/index.ts)
 
+<a id="deepseek-aidsh-user-context"></a>
+
+## `@deepseek-ai/dsh-user-context`
+
+```ts config-catalog
+/** Plugin configuration. */
+export interface Config {
+  /** Path to the SQLite database file (`:memory:` for tests). */
+  path: string
+}
+```
+
+来源： [`packages/memory/user-context/src/index.ts:45`](../packages/memory/user-context/src/index.ts)
+
 <a id="deepseek-aidsh-web"></a>
 
 ## `@deepseek-ai/dsh-web`
@@ -3048,12 +3623,16 @@ export type ApprovalPolicy = 'ask' | 'never'
 /**
  * Config for the web seam. `searchProvider` / `fetchProvider` pin which provider
  * wins for each capability; both are optional (a single registered usable
- * provider auto-selects). Operational overrides such as environment variables
- * must feed these same fields rather than introduce a hidden priority chain.
+ * provider auto-selects). Search credential fallback requires an explicit
+ * `searchProvider` and runs only when that provider reports missing credentials.
+ * Operational overrides such as environment variables must feed these same
+ * fields rather than introduce a hidden priority chain.
  */
 export interface WebRuntimeConfig {
   /** Explicit search provider id. Omitted = auto-select when exactly one usable. */
   readonly searchProvider?: string
+  /** Explicit search provider used only after the primary reports missing credentials. */
+  readonly searchCredentialFallbackProvider?: string
   /** Explicit fetch provider id. Omitted = auto-select when exactly one usable. */
   readonly fetchProvider?: string
 }
@@ -3113,6 +3692,32 @@ export interface Config {
 ```
 
 来源：[`packages/web/web-fetch-http/src/index.ts:34`](../packages/web/web-fetch-http/src/index.ts)
+
+<a id="deepseek-aidsh-web-provider-firecrawl"></a>
+
+## `@deepseek-ai/dsh-web-provider-firecrawl`
+
+依赖服务： `web`
+
+```ts config-catalog
+/** Plugin config; `apply` fills environment and constant defaults. */
+export interface Config {
+  /** Optional literal API key. Prefer `apiKeyEnv` in persisted config. */
+  readonly apiKey?: string
+  /** Credential reference resolved once per request. */
+  readonly apiKeyEnv?: string
+  /** Hosted HTTPS or loopback HTTP Firecrawl v2 endpoint. */
+  readonly baseURL?: string
+  /** Maximum accepted API response bytes. */
+  readonly maxResponseBytes?: number
+  /** Aggregate Markdown characters retained across search sources. */
+  readonly maxSearchContentChars?: number
+  /** Maximum Markdown characters retained from one scrape. */
+  readonly maxFetchBodyChars?: number
+}
+```
+
+来源： [`packages/web/web-provider-firecrawl/src/index.ts:41`](../packages/web/web-provider-firecrawl/src/index.ts)
 
 <a id="deepseek-aidsh-web-search-deepseek"></a>
 
@@ -3190,6 +3795,24 @@ export interface Config {
 
 来源：[`packages/web/web-search-perplexity/src/index.ts:32`](../packages/web/web-search-perplexity/src/index.ts)
 
+<a id="deepseek-aidsh-web-search-searxng"></a>
+
+## `@deepseek-ai/dsh-web-search-searxng`
+
+依赖服务： `web`
+
+```ts config-catalog
+/** Plugin config; `apply` fills environment and constant defaults. */
+export interface Config {
+  /** SearXNG origin or subpath. HTTP is accepted only on a loopback host. */
+  baseURL?: string
+  /** Maximum JSON response body size accepted from SearXNG. */
+  maxResponseBytes?: number
+}
+```
+
+来源： [`packages/web/web-search-searxng/src/index.ts:36`](../packages/web/web-search-searxng/src/index.ts)
+
 <a id="deepseek-aidsh-workflow-worker-thread"></a>
 
 ## `@deepseek-ai/dsh-workflow-worker-thread`
@@ -3220,134 +3843,164 @@ export interface Config {
 
 来源：[`packages/workflow/workflow-worker-thread/src/index.ts:32`](../packages/workflow/workflow-worker-thread/src/index.ts)
 
+<a id="deepseek-aidsh-xiaowei"></a>
+
+## `@deepseek-ai/dsh-xiaowei`
+
+依赖服务： `agentDefaultModel` · `agents` · `sessions` · `XIAOWEI_STARTUP_SERVICE`
+
+```ts config-catalog
+/** Plugin config: the optional one-shot task, otherwise the process idles. */
+export interface Config {
+  /** Optional prompt text for a single foreground run on startup; empty = idle. */
+  task: string
+}
+```
+
+来源： [`packages/bundle/xiaowei/src/index.ts:44`](../packages/bundle/xiaowei/src/index.ts)
+
 ## 无配置的可加载插件
 
 这些插件通过 `cordis.yml` 中不含 `config:` 块的条目加载；它们未声明任何配置接口。
 
-- `@deepseek-ai/dsh-agent`（[`packages/core/agent/src/index.ts`](../packages/core/agent/src/index.ts)）
-- `@deepseek-ai/dsh-api-gateway` — 需要 `typert`（[`packages/api/gateway/src/index.ts`](../packages/api/gateway/src/index.ts)）
-- `@deepseek-ai/dsh-api-remotes`（[`packages/api/remotes/src/index.ts`](../packages/api/remotes/src/index.ts)）
-- `@deepseek-ai/dsh-authorization` — 需要 `credentials`（[`packages/credentials/authorization/src/index.ts`](../packages/credentials/authorization/src/index.ts)）
-- `@deepseek-ai/dsh-client-locale`（[`packages/client/locale/src/index.ts`](../packages/client/locale/src/index.ts)）
-- `@deepseek-ai/dsh-client-modules` — 需要 `webServer` · `loader`（[`packages/client/modules/src/index.ts`](../packages/client/modules/src/index.ts)）
-- `@deepseek-ai/dsh-client-runtime`（[`packages/client/runtime/src/index.ts`](../packages/client/runtime/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-agent-preset`（[`packages/client/ui-agent-preset/src/index.ts`](../packages/client/ui-agent-preset/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-attachment`（[`packages/client/ui-attachment/src/index.ts`](../packages/client/ui-attachment/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-brand-official`（[`packages/client/ui-brand-official/src/index.ts`](../packages/client/ui-brand-official/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-commands`（[`packages/client/ui-commands/src/index.ts`](../packages/client/ui-commands/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-conversation`（[`packages/client/ui-conversation/src/index.ts`](../packages/client/ui-conversation/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-cordis`（[`packages/extensions/ui-cordis/src/index.ts`](../packages/extensions/ui-cordis/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-deliverables` — 需要 `systemPrompt`（[`packages/client/ui-deliverables/src/index.ts`](../packages/client/ui-deliverables/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-directory-picker-browse`（[`packages/client/ui-directory-picker-browse/src/index.ts`](../packages/client/ui-directory-picker-browse/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-directory-picker-native`（[`packages/client/ui-directory-picker-native/src/index.ts`](../packages/client/ui-directory-picker-native/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-goal`（[`packages/client/ui-goal/src/index.ts`](../packages/client/ui-goal/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-input-trigger`（[`packages/client/ui-input-trigger/src/index.ts`](../packages/client/ui-input-trigger/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-jobs`（[`packages/client/ui-jobs/src/index.ts`](../packages/client/ui-jobs/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-layout`（[`packages/client/ui-layout/src/index.ts`](../packages/client/ui-layout/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-message-feedback`（[`packages/client/ui-message-feedback/src/index.ts`](../packages/client/ui-message-feedback/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-model-selection`（[`packages/client/ui-model-selection/src/index.ts`](../packages/client/ui-model-selection/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-permission-presets`（[`packages/client/ui-permission-presets/src/index.ts`](../packages/client/ui-permission-presets/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-plan`（[`packages/client/ui-plan/src/index.ts`](../packages/client/ui-plan/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-reference`（[`packages/client/ui-reference/src/index.ts`](../packages/client/ui-reference/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-renderer`（[`packages/client/ui-renderer/src/index.ts`](../packages/client/ui-renderer/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-settings`（[`packages/client/ui-settings/src/index.ts`](../packages/client/ui-settings/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-settings-general`（[`packages/client/ui-settings-general/src/index.ts`](../packages/client/ui-settings-general/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-settings-models`（[`packages/client/ui-settings-models/src/index.ts`](../packages/client/ui-settings-models/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-settings-plugin-inventory`（[`packages/client/ui-settings-plugin-inventory/src/index.ts`](../packages/client/ui-settings-plugin-inventory/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-settings-plugins`（[`packages/client/ui-settings-plugins/src/index.ts`](../packages/client/ui-settings-plugins/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-sidebar`（[`packages/client/ui-sidebar/src/index.ts`](../packages/client/ui-sidebar/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-skill`（[`packages/client/ui-skill/src/index.ts`](../packages/client/ui-skill/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-subagent`（[`packages/client/ui-subagent/src/index.ts`](../packages/client/ui-subagent/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-theme`（[`packages/client/ui-theme/src/index.ts`](../packages/client/ui-theme/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-tool`（[`packages/client/ui-tool/src/index.ts`](../packages/client/ui-tool/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-trajectory`（[`packages/client/ui-trajectory/src/index.ts`](../packages/client/ui-trajectory/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-user-questions`（[`packages/client/ui-user-questions/src/index.ts`](../packages/client/ui-user-questions/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-workflow-run`（[`packages/client/ui-workflow-run/src/index.ts`](../packages/client/ui-workflow-run/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-workspace`（[`packages/client/ui-workspace/src/index.ts`](../packages/client/ui-workspace/src/index.ts)）
-- `@deepseek-ai/dsh-command-compact` — 需要 `commands` · `compact`（[`packages/compaction/command-compact/src/index.ts`](../packages/compaction/command-compact/src/index.ts)）
-- `@deepseek-ai/dsh-command-feedback` — 需要 `commands`（[`packages/feedback/command-feedback/src/index.ts`](../packages/feedback/command-feedback/src/index.ts)）
-- `@deepseek-ai/dsh-command-goal` — 需要 `commands` · `goals`（[`packages/goal/command-goal/src/index.ts`](../packages/goal/command-goal/src/index.ts)）
-- `@deepseek-ai/dsh-commands`（[`packages/interaction/commands/src/index.ts`](../packages/interaction/commands/src/index.ts)）
-- `@deepseek-ai/dsh-cordis-client-runner`（[`packages/extensions/cordis-client-runner/src/index.ts`](../packages/extensions/cordis-client-runner/src/index.ts)）
-- `@deepseek-ai/dsh-fs-e2b` — 需要 `e2b`（[`packages/e2b/fs-e2b/src/index.ts`](../packages/e2b/fs-e2b/src/index.ts)）
-- `@deepseek-ai/dsh-fs-observation-policy`（[`packages/fs/fs-observation-policy/src/index.ts`](../packages/fs/fs-observation-policy/src/index.ts)）
-- `@deepseek-ai/dsh-goal-round-driver` — 需要 `agents` · `goals` · `sessions`（[`packages/goal/goal-round-driver/src/index.ts`](../packages/goal/goal-round-driver/src/index.ts)）
-- `@deepseek-ai/dsh-host-directory-picker-auto` — 需要 `webServer` · `loader`（[`packages/host/directory-picker-auto/src/index.ts`](../packages/host/directory-picker-auto/src/index.ts)）
-- `@deepseek-ai/dsh-host-directory-picker-native`（[`packages/host/directory-picker-native/src/index.ts`](../packages/host/directory-picker-native/src/index.ts)）
-- `@deepseek-ai/dsh-host-plugin-inventory` — 需要 `loader`（[`packages/host/plugin-inventory/src/index.ts`](../packages/host/plugin-inventory/src/index.ts)）
-- `@deepseek-ai/dsh-llm`（[`packages/llm/llm/src/index.ts`](../packages/llm/llm/src/index.ts)）
-- `@deepseek-ai/dsh-lsp`（[`packages/lsp/lsp/src/index.ts`](../packages/lsp/lsp/src/index.ts)）
-- `@deepseek-ai/dsh-schedule` — 需要 `agents` · `sessions` · `tools` · `sessionPersistence`（[`packages/schedule/schedule/src/index.ts`](../packages/schedule/schedule/src/index.ts)）
-- `@deepseek-ai/dsh-session`（[`packages/core/session/src/index.ts`](../packages/core/session/src/index.ts)）
-- `@deepseek-ai/dsh-session-checkpoint-policy` — 需要 `llm` · `sessionPersistence` · `sessions` · `tools`（[`packages/session/session-checkpoint-policy/src/index.ts`](../packages/session/session-checkpoint-policy/src/index.ts)）
-- `@deepseek-ai/dsh-session-log-export` — 需要 `commands`（[`packages/session-query/session-log-export/src/index.ts`](../packages/session-query/session-log-export/src/index.ts)）
-- `@deepseek-ai/dsh-session-projection`（[`packages/session/session-projection/src/index.ts`](../packages/session/session-projection/src/index.ts)）
-- `@deepseek-ai/dsh-session-stats` — 需要 `sessionProjections`（[`packages/session/session-stats/src/index.ts`](../packages/session/session-stats/src/index.ts)）
-- `@deepseek-ai/dsh-skill-badge` — 需要 `skills`（[`packages/skill/skill-badge/src/index.ts`](../packages/skill/skill-badge/src/index.ts)）
-- `@deepseek-ai/dsh-storage`（[`packages/storage/storage/src/index.ts`](../packages/storage/storage/src/index.ts)）
-- `@deepseek-ai/dsh-subagent`（[`packages/subagent/subagent/src/index.ts`](../packages/subagent/subagent/src/index.ts)）
-- `@deepseek-ai/dsh-subprocess-local`（[`packages/subprocess/subprocess-local/src/index.ts`](../packages/subprocess/subprocess-local/src/index.ts)）
-- `@deepseek-ai/dsh-terminal`（[`packages/terminal/terminal/src/index.ts`](../packages/terminal/terminal/src/index.ts)）
-- `@deepseek-ai/dsh-tool-ask-user` — 需要 `tools` · `userInteraction`（[`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts)）
-- `@deepseek-ai/dsh-tool-call-timeout-policy` — 需要 `tools`（[`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts)）
-- `@deepseek-ai/dsh-tool-cordis` — 需要 `tools` · `systemPrompt` · `dynamicCordisRunner` · `cordisInspect`（[`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts)）
-- `@deepseek-ai/dsh-tool-subagent-control` — 需要 `tools` · `subagents`（[`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts)）
-- `@deepseek-ai/dsh-user-questions`（[`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts)）
-- `@deepseek-ai/dsh-workspace` — 需要 `storageDomain` · `sessionPersistence`（[`packages/workspace/workspace/src/index.ts`](../packages/workspace/workspace/src/index.ts)）
+- `@deepseek-ai/dsh-agent` （[`packages/core/agent/src/index.ts`](../packages/core/agent/src/index.ts)）
+- `@deepseek-ai/dsh-api-gateway` — 需要 `typert` （[`packages/api/gateway/src/index.ts`](../packages/api/gateway/src/index.ts)）
+- `@deepseek-ai/dsh-api-remotes` （[`packages/api/remotes/src/index.ts`](../packages/api/remotes/src/index.ts)）
+- `@deepseek-ai/dsh-authorization` — 需要 `credentials` （[`packages/credentials/authorization/src/index.ts`](../packages/credentials/authorization/src/index.ts)）
+- `@deepseek-ai/dsh-client-locale` （[`packages/client/locale/src/index.ts`](../packages/client/locale/src/index.ts)）
+- `@deepseek-ai/dsh-client-modules` — 需要 `webServer` · `loader` （[`packages/client/modules/src/index.ts`](../packages/client/modules/src/index.ts)）
+- `@deepseek-ai/dsh-client-runtime` （[`packages/client/runtime/src/index.ts`](../packages/client/runtime/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-agent-preset` （[`packages/client/ui-agent-preset/src/index.ts`](../packages/client/ui-agent-preset/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-attachment` （[`packages/client/ui-attachment/src/index.ts`](../packages/client/ui-attachment/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-brand-official` （[`packages/client/ui-brand-official/src/index.ts`](../packages/client/ui-brand-official/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-commands` （[`packages/client/ui-commands/src/index.ts`](../packages/client/ui-commands/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-conversation` （[`packages/client/ui-conversation/src/index.ts`](../packages/client/ui-conversation/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-cordis` （[`packages/extensions/ui-cordis/src/index.ts`](../packages/extensions/ui-cordis/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-deliverables` — 需要 `systemPrompt` （[`packages/client/ui-deliverables/src/index.ts`](../packages/client/ui-deliverables/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-directory-picker-browse` （[`packages/client/ui-directory-picker-browse/src/index.ts`](../packages/client/ui-directory-picker-browse/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-directory-picker-native` （[`packages/client/ui-directory-picker-native/src/index.ts`](../packages/client/ui-directory-picker-native/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-goal` （[`packages/client/ui-goal/src/index.ts`](../packages/client/ui-goal/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-input-trigger` （[`packages/client/ui-input-trigger/src/index.ts`](../packages/client/ui-input-trigger/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-jobs` （[`packages/client/ui-jobs/src/index.ts`](../packages/client/ui-jobs/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-layout` （[`packages/client/ui-layout/src/index.ts`](../packages/client/ui-layout/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-message-feedback` （[`packages/client/ui-message-feedback/src/index.ts`](../packages/client/ui-message-feedback/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-model-selection` （[`packages/client/ui-model-selection/src/index.ts`](../packages/client/ui-model-selection/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-permission-presets` （[`packages/client/ui-permission-presets/src/index.ts`](../packages/client/ui-permission-presets/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-plan` （[`packages/client/ui-plan/src/index.ts`](../packages/client/ui-plan/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-reference` （[`packages/client/ui-reference/src/index.ts`](../packages/client/ui-reference/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-renderer` （[`packages/client/ui-renderer/src/index.ts`](../packages/client/ui-renderer/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-settings` （[`packages/client/ui-settings/src/index.ts`](../packages/client/ui-settings/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-settings-general` （[`packages/client/ui-settings-general/src/index.ts`](../packages/client/ui-settings-general/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-settings-models` （[`packages/client/ui-settings-models/src/index.ts`](../packages/client/ui-settings-models/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-settings-plugin-inventory` （[`packages/client/ui-settings-plugin-inventory/src/index.ts`](../packages/client/ui-settings-plugin-inventory/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-settings-plugins` （[`packages/client/ui-settings-plugins/src/index.ts`](../packages/client/ui-settings-plugins/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-sidebar` （[`packages/client/ui-sidebar/src/index.ts`](../packages/client/ui-sidebar/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-skill` （[`packages/client/ui-skill/src/index.ts`](../packages/client/ui-skill/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-subagent` （[`packages/client/ui-subagent/src/index.ts`](../packages/client/ui-subagent/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-theme` （[`packages/client/ui-theme/src/index.ts`](../packages/client/ui-theme/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-tool` （[`packages/client/ui-tool/src/index.ts`](../packages/client/ui-tool/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-trajectory` （[`packages/client/ui-trajectory/src/index.ts`](../packages/client/ui-trajectory/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-user-questions` （[`packages/client/ui-user-questions/src/index.ts`](../packages/client/ui-user-questions/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-workflow-run` （[`packages/client/ui-workflow-run/src/index.ts`](../packages/client/ui-workflow-run/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-workspace` （[`packages/client/ui-workspace/src/index.ts`](../packages/client/ui-workspace/src/index.ts)）
+- `@deepseek-ai/dsh-command-compact` — 需要 `commands` · `compaction` （[`packages/compaction/command-compact/src/index.ts`](../packages/compaction/command-compact/src/index.ts)）
+- `@deepseek-ai/dsh-command-feedback` — 需要 `commands` （[`packages/feedback/command-feedback/src/index.ts`](../packages/feedback/command-feedback/src/index.ts)）
+- `@deepseek-ai/dsh-command-goal` — 需要 `commands` · `goals` （[`packages/goal/command-goal/src/index.ts`](../packages/goal/command-goal/src/index.ts)）
+- `@deepseek-ai/dsh-commands` （[`packages/interaction/commands/src/index.ts`](../packages/interaction/commands/src/index.ts)）
+- `@deepseek-ai/dsh-cordis-client-runner` （[`packages/extensions/cordis-client-runner/src/index.ts`](../packages/extensions/cordis-client-runner/src/index.ts)）
+- `@deepseek-ai/dsh-fs-e2b` — 需要 `e2b` （[`packages/e2b/fs-e2b/src/index.ts`](../packages/e2b/fs-e2b/src/index.ts)）
+- `@deepseek-ai/dsh-fs-observation-policy` （[`packages/fs/fs-observation-policy/src/index.ts`](../packages/fs/fs-observation-policy/src/index.ts)）
+- `@deepseek-ai/dsh-goal-round-driver` — 需要 `agents` · `goals` · `sessions` （[`packages/goal/goal-round-driver/src/index.ts`](../packages/goal/goal-round-driver/src/index.ts)）
+- `@deepseek-ai/dsh-host-directory-picker-auto` — 需要 `webServer` · `loader` （[`packages/host/directory-picker-auto/src/index.ts`](../packages/host/directory-picker-auto/src/index.ts)）
+- `@deepseek-ai/dsh-host-directory-picker-native` （[`packages/host/directory-picker-native/src/index.ts`](../packages/host/directory-picker-native/src/index.ts)）
+- `@deepseek-ai/dsh-host-plugin-inventory` — 需要 `loader` （[`packages/host/plugin-inventory/src/index.ts`](../packages/host/plugin-inventory/src/index.ts)）
+- `@deepseek-ai/dsh-llm` （[`packages/llm/llm/src/index.ts`](../packages/llm/llm/src/index.ts)）
+- `@deepseek-ai/dsh-lsp` （[`packages/lsp/lsp/src/index.ts`](../packages/lsp/lsp/src/index.ts)）
+- `@deepseek-ai/dsh-schedule` — 需要 `agents` · `sessions` · `tools` · `sessionPersistence` （[`packages/schedule/schedule/src/index.ts`](../packages/schedule/schedule/src/index.ts)）
+- `@deepseek-ai/dsh-session` （[`packages/core/session/src/index.ts`](../packages/core/session/src/index.ts)）
+- `@deepseek-ai/dsh-session-checkpoint-policy` — 需要 `llm` · `sessionPersistence` · `sessions` · `tools` （[`packages/session/session-checkpoint-policy/src/index.ts`](../packages/session/session-checkpoint-policy/src/index.ts)）
+- `@deepseek-ai/dsh-session-log-export` — 需要 `commands` （[`packages/session-query/session-log-export/src/index.ts`](../packages/session-query/session-log-export/src/index.ts)）
+- `@deepseek-ai/dsh-session-projection` （[`packages/session/session-projection/src/index.ts`](../packages/session/session-projection/src/index.ts)）
+- `@deepseek-ai/dsh-session-stats` — 需要 `sessionProjections` （[`packages/session/session-stats/src/index.ts`](../packages/session/session-stats/src/index.ts)）
+- `@deepseek-ai/dsh-skill-badge` — 需要 `skills` （[`packages/skill/skill-badge/src/index.ts`](../packages/skill/skill-badge/src/index.ts)）
+- `@deepseek-ai/dsh-storage` （[`packages/storage/storage/src/index.ts`](../packages/storage/storage/src/index.ts)）
+- `@deepseek-ai/dsh-subagent` （[`packages/subagent/subagent/src/index.ts`](../packages/subagent/subagent/src/index.ts)）
+- `@deepseek-ai/dsh-subprocess-local` （[`packages/subprocess/subprocess-local/src/index.ts`](../packages/subprocess/subprocess-local/src/index.ts)）
+- `@deepseek-ai/dsh-terminal` （[`packages/terminal/terminal/src/index.ts`](../packages/terminal/terminal/src/index.ts)）
+- `@deepseek-ai/dsh-tool-ask-user` — 需要 `tools` · `userQuestions` （[`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts)）
+- `@deepseek-ai/dsh-tool-call-timeout-policy` — 需要 `tools` （[`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts)）
+- `@deepseek-ai/dsh-tool-cordis` — 需要 `tools` · `systemPrompt` · `dynamicCordisRunner` · `cordisInspect` （[`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts)）
+- `@deepseek-ai/dsh-tool-skill-install` — 需要 `tools` · `skills` · `accountSkillStore` （[`packages/account/tool-skill-install/src/index.ts`](../packages/account/tool-skill-install/src/index.ts)）
+- `@deepseek-ai/dsh-tool-subagent-control` — 需要 `tools` · `subagents` （[`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts)）
+- `@deepseek-ai/dsh-user-questions` （[`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts)）
+- `@deepseek-ai/dsh-workspace` — 需要 `storageDomain` · `sessionPersistence` （[`packages/workspace/workspace/src/index.ts`](../packages/workspace/workspace/src/index.ts)）
 
 ## Seam 包（不可直接加载）
 
 抽象服务类——部署时应改为加载具体的实现包（参见[能力 seam](../.agents/notes/implemented/architecture/2026-06-13-capability-seams.zh.md)）。
 
-- `@deepseek-ai/dsh-attachment` — 抽象 `AttachmentStore`（[`packages/attachment/attachment/src/index.ts`](../packages/attachment/attachment/src/index.ts)）
-- `@deepseek-ai/dsh-code-runtime` — 抽象 `CodeRuntime`（[`packages/code-runtime/code-runtime/src/index.ts`](../packages/code-runtime/code-runtime/src/index.ts)）
-- `@deepseek-ai/dsh-compaction` — 抽象 `CompactionEngine`（[`packages/compaction/compaction/src/index.ts`](../packages/compaction/compaction/src/index.ts)）
-- `@deepseek-ai/dsh-credentials` — 抽象 `Credentials`（[`packages/credentials/credentials/src/index.ts`](../packages/credentials/credentials/src/index.ts)）
-- `@deepseek-ai/dsh-file-reference` — 抽象 `FileReferenceService`（[`packages/context/file-reference/src/index.ts`](../packages/context/file-reference/src/index.ts)）
-- `@deepseek-ai/dsh-fs` — 抽象 `FileSystem`（[`packages/fs/fs/src/index.ts`](../packages/fs/fs/src/index.ts)）
-- `@deepseek-ai/dsh-host-directory-picker` — 抽象 `DirectoryPicker`（[`packages/host/directory-picker/src/index.ts`](../packages/host/directory-picker/src/index.ts)）
-- `@deepseek-ai/dsh-jobs` — 抽象 `JobRegistry`（[`packages/jobs/jobs/src/index.ts`](../packages/jobs/jobs/src/index.ts)）
-- `@deepseek-ai/dsh-sandbox` — 抽象 `SandboxProvider`（[`packages/sandbox/sandbox/src/index.ts`](../packages/sandbox/sandbox/src/index.ts)）
-- `@deepseek-ai/dsh-session-persistence` — 抽象 `SessionPersistence`（[`packages/session/session-persistence/src/index.ts`](../packages/session/session-persistence/src/index.ts)）
-- `@deepseek-ai/dsh-session-query` — 抽象 `SessionQueryEngine`（[`packages/session-query/session-query/src/index.ts`](../packages/session-query/session-query/src/index.ts)）
-- `@deepseek-ai/dsh-settings` — 抽象 `Settings`（[`packages/settings/settings/src/index.ts`](../packages/settings/settings/src/index.ts)）
-- `@deepseek-ai/dsh-shell` — 抽象 `ShellExecutor`（[`packages/shell/shell/src/index.ts`](../packages/shell/shell/src/index.ts)）
-- `@deepseek-ai/dsh-spill` — 抽象 `SpillStore`（[`packages/spill/spill/src/index.ts`](../packages/spill/spill/src/index.ts)）
-- `@deepseek-ai/dsh-subprocess` — 抽象 `SubprocessRuntime`（[`packages/subprocess/subprocess/src/index.ts`](../packages/subprocess/subprocess/src/index.ts)）
-- `@deepseek-ai/dsh-workflow` — 抽象 `WorkflowEngine`（[`packages/workflow/workflow/src/index.ts`](../packages/workflow/workflow/src/index.ts)）
+- `@deepseek-ai/dsh-artifact` — 抽象 `ArtifactRegistry` （[`packages/artifact/artifact/src/index.ts`](../packages/artifact/artifact/src/index.ts)）
+- `@deepseek-ai/dsh-attachment` — 抽象 `AttachmentStore` （[`packages/attachment/attachment/src/index.ts`](../packages/attachment/attachment/src/index.ts)）
+- `@deepseek-ai/dsh-code-runtime` — 抽象 `CodeRuntime` （[`packages/code-runtime/code-runtime/src/index.ts`](../packages/code-runtime/code-runtime/src/index.ts)）
+- `@deepseek-ai/dsh-compaction` — 抽象 `CompactionEngine` （[`packages/compaction/compaction/src/index.ts`](../packages/compaction/compaction/src/index.ts)）
+- `@deepseek-ai/dsh-credentials` — 抽象 `CredentialProvider` （[`packages/credentials/credentials/src/index.ts`](../packages/credentials/credentials/src/index.ts)）
+- `@deepseek-ai/dsh-file-reference` — 抽象 `FileReferenceService` （[`packages/context/file-reference/src/index.ts`](../packages/context/file-reference/src/index.ts)）
+- `@deepseek-ai/dsh-fs` — 抽象 `FileSystem` （[`packages/fs/fs/src/index.ts`](../packages/fs/fs/src/index.ts)）
+- `@deepseek-ai/dsh-host-directory-picker` — 抽象 `DirectoryPicker` （[`packages/host/directory-picker/src/index.ts`](../packages/host/directory-picker/src/index.ts)）
+- `@deepseek-ai/dsh-jobs` — 抽象 `JobRegistry` （[`packages/jobs/jobs/src/index.ts`](../packages/jobs/jobs/src/index.ts)）
+- `@deepseek-ai/dsh-sandbox` — 抽象 `SandboxProvider` （[`packages/sandbox/sandbox/src/index.ts`](../packages/sandbox/sandbox/src/index.ts)）
+- `@deepseek-ai/dsh-session-persistence` — 抽象 `SessionPersistence` （[`packages/session/session-persistence/src/index.ts`](../packages/session/session-persistence/src/index.ts)）
+- `@deepseek-ai/dsh-session-query` — 抽象 `SessionQueryEngine` （[`packages/session-query/session-query/src/index.ts`](../packages/session-query/session-query/src/index.ts)）
+- `@deepseek-ai/dsh-settings` — 抽象 `SettingsProvider` （[`packages/settings/settings/src/index.ts`](../packages/settings/settings/src/index.ts)）
+- `@deepseek-ai/dsh-shell` — 抽象 `ShellExecutor` （[`packages/shell/shell/src/index.ts`](../packages/shell/shell/src/index.ts)）
+- `@deepseek-ai/dsh-spill` — 抽象 `SpillStore` （[`packages/spill/spill/src/index.ts`](../packages/spill/spill/src/index.ts)）
+- `@deepseek-ai/dsh-subprocess` — 抽象 `SubprocessRuntime` （[`packages/subprocess/subprocess/src/index.ts`](../packages/subprocess/subprocess/src/index.ts)）
+- `@deepseek-ai/dsh-workflow` — 抽象 `WorkflowEngine` （[`packages/workflow/workflow/src/index.ts`](../packages/workflow/workflow/src/index.ts)）
 ## 库包（无插件入口）
 
 由其他包作为库导入；`cordis.yml` 无法加载它们。
 
-- `@deepseek-ai/dsh-acp-snapshot`（[`packages/test-support/acp-snapshot/src/index.ts`](../packages/test-support/acp-snapshot/src/index.ts)）
-- `@deepseek-ai/dsh-agent-loop-testkit`（[`packages/test-support/agent-loop-testkit/src/index.ts`](../packages/test-support/agent-loop-testkit/src/index.ts)）
-- `@deepseek-ai/dsh-anonymous-user-id`（[`packages/identity/anonymous-user-id/src/index.ts`](../packages/identity/anonymous-user-id/src/index.ts)）
-- `@deepseek-ai/dsh-app-boot`（[`packages/boot/app-boot/src/index.ts`](../packages/boot/app-boot/src/index.ts)）
-- `@deepseek-ai/dsh-atomic-write`（[`packages/util/atomic-write/src/index.ts`](../packages/util/atomic-write/src/index.ts)）
-- `@deepseek-ai/dsh-base`（[`packages/bundle/base/src/index.ts`](../packages/bundle/base/src/index.ts)）
-- `@deepseek-ai/dsh-brand`（[`packages/util/brand/src/index.ts`](../packages/util/brand/src/index.ts)）
-- `@deepseek-ai/dsh-client-test-runtime`（[`packages/test-support/client-runtime/src/index.ts`](../packages/test-support/client-runtime/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-primitives`（[`packages/client/ui-primitives/src/index.ts`](../packages/client/ui-primitives/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-slots`（[`packages/client/ui-slots/src/index.ts`](../packages/client/ui-slots/src/index.ts)）
-- `@deepseek-ai/dsh-client-web`（[`packages/client/web/src/index.ts`](../packages/client/web/src/index.ts)）
-- `@deepseek-ai/dsh-cmdline`（[`packages/boot/cmdline/src/index.ts`](../packages/boot/cmdline/src/index.ts)）
-- `@deepseek-ai/dsh-code-runtime-python`（[`packages/code-runtime/code-runtime-python/src/index.ts`](../packages/code-runtime/code-runtime-python/src/index.ts)）
-- `@deepseek-ai/dsh-home-paths`（[`packages/util/home-paths/src/index.ts`](../packages/util/home-paths/src/index.ts)）
-- `@deepseek-ai/dsh-hook-protocol`（[`packages/hooks/hook-protocol/src/index.ts`](../packages/hooks/hook-protocol/src/index.ts)）
-- `@deepseek-ai/dsh-launch-environment`（[`packages/util/launch-environment/src/index.ts`](../packages/util/launch-environment/src/index.ts)）
-- `@deepseek-ai/dsh-llm-mock-server`（[`packages/test-support/llm-mock-server/src/index.ts`](../packages/test-support/llm-mock-server/src/index.ts)）
-- `@deepseek-ai/dsh-loader-smoke`（[`packages/test-support/loader-smoke/src/index.ts`](../packages/test-support/loader-smoke/src/index.ts)）
-- `@deepseek-ai/dsh-native-command`（[`packages/util/native-command/src/index.ts`](../packages/util/native-command/src/index.ts)）
-- `@deepseek-ai/dsh-output-retention`（[`packages/util/output-retention/src/index.ts`](../packages/util/output-retention/src/index.ts)）
-- `@deepseek-ai/dsh-sandbox-windows-acl`（[`packages/sandbox/sandbox-windows-acl/src/index.ts`](../packages/sandbox/sandbox-windows-acl/src/index.ts)）
-- `@deepseek-ai/dsh-scope`（[`packages/core/scope/src/index.ts`](../packages/core/scope/src/index.ts)）
-- `@deepseek-ai/dsh-sdk-client`（[`packages/sdk/client/src/index.ts`](../packages/sdk/client/src/index.ts)）
-- `@deepseek-ai/dsh-sdk-jsonrpc-demo`（[`packages/examples/jsonrpc-demo/src/index.ts`](../packages/examples/jsonrpc-demo/src/index.ts)）
-- `@deepseek-ai/dsh-sdk-protocol`（[`packages/sdk/protocol/src/index.ts`](../packages/sdk/protocol/src/index.ts)）
-- `@deepseek-ai/dsh-session-telemetry`（[`packages/session/session-telemetry/src/index.ts`](../packages/session/session-telemetry/src/index.ts)）
-- `@deepseek-ai/dsh-session-title-llm`（[`packages/session/session-title-llm/src/index.ts`](../packages/session/session-title-llm/src/index.ts)）
-- `@deepseek-ai/dsh-subagent-in-process-driver`（[`packages/subagent/subagent-in-process-driver/src/index.ts`](../packages/subagent/subagent-in-process-driver/src/index.ts)）
-- `@deepseek-ai/dsh-timeout`（[`packages/util/timeout/src/index.ts`](../packages/util/timeout/src/index.ts)）
-- `@deepseek-ai/dsh-typert-generator`（[`packages/typert/generator/src/index.ts`](../packages/typert/generator/src/index.ts)）
-- `@deepseek-ai/dsh-typert-protocol`（[`packages/typert/protocol/src/index.ts`](../packages/typert/protocol/src/index.ts)）
-- `@deepseek-ai/dsh-typert-registry`（[`packages/typert/registry/src/index.ts`](../packages/typert/registry/src/index.ts)）
+- `@deepseek-ai/dsh-acp-snapshot` （[`packages/test-support/acp-snapshot/src/index.ts`](../packages/test-support/acp-snapshot/src/index.ts)）
+- `@deepseek-ai/dsh-agent-loop-testkit` （[`packages/test-support/agent-loop-testkit/src/index.ts`](../packages/test-support/agent-loop-testkit/src/index.ts)）
+- `@deepseek-ai/dsh-anonymous-user-id` （[`packages/identity/anonymous-user-id/src/index.ts`](../packages/identity/anonymous-user-id/src/index.ts)）
+- `@deepseek-ai/dsh-app-boot` （[`packages/boot/app-boot/src/index.ts`](../packages/boot/app-boot/src/index.ts)）
+- `@deepseek-ai/dsh-atomic-write` （[`packages/util/atomic-write/src/index.ts`](../packages/util/atomic-write/src/index.ts)）
+- `@deepseek-ai/dsh-base` （[`packages/bundle/base/src/index.ts`](../packages/bundle/base/src/index.ts)）
+- `@deepseek-ai/dsh-brand` （[`packages/util/brand/src/index.ts`](../packages/util/brand/src/index.ts)）
+- `@deepseek-ai/dsh-client-test-runtime` （[`packages/test-support/client-runtime/src/index.ts`](../packages/test-support/client-runtime/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-primitives` （[`packages/client/ui-primitives/src/index.ts`](../packages/client/ui-primitives/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-slots` （[`packages/client/ui-slots/src/index.ts`](../packages/client/ui-slots/src/index.ts)）
+- `@deepseek-ai/dsh-client-web` （[`packages/client/web/src/index.ts`](../packages/client/web/src/index.ts)）
+- `@deepseek-ai/dsh-cmdline` （[`packages/boot/cmdline/src/index.ts`](../packages/boot/cmdline/src/index.ts)）
+- `@deepseek-ai/dsh-code-runtime-python` （[`packages/code-runtime/code-runtime-python/src/index.ts`](../packages/code-runtime/code-runtime-python/src/index.ts)）
+- `@deepseek-ai/dsh-document` （[`packages/document/document/src/index.ts`](../packages/document/document/src/index.ts)）
+- `@deepseek-ai/dsh-home-paths` （[`packages/util/home-paths/src/index.ts`](../packages/util/home-paths/src/index.ts)）
+- `@deepseek-ai/dsh-hook-protocol` （[`packages/hooks/hook-protocol/src/index.ts`](../packages/hooks/hook-protocol/src/index.ts)）
+- `@deepseek-ai/dsh-launch-environment` （[`packages/util/launch-environment/src/index.ts`](../packages/util/launch-environment/src/index.ts)）
+- `@deepseek-ai/dsh-llm-mock-server` （[`packages/test-support/llm-mock-server/src/index.ts`](../packages/test-support/llm-mock-server/src/index.ts)）
+- `@deepseek-ai/dsh-loader-smoke` （[`packages/test-support/loader-smoke/src/index.ts`](../packages/test-support/loader-smoke/src/index.ts)）
+- `@deepseek-ai/dsh-native-command` （[`packages/util/native-command/src/index.ts`](../packages/util/native-command/src/index.ts)）
+- `@deepseek-ai/dsh-ops-approval-policy` （[`packages/ops/ops-approval-policy/src/index.ts`](../packages/ops/ops-approval-policy/src/index.ts)）
+- `@deepseek-ai/dsh-ops-domain` （[`packages/ops/ops-domain/src/index.ts`](../packages/ops/ops-domain/src/index.ts)）
+- `@deepseek-ai/dsh-ops-loop-guard` （[`packages/ops/ops-loop-guard/src/index.ts`](../packages/ops/ops-loop-guard/src/index.ts)）
+- `@deepseek-ai/dsh-ops-package-signing` （[`packages/ops/ops-package-signing/src/index.ts`](../packages/ops/ops-package-signing/src/index.ts)）
+- `@deepseek-ai/dsh-ops-platform` （[`packages/ops/ops-platform/src/index.ts`](../packages/ops/ops-platform/src/index.ts)）
+- `@deepseek-ai/dsh-ops-runtime` （[`packages/ops/ops-runtime/src/index.ts`](../packages/ops/ops-runtime/src/index.ts)）
+- `@deepseek-ai/dsh-ops-skill` （[`packages/ops/ops-skill/src/index.ts`](../packages/ops/ops-skill/src/index.ts)）
+- `@deepseek-ai/dsh-ops-workbench-anomaly` （[`packages/ops/ops-workbench-anomaly/src/index.ts`](../packages/ops/ops-workbench-anomaly/src/index.ts)）
+- `@deepseek-ai/dsh-ops-workbench-conversations` （[`packages/ops/ops-workbench-conversations/src/index.ts`](../packages/ops/ops-workbench-conversations/src/index.ts)）
+- `@deepseek-ai/dsh-ops-workbench-memories` （[`packages/ops/ops-workbench-memories/src/index.ts`](../packages/ops/ops-workbench-memories/src/index.ts)）
+- `@deepseek-ai/dsh-ops-workbench-trigger` （[`packages/ops/ops-workbench-trigger/src/index.ts`](../packages/ops/ops-workbench-trigger/src/index.ts)）
+- `@deepseek-ai/dsh-output-retention` （[`packages/util/output-retention/src/index.ts`](../packages/util/output-retention/src/index.ts)）
+- `@deepseek-ai/dsh-sandbox-windows-acl` （[`packages/sandbox/sandbox-windows-acl/src/index.ts`](../packages/sandbox/sandbox-windows-acl/src/index.ts)）
+- `@deepseek-ai/dsh-scope` （[`packages/core/scope/src/index.ts`](../packages/core/scope/src/index.ts)）
+- `@deepseek-ai/dsh-sdk-client` （[`packages/sdk/client/src/index.ts`](../packages/sdk/client/src/index.ts)）
+- `@deepseek-ai/dsh-sdk-jsonrpc-demo` （[`packages/examples/jsonrpc-demo/src/index.ts`](../packages/examples/jsonrpc-demo/src/index.ts)）
+- `@deepseek-ai/dsh-sdk-protocol` （[`packages/sdk/protocol/src/index.ts`](../packages/sdk/protocol/src/index.ts)）
+- `@deepseek-ai/dsh-session-telemetry` （[`packages/session/session-telemetry/src/index.ts`](../packages/session/session-telemetry/src/index.ts)）
+- `@deepseek-ai/dsh-session-title-llm` （[`packages/session/session-title-llm/src/index.ts`](../packages/session/session-title-llm/src/index.ts)）
+- `@deepseek-ai/dsh-subagent-in-process-driver` （[`packages/subagent/subagent-in-process-driver/src/index.ts`](../packages/subagent/subagent-in-process-driver/src/index.ts)）
+- `@deepseek-ai/dsh-timeout` （[`packages/util/timeout/src/index.ts`](../packages/util/timeout/src/index.ts)）
+- `@deepseek-ai/dsh-typert-generator` （[`packages/typert/generator/src/index.ts`](../packages/typert/generator/src/index.ts)）
+- `@deepseek-ai/dsh-typert-protocol` （[`packages/typert/protocol/src/index.ts`](../packages/typert/protocol/src/index.ts)）
+- `@deepseek-ai/dsh-typert-registry` （[`packages/typert/registry/src/index.ts`](../packages/typert/registry/src/index.ts)）

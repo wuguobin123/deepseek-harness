@@ -26,6 +26,7 @@ await ctx.plugin(ToolFs)                                  // this package — re
 | `readMaxLineLength` | `2000` | 每行截断前保留的字符数（后缀会说明上限）。 |
 | `readMaxBytes` | `51200` | 一次 `read` 调用所选行的字节上限；溢出时以「已达上限」footer 结束窗口。 |
 | `readStreamMinSize` | `10485760` | 大于等于该大小或大小未知的文件采用流式读取，而不是整体加载到内存。 |
+| `workspaceOnly` | `false` | 为 true 时，每个模型指定的路径都会规范化，并且必须位于调用会话 cwd 下。没有 agent workspace 的调用、符号链接逃逸和绝对路径逃逸都会以 `FS_SANDBOX_DENIED` 失败；多用户 preset 应启用此项。 |
 
 ## 工具（schema 见[文件系统工具 schema Agent Note](../../../.agents/notes/implemented/feature/2026-06-17-filesystem-tool-schemas.zh.md)）
 

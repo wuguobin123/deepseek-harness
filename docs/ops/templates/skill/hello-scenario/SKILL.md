@@ -6,13 +6,11 @@ whenToUse: Optional human-facing hint; not model-visible.
 
 # Hello scenario
 
-Replace this body with the directive the parent model should read when it
-loads this Skill. The body is plain Markdown; the Skill consumer renders it
-as `<skill_content>` and injects it at the user-explicit gesture boundary.
+English | [中文](SKILL.zh.md)
 
-Keep the body short. The Skill body lives inside the parent's request
-context, so every token here costs against the parent's context window.
-Reference external files or tool calls instead of inlining large content.
+Replace this body with the directive the parent model should read when it loads this Skill. The body is plain Markdown; the Skill consumer renders it as `<skill_content>` and injects it at the user-explicit gesture boundary.
+
+Keep the body short. The Skill body lives inside the parent's request context, so every token here costs against the parent's context window. Reference external files or tool calls instead of inlining large content.
 
 ## What the model does after reading this Skill
 
@@ -28,6 +26,4 @@ Reference external files or tool calls instead of inlining large content.
 
 ## Reference material
 
-Drop references, templates, or scripts under a `references/` or `scripts/`
-directory beside this `SKILL.md`. The Skill consumer renders the resource
-base after the body and lists the available files for the model to read.
+Drop references, templates, or scripts under a `references/` or `scripts/` directory beside this `SKILL.md`. The Skill consumer renders the resource base after the body and lists the available files for the model to read.

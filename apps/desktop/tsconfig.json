@@ -20,10 +20,9 @@
     "skipLibCheck": true,
     "useDefineForClassFields": true,
     "verbatimModuleSyntax": false,
-    "baseUrl": ".",
     "paths": {
-      "@shared/*": ["src/shared/*"],
-      "@renderer/*": ["src/renderer/*"]
+      "@shared/*": ["./src/shared/*"],
+      "@renderer/*": ["./src/renderer/*"]
     }
   },
   "include": ["src/renderer/**/*", "src/preload/**/*", "src/shared/**/*", "tests/**/*"],

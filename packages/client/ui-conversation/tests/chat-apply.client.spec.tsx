@@ -89,12 +89,12 @@ describe('apply wiring', () => {
     expect(details?.store).toBe(conversationSession?.store)
     expect(chatView?.store).toBe(conversationSession?.store)
     // The hero holes ride the conversation entry's children declaration (the
-    // empty-state occupant is gone). Both are root-scoped: the new-session
-    // screen precedes the session either would belong to.
+    // empty-state occupant is gone). Both are root-scoped.
     expect(b.slots.spec('conversation.hero.brand.mark')).toEqual({ kind: 'single', scope: 'root' })
     expect(b.slots.spec('conversation.hero.workspace')).toEqual({ kind: 'single', scope: 'root' })
-    expect(b.slots.spec('conversation.hero.agentPreset')).toEqual({ kind: 'single', scope: 'root' })
     expect(b.slots.spec('conversation.session.header.lineage'))
+      .toEqual({ kind: 'single', scope: 'session' })
+    expect(b.slots.spec('conversation.details.artifact'))
       .toEqual({ kind: 'single', scope: 'session' })
     expect(b.slots.entries('settings.general.item').map(entry => entry.options.id)).toEqual(['composer-enter'])
     await b.runtime.dispose()

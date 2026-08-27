@@ -1,12 +1,10 @@
 /**
  * account domain contract — wire projection of `ctx.identity` for the
- * multi-user workbuddy backend. The four methods are deliberately NOT in
- * PRIVILEGED_METHODS (see dsh-client-connection): anonymous LAN callers may
- * hit signup and signin so the deployment can grow users from cold start,
- * and signin carries a freshly-issued bearer token the fence reads on every
- * subsequent privileged request. signout and state are the two wire surfaces
- * a signed-in client touches; both require a valid bearer in the header, but
- * neither mutates the deployment configuration.
+ * multi-user xiaowei backend. Signup, email-code, and signin are public after
+ * the Host/trusted-authority check, but signup requires a live invitation.
+ * Invitation creation and listing require an account bearer and derive their
+ * owner from that authenticated principal. Signin carries a freshly issued
+ * bearer token the fence reads on every subsequent account request.
  *
  * Branded ids (`UserId`, `SessionToken`) ride the wire as strings carrying the
  * same opaque brand strings the host seam uses — the api/ layer is browser
@@ -38,12 +36,26 @@ export interface AuthenticatedView {
   expiresAt: number
 }
 
+/** Metadata for an account-owned invitation; active unconsumed rows include
+ * plaintext, while used, expired, or legacy rows carry `code: null`. */
+export interface InvitationView {
+  invitationId: string
+  codeMask: string
+  code: string | null
+  createdAt: number
+  expiresAt: number
+  consumedAt: number | null
+  redeemedBy: string | null
+}
+
 /** account-domain unary methods (the map keys account.* of RpcMethodMap). */
 export interface AccountApi {
   /**
    * Create one account and return an immediately-valid session.
    * @throws `bad-request` on schema-rejected input (the seam's own message).
    * @throws `email-taken` when the email is already registered.
+   * @throws `invitation-invalid` when the invitation is unusable.
+   * @throws `user-limit` when the validation cohort is full.
    */
   signup(request: RpcRequest<{
     email: string
@@ -55,18 +67,34 @@ export interface AccountApi {
      * surfaces `verification-code-required` when omitted and the seam is on.
      */
     verificationCode?: string
+    invitationCode: string
   }>): Promise<RpcResponse<SignedIn>>
 
   /**
    * Mint a fresh 6-digit verification code and dispatch it to the given email.
    * Public (non-privileged): anonymous LAN callers may pre-flight signup by
    * sending themselves a code. Rate-limited at the seam — the host returns
-   * `too-many-requests` when the cooldown or per-hour cap is hit.
+   * `email-code-resend-cooldown` or `email-code-rate-limit` when throttled.
+   * @throws `invitation-invalid` when the invitation is unusable.
    */
-  emailCode(request: RpcRequest<{ email: string }>): Promise<RpcResponse<{
+  emailCode(request: RpcRequest<{ email: string; invitationCode: string }> ): Promise<RpcResponse<{
     expiresInSeconds: number
     retryAfterSeconds: number
   }>>
+
+  /** Account-owned invitation methods. */
+  invites: {
+    /** Create one single-use invitation and return its plaintext.
+     * @throws `invitation-limit` after the account's third lifetime issue.
+     * @throws `user-limit` when the validation cohort is full.
+     */
+    create(request: RpcRequest<Record<string, never>>): Promise<RpcResponse<InvitationView & { code: string }>>
+    /** List the authenticated account's invitations; only active unconsumed
+     * decryptable rows include plaintext, terminal and legacy rows are null. */
+    list(request: RpcRequest<Record<string, never>>): Promise<RpcResponse<{ items: InvitationView[] }>>
+    /** Regenerate an active invitation without consuming a new lifetime slot. */
+    rotate(request: RpcRequest<{ invitationId: string }>): Promise<RpcResponse<InvitationView & { code: string }>>
+  }
 
   /**
    * Verify an email + password pair and issue a fresh session token.

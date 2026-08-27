@@ -55,6 +55,8 @@ export class WorkspaceRuntime implements IWorkspaces {
   private readonly manager: WorkspaceManager
   /** In-flight blank-session creates keyed by workspace (connectWorkspace coalescing). */
   private readonly connecting = new Map<WorkspaceId, Promise<SessionId>>()
+  /** Successful creates awaiting a Host summary that carries the server-resolved cwd. */
+  private readonly pendingBlankByWorkspace = new Map<WorkspaceId, SessionId>()
   /** Guards the runtime-owned one-shot initial-selection subscription. */
   private initialSelectionStarted = false
 
@@ -103,13 +105,27 @@ export class WorkspaceRuntime implements IWorkspaces {
     // no grouping surface can show, so New Session mints a fresh one instead.
     const archived = this.list.getSnapshot().archivedSessionIds
     const sessions = this.sessions.list.getSnapshot()
+    const pendingId = this.pendingBlankByWorkspace.get(workspaceId)
+    if (pendingId !== undefined) {
+      const pending = sessions.byId[pendingId]
+      if (pending !== undefined && pending.blank
+        && workspace.sessionIds.includes(pendingId) && !archived.includes(pendingId)) return pendingId
+      this.pendingBlankByWorkspace.delete(workspaceId)
+    }
     for (const id of sessions.ids) {
       const summary = sessions.byId[id]
       if (summary !== undefined && summary.blank && summary.cwd === workspace.path
         && workspace.sessionIds.includes(summary.id)
         && !archived.includes(summary.id)) return summary.id
     }
+    // The server resolves the workspace path from the authenticated owner;
+    // a client must never echo a host cwd across the account RPC.
     const attempt = this.sessions.create({ workspaceId })
+      .then((sessionId) => {
+        this.manager.attachSession(workspaceId, sessionId)
+        this.pendingBlankByWorkspace.set(workspaceId, sessionId)
+        return sessionId
+      })
       .finally(() => { this.connecting.delete(workspaceId) })
     this.connecting.set(workspaceId, attempt)
     return attempt

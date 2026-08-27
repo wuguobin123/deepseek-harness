@@ -29,4 +29,6 @@ export interface ChatStoreState {
    * persisted snapshots from before this field rehydrate without it.
    */
   inspect: { callId: CallId } | null
+  /** Artifact selected from a compact tool card for the details surface. */
+  artifactId: string | null
 }

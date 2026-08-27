@@ -104,14 +104,6 @@ interface AgentTurnResponse {
   stopReason: SubagentStopReason
 }
 
-/** Wire shape of the `agent.turn` response the Python child returns. */
-interface AgentTurnResponse {
-  output: ContentBlock[]
-  structured?: unknown
-  diagnostic?: string
-  stopReason: SubagentStopReason
-}
-
 /** JSON-RPC 2.0 error response received from the Python child. */
 interface JsonRpcErrorResponse {
   jsonrpc: '2.0'
@@ -154,10 +146,13 @@ class PythonChildDriver {
   ) {
     const env = { ...scrubbedParentEnv(), ...spec.env }
     this.child = spawn(spec.command, ['-m', spec.module, ...args], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] })
-    this.stdin = this.child.stdin!
-    this.stdout = this.child.stdout!
+    if (this.child.stdin === null || this.child.stdout === null) {
+      throw new Error('ops-subagent-python: spawned child is missing configured stdio pipes')
+    }
+    this.stdin = this.child.stdin
+    this.stdout = this.child.stdout
     this.stdout.setEncoding('utf8')
-    this.stdout.on('data', (chunk: string) => this.handleData(chunk, onNotification))
+    this.stdout.on('data', (chunk: string) => { this.handleData(chunk, onNotification) })
     this.child.stderr?.setEncoding('utf8')
     this.child.stderr?.on('data', (chunk: string) => {
       // stderr is untrusted Python output; log it but do not surface as protocol.
@@ -172,7 +167,7 @@ class PythonChildDriver {
     const id = randomUUID()
     const message: JsonRpcRequest = { jsonrpc: '2.0', id, method, params }
     return new Promise<R>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, method })
+      this.pending.set(id, { resolve: resolve, reject, method })
       this.stdin.write(JSON.stringify(message) + '\n')
     })
   }
@@ -183,12 +178,12 @@ class PythonChildDriver {
     this.disposed = true
     this.stdin.end()
     const exited = new Promise<void>((resolve) => {
-      this.child.once('exit', () => resolve())
+      this.child.once('exit', () => { resolve() })
     })
     const timer = setTimeout(() => {
       this.child.kill('SIGTERM')
       const killTimer = setTimeout(() => this.child.kill('SIGKILL'), this.spec.disposeGraceMs)
-      exited.finally(() => clearTimeout(killTimer))
+      void exited.finally(() => { clearTimeout(killTimer) })
     }, this.spec.disposeEofGraceMs)
     await exited
     clearTimeout(timer)
@@ -217,14 +212,12 @@ class PythonChildDriver {
     let message: JsonRpcResponse | JsonRpcErrorResponse | JsonRpcNotification
     try {
       message = JSON.parse(line) as typeof message
-    } catch (error) {
+    } catch {
       process.stderr.write(`[ops-python] malformed JSON line: ${line}\n`)
       return
     }
-    if (!('id' in message) || message.id === undefined || message.id === null) {
-      // Notification — narrow to the notification variant before reading `method`.
-      const notification = message as JsonRpcNotification
-      onNotification(notification.method, notification.params)
+    if (!('id' in message)) {
+      onNotification(message.method, message.params)
       return
     }
     const pending = this.pending.get(message.id)
@@ -250,7 +243,7 @@ class OpsPythonProvider implements SubagentProvider {
 
   constructor(readonly name: string, private readonly config: ResolvedConfig) {}
 
-  async start(request: ResolvedSubagentStartRequest): Promise<SubagentRun> {
+  start(request: ResolvedSubagentStartRequest): Promise<SubagentRun> {
     const cwd = resolveChildCwd('ops-subagent-python', this.config.cwd, request.parent.session.header.cwd)
     const spec: ResolvedConfig = { ...this.config }
     // Parent-namespace-unique id: the child lives in another process, so the
@@ -272,11 +265,11 @@ class OpsPythonProvider implements SubagentProvider {
           // method is reserved for future use.
           if (method === 'session.event') void method
         },
-        error => rejectDriver(error),
+        (error) => { rejectDriver(error) },
       )
       driver.request('initialize', {
         descriptor: request.descriptor,
-      }).then(() => resolveDriver(driver), rejectDriver)
+      }).then(() => { resolveDriver(driver) }, rejectDriver)
     })
 
     const flags = { cancelled: false }
@@ -315,7 +308,7 @@ class OpsPythonProvider implements SubagentProvider {
     })()
 
     let disposal: Promise<void> | undefined
-    return {
+    return Promise.resolve({
       id,
       localAgent: undefined,
       result,
@@ -333,7 +326,7 @@ class OpsPythonProvider implements SubagentProvider {
         })()
         return disposal
       },
-    }
+    })
   }
 }
 

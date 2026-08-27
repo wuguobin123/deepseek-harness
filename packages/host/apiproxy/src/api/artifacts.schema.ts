@@ -13,8 +13,10 @@ import { workspaceIdSchema } from './workspace.schema.ts'
 /** Brand cast: a sha256-prefixed string accepted as ArtifactId. */
 export const artifactIdSchema = z.string().min(1) as unknown as z.ZodType<import('./artifacts.ts').ArtifactId>
 
+/** Wire schema for supported artifact kinds. */
 export const artifactKindSchema = z.enum(['html', 'slides', 'doc', 'sheet', 'chart'])
 
+/** Wire schema for artifact-producing tool identifiers. */
 export const artifactSourceSchema = z.enum([
   'tool-html',
   'tool-slides',
@@ -24,6 +26,7 @@ export const artifactSourceSchema = z.enum([
   'tool-svg',
 ])
 
+/** Wire schema for artifact MIME types. */
 export const artifactMediaTypeSchema = z.enum([
   'text/html',
   'text/markdown',
@@ -47,10 +50,11 @@ export const artifactViewSchema = z.object({
   name: z.string().optional(),
 }) satisfies z.ZodType<Wire<ArtifactView>>
 
-/** artifact.list request payload (workspaceId / sessionId both optional). */
+/** artifact.list request payload (all filters optional for local callers). */
 export const artifactListRequestSchema = z.object({
   workspaceId: workspaceIdSchema.optional(),
   sessionId: sessionIdSchema.optional(),
+  kind: artifactKindSchema.optional(),
 }) satisfies z.ZodType<Wire<RequestPayload<'artifact.list'>>>
 
 /** artifact.list response value. */

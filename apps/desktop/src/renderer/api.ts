@@ -14,6 +14,7 @@
  * the matching bridge keys so feature pages don't reach past `api.ts`.
  */
 import type {
+  AppUpdateState,
   AuthState,
   HostFrame,
   MuxFrame,
@@ -142,6 +143,7 @@ export const workspace = {
       }>
       archivedSessionIds: string[]
     }>('workspace.list', {}),
+  importDirectory: () => bridge().importDirectory(),
 }
 
 // ----- Skills -----
@@ -187,6 +189,103 @@ export const llm = {
     }>('llm.providers', {}),
 }
 
+// ----- Artifacts -----
+
+/**
+ * Renderable product class. Mirrors `ArtifactKind` in
+ * `packages/host/apiproxy/src/api/artifacts.ts`; the wire list is closed so
+ * a renderer can switch on the discriminant without an undefined arm.
+ */
+export type ArtifactKind = 'html' | 'slides' | 'doc' | 'sheet' | 'chart'
+
+/**
+ * Producer of one artifact. Mirrors `ArtifactSource` in
+ * `packages/host/apiproxy/src/api/artifacts.ts`.
+ */
+export type ArtifactSource =
+  | 'tool-html'
+  | 'tool-slides'
+  | 'tool-doc'
+  | 'tool-sheet'
+  | 'tool-mermaid'
+  | 'tool-svg'
+
+/** Wire-side MIME media type vocabulary; closed like `ArtifactKind`. */
+export type ArtifactMediaType =
+  | 'text/html'
+  | 'text/markdown'
+  | 'image/svg+xml'
+  | 'image/png'
+  | 'image/jpeg'
+  | 'application/pdf'
+
+/**
+ * One artifact row carried by every `artifact.*` value. The host brands
+ * `artifactId` (`Branded<'ArtifactId'>`); the renderer never narrows on the
+ * brand, so it degrades to `string` at this boundary.
+ */
+export interface ArtifactView {
+  artifactId: string
+  kind: ArtifactKind
+  source: ArtifactSource
+  mediaType: ArtifactMediaType
+  bytes: number
+  /** Optional human-readable title; absent when the producer named none. */
+  title?: string
+  /** Workspace owning the artifact; absent for unowned writes. */
+  workspaceId?: string
+  /** Session that produced the artifact; absent for unowned writes. */
+  sessionId?: string
+  /** ISO-8601 creation instant. */
+  createdAt: string
+  /** Optional display name; absent when the producer named none. */
+  name?: string
+}
+
+export const artifact = {
+  list: (input: { workspaceId?: string; sessionId?: string; kind?: ArtifactKind } = {}) =>
+    call<{ items: ArtifactView[] }>('artifact.list', input),
+  read: (input: { artifactId: string }) =>
+    call<{ view: ArtifactView; bytesBase64: string }>('artifact.read', input),
+  remove: (input: { artifactId: string }) =>
+    call<{ removed: true }>('artifact.remove', input),
+  save: async (input: { artifactId: string }) => {
+    const result = await bridge().saveArtifact(input)
+    if (result.ok) return result.value
+    throw Object.assign(new Error(result.error.message), { code: result.error.code })
+  },
+  openInBrowser: async (input: { artifactId: string }) => {
+    const result = await bridge().openArtifactInBrowser(input)
+    if (result.ok) return result.value
+    throw Object.assign(new Error(result.error.message), { code: result.error.code })
+  },
+}
+
+/** Account wallet snapshot returned by `account.wallet.get`. */
+export interface WalletView { userId: string; balanceMicros: number; updatedAt: number }
+/** API-key metadata returned by `account.modelKeys.list`. */
+export interface ModelKeyView {
+  keyId: string
+  userId: string
+  label: string
+  createdAt: number
+  lastUsedAt: number | null
+  revokedAt: number | null
+}
+
+export const wallet = {
+  get: (input: { userId: string }) => call<WalletView>('account.wallet.get', input),
+}
+
+export const modelKeys = {
+  list: (input: { userId: string }) => call<{ items: ModelKeyView[] }>('account.modelKeys.list', input),
+}
+
+/** Format integer micro-yuan as a localized CNY amount. */
+export function formatCnyFromMicros(micros: number): string {
+  return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(micros / 1_000_000)
+}
+
 // ----- Subscriptions (SSE fan-out) -----
 
 export function subscribeMux(
@@ -220,21 +319,23 @@ export async function getSession(): Promise<SessionState> {
 
 export async function updateSession(input: {
   baseUrl: string
+  environment?: 'local' | 'cloud'
+  lastLocation?: 'local' | 'cloud'
 }): Promise<{ ok: true; value: { baseUrl: string } } | { ok: false; error: { code: string; message: string } }> {
   return bridge().updateSession(input)
 }
 
-// ----- Update check (stub) -----
+// ----- Client update check -----
 
 export const update = {
   getState: () => bridge().getAppUpdateState(),
   check: () => bridge().checkAppUpdate(),
-  subscribe: (
-    listener: (state: { status: 'idle' | 'checking' | 'up-to-date' | 'available' | 'error'; currentVersion: string }) => void,
-  ) => bridge().subscribeAppUpdateState(listener),
+  openDownload: () => bridge().openAppUpdateDownload(),
+  subscribe: (listener: (state: AppUpdateState) => void) =>
+    bridge().subscribeAppUpdateState(listener),
 }
 
-// ----- Auth (workbuddy multi-user bearer session lifecycle) -----
+// ----- Auth (xiaowei multi-user bearer session lifecycle) -----
 
 /**
  * Renderer-side wrappers around the `workbench:auth:*` IPC bridge. The
@@ -251,7 +352,7 @@ export const auth = {
    * signed out. The host returns `retryAfterSeconds` so the UI can drive
    * the cooldown timer.
    */
-  requestEmailCode: async (input: { email: string }): Promise<
+  requestEmailCode: async (input: { email: string; invitationCode: string }): Promise<
     | { ok: true; value: RequestEmailCodeValue }
     | { ok: false; error: { code: string; message: string } }
   > => bridge().requestEmailCode(input),
@@ -261,6 +362,7 @@ export const auth = {
     password: string
     displayName?: string
     verificationCode?: string
+    invitationCode: string
   }): Promise<
     | { ok: true; value: AuthState }
     | { ok: false; error: { code: string; message: string } }
@@ -277,6 +379,37 @@ export const auth = {
     bridge().subscribeAuthState(listener),
 }
 
+/** Account-owned invitation creation, repeat listing, and explicit regeneration. */
+export const invites = {
+  list: () => call<{ items: Array<{
+    invitationId: string
+    code: string | null
+    codeMask: string
+    createdAt: number
+    expiresAt: number
+    consumedAt: number | null
+    redeemedBy: string | null
+  }> }>('account.invites.list', {}),
+  create: () => call<{
+    invitationId: string
+    code: string
+    codeMask: string
+    createdAt: number
+    expiresAt: number
+    consumedAt: number | null
+    redeemedBy: string | null
+  }>('account.invites.create', {}),
+  rotate: (invitationId: string) => call<{
+    invitationId: string
+    code: string
+    codeMask: string
+    createdAt: number
+    expiresAt: number
+    consumedAt: number | null
+    redeemedBy: string | null
+  }>('account.invites.rotate', { invitationId }),
+}
+
 // ----- Helpers for consumers -----
 
 /**
@@ -285,7 +418,7 @@ export const auth = {
  * `projections.values.title`. Fall back to "会话 {short id}" / "空会话".
  */
 export function sessionTitle(item: SessionListItem): string {
-  const fromProjection = item.projections?.values?.['title']
+  const fromProjection = item.projections?.values['title']
   if (typeof fromProjection === 'string' && fromProjection.trim().length > 0) {
     return fromProjection.trim()
   }

@@ -32,8 +32,8 @@ export interface SessionsPort {
   /** Observable list snapshot (read face only; writes stay inside the sessions domain). */
   readonly list: ObservableSnapshot<SessionsPortList>
   /**
-   * Create a session on the host.
-   * @param opts - target workspace.
+   * Create a session on the host; the server resolves the Workspace directory.
+   * @param opts - target Workspace reference only; cwd is never client-supplied here.
    * @returns the new session id.
    */
   create(opts: { workspaceId: WorkspaceId }): Promise<SessionId>

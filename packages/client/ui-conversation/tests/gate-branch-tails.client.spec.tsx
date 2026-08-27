@@ -148,6 +148,52 @@ describe('render branch tails', () => {
     )
     expect(view.getByText('详情')).toBeTruthy()
     expect(view.getByText('该调用不在当前窗口内')).toBeTruthy()
+    expect(view.container.querySelector('[data-surface="tool"]')).not.toBeNull()
+  })
+
+  it('DetailsPanel gives an artifact an edge-to-edge body owned by the artifact seat', () => {
+    localStorage.clear()
+    const snap = snapshotBase()
+    const chat = createChatStore().create()
+    chat.actions.setArtifact('sha256:artifact')
+    const emptyList = createSnapshotStore<SessionListState>(
+      { ids: [], byId: {}, current: undefined, phase: 'ready', subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined })
+    const emptyWorkspaces = createSnapshotStore<WorkspaceListState>({
+      items: [], archivedSessionIds: [], state: 'idle', phase: 'ready', error: null,
+      baselinesReady: true, recentWorkspaceId: undefined,
+    })
+    const seats: string[] = []
+    const view = render(
+      <DetailsPanel
+        SessionProvider={SessionProviderStub}
+        renderSlot={(key, owner) => {
+          seats.push(key)
+          return <div data-testid="artifact-details-seat">{String('artifactId' in owner ? owner.artifactId : '')}</div>
+        }}
+        sessionId={SID}
+        useSession={bindSnapshotSelector({ getSnapshot: () => snap, subscribe: () => () => {} })}
+        useSessions={bindSnapshotSelector(emptyList)}
+        useWorkspaces={bindSnapshotSelector(emptyWorkspaces)}
+        useProjection={(() => undefined)}
+        useInput={(() => { throw new Error('unused') })}
+        inputActions={{
+          setDraft: () => {},
+          addImages: () => true,
+          removeImage: () => {},
+          pruneImages: () => {},
+          submit: () => {},
+        }}
+        useStore={bindSnapshotSelector(chat)}
+        actions={chat.actions}
+        closeDetails={vi.fn()}
+        t={t}
+      />,
+    )
+
+    expect(view.getByText('产物')).toBeTruthy()
+    expect(view.getByTestId('artifact-details-seat').textContent).toBe('sha256:artifact')
+    expect(view.container.querySelector('[data-surface="artifact"]')).not.toBeNull()
+    expect(seats).toEqual(['conversation.details.artifact'])
   })
 
   it('DetailsPanel resolves a nested run_code leaf to its full logged args and output', () => {

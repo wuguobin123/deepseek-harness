@@ -11,20 +11,13 @@
  * `location.hash` and dispatches into `ctx.workspaces.select` /
  * `ctx.sessions.open`).
  *
- * Auth gate (10.1a): until the user is signed in, the Cordis UI is
- * replaced by `<SignInCard />` mounted into a `.signin-gate` overlay.
- * Once `useAuthStore.state.signedIn` flips true, the overlay is torn
- * down and the Cordis host is booted; on sign-out the reverse happens.
- * The auth store is subscribed once at boot; IPC fan-out from the main
- * process keeps the gate in sync across windows.
+ * Authentication is an account feature inside the complete Cordis UI. It
+ * does not gate local workspaces or replace the renderer on sign-in/out.
  */
-import React, { StrictMode } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
 import { bootRenderer, type HostHandles } from './cordis-host'
-import { installTransport, type WorkbenchApiTransport } from './transport'
+import type { WorkbenchApiTransport } from './transport'
 import { installPersistedTheme } from './theme-persist'
 import { buildDevBridge } from './dev-bridge'
-import { SignInCard } from './features/auth/SignInCard'
 import { useAuthStore, bindAuthStore } from './stores/auth'
 import './styles.css'
 
@@ -37,6 +30,8 @@ import './styles.css'
 // superset of the four-method subset we actually consume. We narrow
 // via structural cast here; runtime calls only hit the four primitives.
 let rawApi = window.workbenchApi
+// Preload makes this required in packaged builds; the Vite dev runtime starts without it.
+// oxlint-disable-next-line typescript/no-unnecessary-condition
 if (!rawApi) {
   if (window.__WORKBENCH_API_OVERRIDE__) {
     rawApi = window.__WORKBENCH_API_OVERRIDE__
@@ -46,12 +41,11 @@ if (!rawApi) {
     // UI is exercisable end-to-end from the browser.
     rawApi = buildDevBridge()
   }
-  window.workbenchApi = rawApi as unknown as typeof window.workbenchApi
+  window.workbenchApi = rawApi
 }
 const api = rawApi as unknown as WorkbenchApiTransport
 
 installPersistedTheme()
-installTransport(api)
 
 const containerRaw = document.getElementById('root')
 if (!containerRaw) throw new Error('desktop renderer: missing #root')
@@ -66,94 +60,57 @@ if (/Mac OS X|Macintosh/.test(navigator.userAgent)) {
   document.body.classList.add('is-mac')
 }
 
-// ---- Auth gate ---------------------------------------------------------
-//
-// We hold one of two mutually exclusive mounts at a time: a `.signin-gate`
-// React root (SignInCard only) OR the Cordis host. Disposing one before
-// mounting the other keeps #root's children unambiguous — we never have a
-// partial overlay fighting the slot tree for input events.
-
 let cordisHandles: HostHandles | null = null
-let signinRoot: Root | null = null
-let signinHost: HTMLDivElement | null = null
 
-function disposeCordis(): void {
+async function disposeCordis(): Promise<void> {
   if (cordisHandles) {
-    void cordisHandles.dispose().catch((err) => {
+    const handles = cordisHandles
+    cordisHandles = null
+    await handles.dispose().catch((err: unknown) => {
       console.error('[desktop-renderer] cordis dispose threw:', err)
     })
-    cordisHandles = null
   }
 }
 
-function unmountSignIn(): void {
-  if (signinRoot) {
-    signinRoot.unmount()
-    signinRoot = null
-  }
-  if (signinHost) {
-    signinHost.remove()
-    signinHost = null
-  }
-}
-
-async function showSignInGate(): Promise<void> {
-  disposeCordis()
-  unmountSignIn()
-  const host = document.createElement('div')
-  host.className = 'signin-gate'
-  host.setAttribute('data-testid', 'signin-gate')
-  container.appendChild(host)
-  signinHost = host
-  signinRoot = createRoot(host)
-  signinRoot.render(
-    React.createElement(StrictMode, null, React.createElement(SignInCard)),
-  )
-}
-
-async function showWorkbuddy(): Promise<void> {
-  unmountSignIn()
-  disposeCordis()
+async function showXiaowei(): Promise<void> {
+  await disposeCordis()
   try {
     // Sampled per boot: the directory-flow surface choice (native vs browse)
     // reads it; a baseUrl edit in Settings takes effect on the next boot.
     const { baseUrl } = await rawApi.getSession()
     cordisHandles = await bootRenderer(container, api, baseUrl)
   } catch (err) {
-    console.error('[desktop-renderer] cordis boot failed; falling back to sign-in:', err)
-    await showSignInGate()
+    console.error('[desktop-renderer] runtime boot failed:', err)
+    const host = document.createElement('div')
+    host.className = 'runtime-error'
+    host.setAttribute('data-testid', 'local-runtime-error')
+    host.innerHTML = '<h1>本机运行环境不可用</h1><p>请重试本机运行环境，或在设置中切换到云端。</p>'
+    container.appendChild(host)
   }
 }
 
 await bindAuthStore()
-
+// Restore the durable account before sidebar chrome reads its initial identity.
+await useAuthStore.getState().refresh()
 useAuthStore.subscribe((state, prev) => {
   if (!state.initialized) return
-  if (state.state.signedIn === prev.state.signedIn) return
-  if (state.state.signedIn) {
-    void showWorkbuddy()
-  } else {
-    void showSignInGate()
-  }
+  const currentKey = state.state.signedIn ? `signed-in:${state.state.userId}` : 'signed-out'
+  const previousKey = prev.state.signedIn ? `signed-in:${prev.state.userId}` : 'signed-out'
+  if (currentKey === previousKey) return
+  // Authentication affects cloud RPC authorization only. The complete UI and
+  // local Host remain mounted for signed-out users.
 })
 
-const initial = useAuthStore.getState()
-if (initial.initialized && initial.state.signedIn) {
-  await showWorkbuddy()
-} else {
-  await showSignInGate()
-}
+await showXiaowei()
 
 // ---- Lifecycle ---------------------------------------------------------
 
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
-    disposeCordis()
-    unmountSignIn()
+    void disposeCordis()
   })
 }
 
 window.addEventListener('beforeunload', () => {
-  disposeCordis()
-  unmountSignIn()
+  void disposeCordis()
 })

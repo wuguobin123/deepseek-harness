@@ -241,6 +241,23 @@ describe('createFixtureApi', () => {
     expect(cleared.result.value.credentials.TEST_API_KEY).toEqual({ configured: false, writable: true })
   })
 
+  it('keeps fixture plugin selections separate from immutable defaults', async () => {
+    const api = createFixtureApi()
+    const initial = await api.accountPlugins.list(req({}))
+    if (!initial.result.ok) throw new Error('account plugin list failed')
+    expect(initial.result.value.items).toMatchObject([
+      { pluginId: 'core-tools', systemDefault: true, installed: true },
+      { pluginId: 'editor', systemDefault: false, installed: false },
+    ])
+
+    const installed = await api.accountPlugins.install(req({ pluginId: 'editor' }))
+    if (!installed.result.ok) throw new Error('account plugin install failed')
+    expect(installed.result.value.installed).toBe(true)
+    const uninstalled = await api.accountPlugins.uninstall(req({ pluginId: 'editor' }))
+    if (!uninstalled.result.ok) throw new Error('account plugin uninstall failed')
+    expect(uninstalled.result.value.installed).toBe(false)
+  })
+
   it('emits the todo/write snapshot at the real tool boundary: between tool/call and tool/result, timestamps monotonic', async () => {
     const api = createFixtureApi()
     const tail = await api.sessions.history(req({ sessionId: sid('fx-alpha'), maxMessages: 10 }))

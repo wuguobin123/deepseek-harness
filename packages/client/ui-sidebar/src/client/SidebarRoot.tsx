@@ -143,7 +143,7 @@ export function SidebarRoot({
                 {renderSlot('sidebar.brand.name', {}, {
                   fallback: (
                     <>
-                      <span className={css.fallbackBrandName}>DSH Local Build</span>
+                      <span className={css.fallbackBrandName}>小薇本地版</span>
                       {process.env.DSH_CLIENT_COMMIT_HASH
                         ? <span className={css.buildRevision}>{process.env.DSH_CLIENT_COMMIT_HASH}</span>
                         : null}
@@ -196,13 +196,14 @@ export function SidebarRoot({
         })}
       </div>
 
-      {/* Footer actions stack above Settings in both sidebar widths. */}
+      {/* Settings stays above optional footer actions so deployment-owned
+          identity chrome can occupy the physical bottom of the sidebar. */}
       <div className={css.footArea}>
-        <div className={css.footerActions}>
-          {renderSlot('sidebar.footer.action', { wide })}
-        </div>
         <div className={css.settingsArea}>
           {renderSlot('sidebar.settings', { wide })}
+        </div>
+        <div className={css.footerActions}>
+          {renderSlot('sidebar.footer.action', { wide })}
         </div>
       </div>
     </div>
