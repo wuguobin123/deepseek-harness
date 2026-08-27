@@ -94,6 +94,29 @@ describe('DualHostRouter', () => {
     expect(decodeResourceId(result.sessionId)).toEqual({ location: 'cloud', id: 'default-session' })
   })
 
+  it('routes generated Remote calls by their agent resource id', async () => {
+    const cloud = client()
+    const local = client({ calls: { 'commands/list': [{ name: 'compact' }] } })
+    const router = new DualHostRouter(cloud as never, () => local as never)
+
+    await expect(router.call('commands/list', {
+      args: { agentId: encodeResourceId('local', 'session:command') },
+    })).resolves.toEqual([{ name: 'compact' }])
+
+    expect(local.call).toHaveBeenCalledWith('commands/list', {
+      args: { agentId: 'session:command' },
+    })
+    expect(cloud.call).not.toHaveBeenCalled()
+  })
+
+  it('defaults a resource-less generated Remote call to the cloud Host', async () => {
+    const cloud = client({ calls: { 'pluginInventory/list': { entries: [] } } })
+    const router = new DualHostRouter(cloud as never, () => null)
+
+    await expect(router.call('pluginInventory/list', { args: {} })).resolves.toEqual({ entries: [] })
+    expect(cloud.call).toHaveBeenCalledWith('pluginInventory/list', { args: {} })
+  })
+
   it('does not delay cloud frames while the device Host is starting', async () => {
     const cloud = client({ mux: [{ rpcId: 'cloud:1', method: 'session/changed', payload: { sessionId: 'cloud-session' } }] })
     const neverLocal = new Promise<never>(() => {})

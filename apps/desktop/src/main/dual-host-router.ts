@@ -30,6 +30,19 @@ const RESOURCE_OR_CLOUD_METHODS = [
   'llm.providers', 'llm.models', 'llm.discoverModels',
   'artifact.list', 'artifact.read', 'artifact.remove',
 ] as const
+const REMOTE_RESOURCE_OR_CLOUD_METHODS = [
+  'commands/list', 'commands/execute',
+  'goals/create', 'goals/edit', 'goals/pause', 'goals/resume', 'goals/complete', 'goals/clear',
+  'dynamicCordisRunner/undefineFromPanel', 'dynamicCordisRunner/runHostHalf',
+  'dynamicCordisRunner/getClientCode', 'dynamicCordisRunner/resolveRequestRun',
+  'dynamicCordisRunner/settleUserRun', 'dynamicCordisRunner/stopFromPanel',
+  'dynamicCordisRunner/syncInspectManifest', 'dynamicCordisRunner/resolveInspectQuery',
+  'dynamicCordisRunner/inventory', 'dynamicCordisRunner/reportRenderFailure',
+  'dynamicCordisRunner/reportClientGuardFailure', 'dynamicCordisRunner/invoke',
+  'fileReferences/list', 'pluginInventory/list',
+  'messageFeedback/list', 'messageFeedback/put', 'messageFeedback/delete',
+  'sessionReferenceResolver/candidates',
+] as const
 const EXPLICIT_LOCATION_METHODS = ['workspace.create'] as const
 
 type ClassifiedMethod =
@@ -44,7 +57,10 @@ void ROUTE_PARTITION_IS_EXHAUSTIVE
 
 const AGGREGATE: ReadonlySet<string> = new Set(AGGREGATE_METHODS)
 const CLOUD_ONLY: ReadonlySet<string> = new Set(CLOUD_ONLY_METHODS)
-const RESOURCE_OR_CLOUD: ReadonlySet<string> = new Set(RESOURCE_OR_CLOUD_METHODS)
+const RESOURCE_OR_CLOUD: ReadonlySet<string> = new Set([
+  ...RESOURCE_OR_CLOUD_METHODS,
+  ...REMOTE_RESOURCE_OR_CLOUD_METHODS,
+])
 const EXPLICIT_LOCATION: ReadonlySet<string> = new Set(EXPLICIT_LOCATION_METHODS)
 
 /** Fail-closed ownership class for one wire method. */
