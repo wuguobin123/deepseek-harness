@@ -176,6 +176,12 @@ async function main(): Promise<number> {
       if (api.setEnvironmentVariableW('TEMP', privateTempDir) === 0) {
         fail(`SetEnvironmentVariableW TEMP failed (Win32 ${api.getLastError()})`)
       }
+      if (api.setEnvironmentVariableW('XDG_CACHE_HOME', privateTempDir) === 0) {
+        fail(`SetEnvironmentVariableW XDG_CACHE_HOME failed (Win32 ${api.getLastError()})`)
+      }
+      if (api.setEnvironmentVariableW('NPM_CONFIG_CACHE', privateTempDir) === 0) {
+        fail(`SetEnvironmentVariableW NPM_CONFIG_CACHE failed (Win32 ${api.getLastError()})`)
+      }
     }
 
     const child = sandbox.spawn({

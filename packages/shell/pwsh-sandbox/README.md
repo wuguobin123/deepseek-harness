@@ -9,7 +9,7 @@ The executor inherits [`@deepseek-ai/dsh-pwsh-local`](../pwsh-local/)'s process 
 ## Behavior
 
 - `danger-full-access`: commands run through the local executor unchanged; results carry `sandbox: { mode, denied: false }`.
-- Confined modes (`read-only`, `workspace-write`): the pwsh argv is wrapped by `ctx.sandbox.confine()`; runner-launch refusal fails closed with `SANDBOX_UNAVAILABLE` (foreground throw, background `runnerFailed` fact), and a denied write classifies against the selected backend's `denialSignatures` into `sandbox.denied`.
+- Confined modes (`read-only`, `workspace-write`): the pwsh argv is wrapped by `ctx.sandbox.confine()`; runner-owned environment overrides merge after caller values for foreground and background processes; runner-launch refusal fails closed with `SANDBOX_UNAVAILABLE` (foreground throw, background `runnerFailed` fact), and a denied write classifies against the selected backend's `denialSignatures` into `sandbox.denied`. The local provider supplies cache overrides only for `workspace-write`.
 
 ## Model Experience
 
@@ -30,5 +30,5 @@ None directly; the denial surface belongs to the tool layer.
 ## Known Limitations and Deferred Work
 
 - **Reads are unrestricted** on Windows (the ACL runner restricts writes only); the read boundary is documented in `@deepseek-ai/dsh-sandbox-windows-acl`.
-- **Windows workspace-write temp authority is private** per live session/workspace pair; agentless calls receive a fresh private directory per invocation. The ambient temp root is never granted, and the runner rewrites TMP/TEMP to the private directory before spawning.
+- **Windows workspace-write temp authority is private** per live session/workspace pair; agentless calls receive a fresh private directory per invocation. The ambient temp root is never granted, and the runner rewrites `TMP`, `TEMP`, `XDG_CACHE_HOME`, and `NPM_CONFIG_CACHE` to the private directory before spawning.
 - **Windows read-only grants no explicit writable root but remains partial** because the restricted token must retain Everyone. Objects whose DACL grants Everyone write access — including compatible opens of the NUL device — remain ambient authority; PowerShell's `> $null` redirection still works without opening NUL.

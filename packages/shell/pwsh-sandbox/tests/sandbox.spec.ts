@@ -10,7 +10,7 @@ import { spawnSync } from 'node:child_process'
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { Context, Service } from '@deepseek-ai/cordis'
 import { SandboxProvider, SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
 import type { ConfinedArgv, RunnerFailureRule, SandboxExecutionPolicy, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
@@ -55,7 +55,7 @@ function throwingSubprocessRuntime(error: unknown): new (ctx: Context) => Servic
 async function setup(
   behavior: (argv: readonly string[], policy: SandboxPolicy) => ConfinedArgv = passthrough,
   subprocess: new (ctx: Context) => Service = LocalSubprocessRuntime,
-): Promise<{ executor: SandboxPwshExecutor; calls: ConfineCall[] }> {
+): Promise<{ ctx: Context; executor: SandboxPwshExecutor; calls: ConfineCall[] }> {
   const calls: ConfineCall[] = []
   class FakeSandboxProvider extends SandboxProvider {
     confine(argv: readonly string[], policy: SandboxPolicy): ConfinedArgv {
@@ -71,7 +71,7 @@ async function setup(
     ctx.subprocess.internals = { spillDir }
   }
   await ctx.plugin(SandboxPwshExecutor, { graceMs: 200 })
-  return { executor: ctx.shell as SandboxPwshExecutor, calls }
+  return { ctx, executor: ctx.shell as SandboxPwshExecutor, calls }
 }
 
 describe('helpers (pure)', () => {
@@ -179,6 +179,27 @@ describe.skipIf(!pwshAvailable())('SandboxPwshExecutor', () => {
     expect(call?.argv).toContain('-NonInteractive')
     expect(call?.argv.at(-1)).toContain('echo wrapped')
     expect(result.sandbox).toEqual({ mode: 'read-only', denied: false, enforcement: 'full' })
+  }, 30_000)
+
+  it('merges runner-owned cache variables after caller values for foreground and background spawns', async () => {
+    const cache = join(tmpdir(), 'dsh-cache')
+    const { ctx, executor } = await setup(argv => ({
+      ...passthrough(argv),
+      env: { XDG_CACHE_HOME: cache, NPM_CONFIG_CACHE: cache },
+    }))
+    const spawn = vi.spyOn(ctx.subprocess, 'spawn')
+    const spec = executor.resolve({ command: '$true', env: { XDG_CACHE_HOME: 'C:\\caller-cache', KEEP_ME: 'yes' } })
+    await executor.run(spec)
+    const background = executor.start(spec)
+    await background.done
+    expect(spawn).toHaveBeenCalledTimes(2)
+    for (const call of spawn.mock.calls) {
+      expect(call[0].env).toMatchObject({
+        XDG_CACHE_HOME: cache,
+        NPM_CONFIG_CACHE: cache,
+        KEEP_ME: 'yes',
+      })
+    }
   }, 30_000)
 
   it('advertises the deployment default mode and stamps the deployment policy when none rides the request', async () => {

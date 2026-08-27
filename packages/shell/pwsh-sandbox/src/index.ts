@@ -29,6 +29,12 @@ import { PwshLocalExecutor } from '@deepseek-ai/dsh-pwsh-local'
 import type { Config as LocalConfig } from '@deepseek-ai/dsh-pwsh-local'
 import { classifyDenial, classifyRunnerFailure, isRunnerSpawnFailure, matchesSignature } from './helpers.ts'
 
+/** Merge runner-owned cache variables over caller-provided process variables. */
+function withSandboxEnvironment(spec: ShellExecSpec, confined: ConfinedArgv): ShellExecSpec {
+  if (confined.env === undefined) return spec
+  return { ...spec, env: { ...spec.env, ...confined.env } }
+}
+
 /**
  * Plugin config: the local executor's knobs, verbatim. The sandbox policy —
  * the default mode and fallback `workspace-write` root — is NOT here: it lives
@@ -103,7 +109,7 @@ export class SandboxPwshExecutor extends PwshLocalExecutor {
     const confined = this.confine(spec, { ...policy, mode })
     let result: ShellRunResult
     try {
-      result = await this.runArgv(spec, confined.argv)
+      result = await this.runArgv(withSandboxEnvironment(spec, confined), confined.argv)
     } catch (error) {
       // An upstream abort remains cancellation even when it prevents spawn.
       if (spec.signal?.aborted === true) spec.signal.throwIfAborted()
@@ -130,7 +136,7 @@ export class SandboxPwshExecutor extends PwshLocalExecutor {
     const confined = this.confine(spec, { ...policy, mode })
     let proc: ShellProcess
     try {
-      proc = this.startArgv(spec, confined.argv)
+      proc = this.startArgv(withSandboxEnvironment(spec, confined), confined.argv)
     } catch (error) {
       if (isRunnerSpawnFailure(error, confined.argv[0], spec.workdir)) {
         throw new SandboxUnavailableError(mode, String(error))

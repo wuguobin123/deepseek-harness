@@ -95,6 +95,8 @@ export interface RunnerFailureRule {
 export interface ConfinedArgv {
   /** The wrapped argv (runner, profile, separator, then the caller's argv). */
   argv: string[]
+  /** Runner-owned environment overrides; consumers merge these after caller values. */
+  env?: Readonly<Record<string, string>>
   /** How completely the selected backend enforces the policy's file effects. */
   enforcement: SandboxEnforcement
   /**

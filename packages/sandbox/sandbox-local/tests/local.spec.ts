@@ -80,7 +80,8 @@ describe('profile dialects', () => {
   })
 
   it('landlock workspace-write: adds the host /tmp and the workspace root', () => {
-    expect(landlockProfileArgs(WW)).toEqual(['--ro', '/', '--rw', '/dev/null', '--rw', '/tmp', '--rw', '/ws'])
+    const writable = [...new Set(['/tmp', tmpdir(), '/ws'])].flatMap(path => ['--rw', path])
+    expect(landlockProfileArgs(WW)).toEqual(['--ro', '/', '--rw', '/dev/null', ...writable])
   })
 
   it('seatbelt read-only: allow-default with every file write denied except the /dev/null literal', () => {
@@ -118,6 +119,7 @@ describe('runnerCommand config', () => {
     const confined = sandbox.confine(['bash', '-c', 'echo hi'], WW)
     expect(confined).toEqual({
       argv: ['fake-runner', '--flag', ...bwrapProfileArgs(WW), '--', 'bash', '-c', 'echo hi'],
+      env: { XDG_CACHE_HOME: '/tmp', NPM_CONFIG_CACHE: '/tmp' },
       enforcement: 'full',
       // An operator runner's kernel mechanism is unknown: both Linux
       // file-denial dialects, never bare EPERM.
@@ -181,6 +183,7 @@ describe('the platform chains', () => {
     const confined = sandbox.confine(['bash', '-c', 'echo hi'], WW)
     expect(confined).toEqual({
       argv: [launcher, ...landlockProfileArgs(WW), '--', 'bash', '-c', 'echo hi'],
+      env: { XDG_CACHE_HOME: tmpdir(), NPM_CONFIG_CACHE: tmpdir() },
       enforcement: 'full',
       denialSignatures: ['permission denied'],
       runnerFailureRules: [{

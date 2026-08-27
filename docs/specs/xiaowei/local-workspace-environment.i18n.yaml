@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/specs/xiaowei/local-workspace-environment.md
-local-workspace-environment.md: 100081a62f1138eab43e93ee869104b12491e963
-local-workspace-environment.zh.md: 9f2d4c16aa6db7689d36c8da324e1f223e8779c1
+local-workspace-environment.md: 0df75b383ab2eab42706fc116b0adda696d3e2af
+local-workspace-environment.zh.md: a60386c18db20eaf8c585355f23f7e44f4b41c0c

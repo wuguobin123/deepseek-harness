@@ -66,9 +66,19 @@ sdd:
     - id: ACC-xiaowei-local-workspace-environment-011
       text: Desktop and service checks distinguish sign-out, expired authentication, account switching, cloud unavailability, insufficient balance, provider failure, and user cancellation; each case stops the old stream, releases or settles its reservation according to observed usage, keeps the local Session recoverable, and leaves cloud Workspace execution unaffected.
       evidence: []
+    - id: ACC-xiaowei-local-workspace-environment-012
+      text: Sandbox and desktop checks prove that workspace-write foreground and background commands receive only runner-authorized cache paths, read-only and danger-full-access behavior remains unchanged, and a local question request, response, and resolved event use one location-bearing correlation id so the submitted card closes after authoritative resolution.
+      evidence:
+        - packages/sandbox/sandbox-local/tests/local.spec.ts
+        - packages/sandbox/sandbox-local/tests/acl-grants.spec.ts
+        - packages/sandbox/sandbox-windows-acl/tests/runner.spec.ts
+        - packages/shell/bash-sandbox/tests/sandbox.spec.ts
+        - packages/shell/pwsh-sandbox/tests/sandbox.spec.ts
+        - apps/desktop/tests/dual-host-router.test.ts
   evidence: []
   decisions:
     - .agents/notes/proposed/architecture/2026-08-27-workbuddy-federated-desktop.md
+    - .agents/notes/implemented/bug-fix/2026-08-27-xiaowei-local-runtime-interaction-reliability.md
 ---
 # 小薇本机与云端工作区
 
@@ -80,16 +90,16 @@ sdd:
 
 ## Requirements
 
-### REQ-xiaowei-local-workspace-environment-001 through REQ-xiaowei-local-workspace-environment-013
+### REQ-xiaowei-local-workspace-environment-001 through REQ-xiaowei-local-workspace-environment-014
 
 文档头部定义可观察需求。已登录的本机任务可以通过账号推理流发送组装后的模型可见对话与工具 schema，但 Bearer 仍由 Electron 持有，生产 Host 只从该 Bearer 解析账号，且任何一方都不会将推理流量转换成云端 Workspace 或 Session。
 
 ## Acceptance
 
-### ACC-xiaowei-local-workspace-environment-001 through ACC-xiaowei-local-workspace-environment-011
+### ACC-xiaowei-local-workspace-environment-001 through ACC-xiaowei-local-workspace-environment-012
 
 实现必须分别完成路由、渲染器、设备 Worker、云端回归、依赖闭包、包体与已安装客户端验收。源码与单元检查不能替代桌面端安装包验收。
 
 ## Decisions
 
-[联邦桌面端提案](../../../.agents/notes/proposed/architecture/2026-08-27-workbuddy-federated-desktop.zh.md)记录 Host 联邦、资源身份、本机 Worker、迁移与打包决策。
+[联邦桌面端提案](../../../.agents/notes/proposed/architecture/2026-08-27-workbuddy-federated-desktop.zh.md)记录 Host 联邦、资源身份、本机 Worker、迁移与打包决策。[本机运行时可靠性决策](../../../.agents/notes/implemented/bug-fix/2026-08-27-xiaowei-local-runtime-interaction-reliability.zh.md)记录沙箱缓存位置与交互问题关联。

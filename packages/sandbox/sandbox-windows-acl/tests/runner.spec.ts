@@ -179,7 +179,9 @@ describe.skipIf(!isWin32 || !pwshAvailable())('windows-acl runner', () => {
         `try{Set-Content -Path '${seamWorkspace}\\server-granted.txt' -Value ok -ErrorAction Stop;'WORKSPACE-WRITE: OK'}catch{'WORKSPACE-WRITE: DENIED'};`,
         `try{Set-Content -Path '${privateTemp}\\server-granted.txt' -Value ok -ErrorAction Stop;'PRIVATE-TEMP-WRITE: OK'}catch{'PRIVATE-TEMP-WRITE: DENIED'};`,
         "'TEMP-ENV: ' + $env:TEMP;",
-        "'TMP-ENV: ' + $env:TMP",
+        "'TMP-ENV: ' + $env:TMP;",
+        "'XDG-CACHE-ENV: ' + $env:XDG_CACHE_HOME;",
+        "'NPM-CACHE-ENV: ' + $env:NPM_CONFIG_CACHE",
       ].join('')
       const result = runRunner([
         '--workspace', seamWorkspace, '--temp', privateTemp, '--mode', 'workspace-write', '--write-sid', writeSid,
@@ -194,6 +196,8 @@ describe.skipIf(!isWin32 || !pwshAvailable())('windows-acl runner', () => {
       expect(result.stdout).toContain('PRIVATE-TEMP-WRITE: OK')
       expect(result.stdout).toContain(`TEMP-ENV: ${privateTemp}`)
       expect(result.stdout).toContain(`TMP-ENV: ${privateTemp}`)
+      expect(result.stdout).toContain(`XDG-CACHE-ENV: ${privateTemp}`)
+      expect(result.stdout).toContain(`NPM-CACHE-ENV: ${privateTemp}`)
       expect(existsSync(join(seamWorkspace, 'server-granted.txt'))).toBe(false)
       expect(existsSync(join(privateTemp, 'server-granted.txt'))).toBe(true)
     } finally {

@@ -109,6 +109,27 @@ describe('the provider hand-off', () => {
     expect(result.sandbox).toEqual({ mode: 'read-only', denied: false, enforcement: 'full' })
   })
 
+  it('merges runner-owned cache variables after caller values for foreground and background spawns', async () => {
+    const cache = join(tmpdir(), 'dsh-cache')
+    const { ctx, bash } = await setup({}, argv => ({
+      ...passthrough(argv),
+      env: { XDG_CACHE_HOME: cache, NPM_CONFIG_CACHE: cache },
+    }))
+    const spawn = vi.spyOn(ctx.subprocess, 'spawn')
+    const spec = bash.resolve({ command: 'true', env: { XDG_CACHE_HOME: '/caller-cache', KEEP_ME: 'yes' } })
+    await bash.run(spec)
+    const background = bash.start(spec)
+    await background.done
+    expect(spawn).toHaveBeenCalledTimes(2)
+    for (const call of spawn.mock.calls) {
+      expect(call[0].env).toMatchObject({
+        XDG_CACHE_HOME: cache,
+        NPM_CONFIG_CACHE: cache,
+        KEEP_ME: 'yes',
+      })
+    }
+  })
+
   it('starts a non-Bash runner before the confined inner Bash evaluates BASH_ENV', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'dsh-bash-env-order-'))
     const hook = join(dir, 'hook.sh')

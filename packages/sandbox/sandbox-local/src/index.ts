@@ -317,6 +317,7 @@ export class LocalSandboxProvider extends SandboxProvider {
     if (this.runnerCommand !== undefined) {
       return {
         argv: [...this.runnerCommand, ...bwrapProfileArgs(policy), '--', ...argv],
+        ...this.cacheEnvironment('bwrap', policy),
         enforcement: 'full',
         denialSignatures: DENIAL_SIGNATURES.runnerCommand,
         runnerFailureRules: [{ fatalSignatures: this.configuredRunnerFailureSignatures }],
@@ -326,10 +327,24 @@ export class LocalSandboxProvider extends SandboxProvider {
     const runnerArgv = this.runnerArgv(selected.runner, policy)
     return {
       argv: [...runnerArgv, '--', ...argv],
+      ...this.cacheEnvironment(selected.runner, policy),
       enforcement: selected.enforcement,
       denialSignatures: DENIAL_SIGNATURES[selected.runner],
       runnerFailureRules: RUNNER_FAILURE_RULES[selected.runner],
     }
+  }
+
+  /** Return cache locations only for writable confinement, where the runner grants them. */
+  private cacheEnvironment(
+    runner: SelectedRunner['runner'],
+    policy: SandboxPolicy,
+  ): { env?: Readonly<Record<string, string>> } {
+    if (policy.mode !== 'workspace-write') return {}
+    let tempDir = runner === 'bwrap' ? '/tmp' : tmpdir()
+    if (runner === 'windows-acl' && policy.sessionId !== undefined) {
+      tempDir = this.materializeAclGrant(policy.sessionId, policy.workspaceRoot).dir
+    }
+    return { env: { XDG_CACHE_HOME: tempDir, NPM_CONFIG_CACHE: tempDir } }
   }
 
   /** The selected rung's runner invocation (program + profile arguments) for one policy. */

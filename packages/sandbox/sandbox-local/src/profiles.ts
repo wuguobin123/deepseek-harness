@@ -4,6 +4,7 @@
  * @module @deepseek-ai/dsh-sandbox-local/profiles
  */
 
+import { tmpdir } from 'node:os'
 import { grantArgs as landlockGrantArgs } from '@deepseek-ai/node-addon-landlock-run'
 import { writableRoots } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
@@ -30,7 +31,9 @@ export function bwrapProfileArgs(policy: SandboxPolicy): string[] {
 export function landlockProfileArgs(policy: SandboxPolicy): string[] {
   const readWrite = ['/dev/null']
   if (policy.mode === 'workspace-write') {
-    readWrite.push('/tmp', policy.workspaceRoot)
+    for (const path of ['/tmp', tmpdir(), policy.workspaceRoot]) {
+      if (!readWrite.includes(path)) readWrite.push(path)
+    }
   }
   return landlockGrantArgs({ readOnly: ['/'], readWrite })
 }

@@ -7546,28 +7546,31 @@ body.is-mac .signin-gate {
 .environment-settings-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  min-height: 48px;
+  gap: 8px;
   padding: 16px 0;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
 }
 
 .environment-settings-row__copy {
+  flex: 1;
   min-width: 0;
+  padding-right: 48px;
 }
 
 .environment-settings-row__title {
-  color: var(--fg);
+  color: var(--dsw-alias-label-primary);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 400;
+  line-height: 22px;
 }
 
 .environment-settings-row__description,
 .environment-settings-row__error {
   margin-top: 4px;
-  color: var(--fg-3);
+  color: var(--dsw-alias-label-tertiary);
   font-size: 12px;
-  line-height: 1.45;
+  font-weight: 400;
+  line-height: 18px;
 }
 
 .environment-settings-row__error {
@@ -7576,13 +7579,24 @@ body.is-mac .signin-gate {
 
 .environment-settings-row select {
   flex: 0 0 auto;
-  min-width: 132px;
-  padding: 7px 30px 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-  color: var(--fg);
-  background: var(--surface);
+  height: 36px;
+  padding: 0 38px 0 14px;
+  border: none;
+  border-radius: 18px;
+  color: var(--dsw-alias-label-primary);
+  background-color: var(--dsw-alias-bg-module-platform);
+  background-position: right 14px center;
   font: inherit;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.environment-settings-row select:hover:not(:disabled) {
+  background-color: var(--dsw-alias-interactive-bg-hover);
+}
+
+.environment-settings-row select:disabled {
+  cursor: default;
 }
 
 .user-menu__guest-settings {

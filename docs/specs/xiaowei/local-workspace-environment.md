@@ -66,9 +66,19 @@ sdd:
     - id: ACC-xiaowei-local-workspace-environment-011
       text: Desktop and service checks distinguish sign-out, expired authentication, account switching, cloud unavailability, insufficient balance, provider failure, and user cancellation; each case stops the old stream, releases or settles its reservation according to observed usage, keeps the local Session recoverable, and leaves cloud Workspace execution unaffected.
       evidence: []
+    - id: ACC-xiaowei-local-workspace-environment-012
+      text: Sandbox and desktop checks prove that workspace-write foreground and background commands receive only runner-authorized cache paths, read-only and danger-full-access behavior remains unchanged, and a local question request, response, and resolved event use one location-bearing correlation id so the submitted card closes after authoritative resolution.
+      evidence:
+        - packages/sandbox/sandbox-local/tests/local.spec.ts
+        - packages/sandbox/sandbox-local/tests/acl-grants.spec.ts
+        - packages/sandbox/sandbox-windows-acl/tests/runner.spec.ts
+        - packages/shell/bash-sandbox/tests/sandbox.spec.ts
+        - packages/shell/pwsh-sandbox/tests/sandbox.spec.ts
+        - apps/desktop/tests/dual-host-router.test.ts
   evidence: []
   decisions:
     - .agents/notes/proposed/architecture/2026-08-27-workbuddy-federated-desktop.md
+    - .agents/notes/implemented/bug-fix/2026-08-27-xiaowei-local-runtime-interaction-reliability.md
 ---
 # Xiaowei local and cloud workspaces
 
@@ -80,16 +90,16 @@ Xiaowei Desktop follows the WorkBuddy execution model: one complete product UI p
 
 ## Requirements
 
-### REQ-xiaowei-local-workspace-environment-001 through REQ-xiaowei-local-workspace-environment-013
+### REQ-xiaowei-local-workspace-environment-001 through REQ-xiaowei-local-workspace-environment-014
 
 The frontmatter owns the observable requirements. A signed-in local task may send its assembled model-visible conversation and tool schema through the account inference stream, but Electron retains the bearer, the production Host derives the account from that bearer, and neither side converts inference traffic into a cloud Workspace or Session.
 
 ## Acceptance
 
-### ACC-xiaowei-local-workspace-environment-001 through ACC-xiaowei-local-workspace-environment-011
+### ACC-xiaowei-local-workspace-environment-001 through ACC-xiaowei-local-workspace-environment-012
 
 Implementation must close routing, renderer, device Worker, cloud regressions, dependency closure, package size, and installed-client behavior separately. Source and unit checks cannot satisfy packaged desktop acceptance.
 
 ## Decisions
 
-The [federated desktop proposal](../../../.agents/notes/proposed/architecture/2026-08-27-workbuddy-federated-desktop.md) owns the Host federation, resource identity, local Worker, migration, and packaging decisions.
+The [federated desktop proposal](../../../.agents/notes/proposed/architecture/2026-08-27-workbuddy-federated-desktop.md) owns the Host federation, resource identity, local Worker, migration, and packaging decisions. The [local runtime reliability decision](../../../.agents/notes/implemented/bug-fix/2026-08-27-xiaowei-local-runtime-interaction-reliability.md) owns sandbox cache placement and interactive-question correlation.

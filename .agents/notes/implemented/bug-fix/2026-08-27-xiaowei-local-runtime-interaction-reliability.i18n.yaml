@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-27-xiaowei-local-runtime-interaction-reliability.md
+2026-08-27-xiaowei-local-runtime-interaction-reliability.md: 47aee6669bf842c22f0a913e79d206b7bb150fca
+2026-08-27-xiaowei-local-runtime-interaction-reliability.zh.md: 86ee4a0f94144746f71d7bb00f1ff73d03cb6ccc

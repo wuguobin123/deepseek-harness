@@ -116,6 +116,7 @@ describe('windows-acl write grants (LocalSandboxProvider)', () => {
       expect(basename(tempDir ?? '')).toMatch(/^dsh-[A-Za-z0-9_-]{6}$/u)
       expect(tempSid).toBe(`TEMP:${tempDir}`)
       expect(tempSid).not.toBe(WORKSPACE_SID)
+      expect(confined.env).toEqual({ XDG_CACHE_HOME: tempDir, NPM_CONFIG_CACHE: tempDir })
       expect(confined.argv).toEqual([
         'node', 'windows-acl-runner.js',
         '--workspace', ws,

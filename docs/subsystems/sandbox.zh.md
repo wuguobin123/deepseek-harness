@@ -117,7 +117,7 @@ interface RunnerFailureRule {
 }
 ```
 
-`ConfinedArgv` 是消费方实际 spawn 的内容。除了替换后的 argv，它还携带后端的强制执行事实和两种正交的 stderr 分类器。`denialSignatures` 用于识别沙箱正常工作时受限命令被阻止的情况。`runnerFailureRules` 用于识别沙箱 runner 在执行命令之前拒绝或失败的情况；消费方应先检查后者，将其作为沙箱基础设施故障上报，而非普通任务失败。
+`ConfinedArgv` 是消费方实际 spawn 的内容。除了替换后的 argv，它还可以携带 runner 拥有的环境覆盖项，消费方会在调用方值之后合并这些覆盖项；此外，它还携带后端的强制执行事实和两种正交的 stderr 分类器。`denialSignatures` 用于识别沙箱正常工作时受限命令被阻止的情况。`runnerFailureRules` 用于识别沙箱 runner 在执行命令之前拒绝或失败的情况；消费方应先检查后者，将其作为沙箱基础设施故障上报，而非普通任务失败。
 
 ```ts type-equiv
 /**
@@ -128,6 +128,8 @@ interface RunnerFailureRule {
 interface ConfinedArgv {
   /** The wrapped argv (runner, profile, separator, then the caller's argv). */
   argv: string[]
+  /** Runner-owned environment overrides; consumers merge these after caller values. */
+  env?: Readonly<Record<string, string>>
   /** How completely the selected backend enforces the policy's file effects. */
   enforcement: SandboxEnforcement
   /**
