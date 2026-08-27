@@ -12,6 +12,8 @@ A global local-or-cloud connection replaces the complete cloud product with one 
 
 Xiaowei Desktop will keep one complete renderer and federate one production Host with one on-demand loopback device Host. The sidebar will group local and cloud Workspaces, and location-bearing desktop identifiers will keep every Workspace, Session, event, approval, artifact, subagent, and workflow operation on its owning Host. Local failure will not interrupt the cloud group.
 
+New Session will start work without presenting execution location as a prerequisite. With no current or recent Workspace, the authenticated desktop creates the account-default cloud task; work started from an existing Session or Workspace inherits that resource's location. The ordinary directory action opens computer files through the device Host, while an advanced submenu retains explicit local registration and cloud-copy import. Location labels remain explanatory metadata, not a global mode.
+
 Electron will pass a selected directory's canonical path only to the loopback Host. A separate confirmed cloud-copy action will keep the bounded, account-owned import protocol. Selection, restoration, and ordinary local execution will never upload the directory.
 
 The device Host will provide the normal local Worker capabilities through the same UI. Filesystem tools will keep canonical Workspace containment; Shell and child execution will use the existing per-Session sandbox policy and approval flow, with delegated work inheriting the Session location, cwd, and permission state. Local Skill installation will publish only below the device runtime home, while cloud installation will remain account-scoped on the production Host.
@@ -25,6 +27,8 @@ Connection preferences will stop representing global execution ownership. A 0.3.
 ## Alternatives considered
 
 **Keep a global execution-environment switch.** Rejected because one Host replaces the other Host's Workspace and Session inventory, reloads the complete renderer, and turns capability differences into an apparent product downgrade.
+
+**Present local and cloud as equal first-run choices.** Rejected because an execution topology question blocks users who only need to begin a task or use files on their computer. Explicit location remains available after the primary task action.
 
 **Increase the restricted local profile's tool roster without Host federation.** Rejected because it improves local tasks but still hides the user's cloud Workspaces and account product whenever local is selected.
 

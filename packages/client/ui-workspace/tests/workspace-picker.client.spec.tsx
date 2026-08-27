@@ -110,10 +110,11 @@ function mount(
 }
 
 function chooseLocal(): void {
-  fireEvent.click(screen.getByRole('menuitem', { name: '打开本机文件夹（实时，不上传）' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: '使用电脑上的文件夹' }))
 }
 
 function chooseCloud(): void {
+  fireEvent.mouseEnter(screen.getByRole('menuitem', { name: '高级选项' }))
   fireEvent.click(screen.getByRole('menuitem', { name: '导入云端副本（独立副本）' }))
 }
 
@@ -142,11 +143,12 @@ describe('WorkspacePicker', () => {
     expect(screen.queryByTestId('directory-flow')).toBeNull()
   })
 
-  it('requires an explicit local or cloud choice when no Workspace exists', () => {
+  it('offers the computer-folder action and advanced location choices when no Workspace exists', () => {
     const b = mount([])
     expect(screen.getByRole('menu')).toBeTruthy()
-    expect(screen.getByRole('menuitem', { name: '打开本机文件夹（实时，不上传）' })).toBeTruthy()
-    expect(screen.getByRole('menuitem', { name: '导入云端副本（独立副本）' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: '使用电脑上的文件夹' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: '高级选项' })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: '导入云端副本（独立副本）' })).toBeNull()
     expect(b.onClose).not.toHaveBeenCalled()
     expect(screen.queryByTestId('directory-flow')).toBeNull()
   })
@@ -200,13 +202,13 @@ describe('WorkspacePicker', () => {
     // The flow is open but nothing is picked yet: a chooser pending on the
     // host display must already block concurrent workspace actions.
     expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: 'Alpha' }).disabled).toBe(true)
-    expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: '打开本机文件夹（实时，不上传）' }).disabled).toBe(true)
-    expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: '导入云端副本（独立副本）' }).disabled).toBe(true)
+    expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: '使用电脑上的文件夹' }).disabled).toBe(true)
+    expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: '高级选项' }).disabled).toBe(true)
     act(() => { b.probe.owner!.onPicked('/tmp/project') })
     expect(b.probe.owner!.busy).toBe(true)
     expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: 'Alpha' }).disabled).toBe(true)
-    expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: '打开本机文件夹（实时，不上传）' }).disabled).toBe(true)
-    expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: '导入云端副本（独立副本）' }).disabled).toBe(true)
+    expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: '使用电脑上的文件夹' }).disabled).toBe(true)
+    expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: '高级选项' }).disabled).toBe(true)
     await act(async () => { resolve(created); await pending })
     expect(b.probe.owner!.busy).toBe(false)
   })
@@ -256,8 +258,8 @@ describe('WorkspacePicker', () => {
     // would pre-empt the workspaces about to arrive.
     expect(screen.getByRole('status').textContent).toBe('正在加载工作区…')
     expect(screen.queryByTestId('directory-flow')).toBeNull()
-    expect(screen.getByRole('menuitem', { name: '打开本机文件夹（实时，不上传）' })).toBeTruthy()
-    expect(screen.getByRole('menuitem', { name: '导入云端副本（独立副本）' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: '使用电脑上的文件夹' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: '高级选项' })).toBeTruthy()
   })
 
   it('shows no popover at all when nothing is listed and nothing can be added', () => {
@@ -291,18 +293,18 @@ describe('WorkspacePicker', () => {
   it('hides the add entry while the directory-flow hole is empty', () => {
     mount([workspace('alpha', 'Alpha')], vi.fn(), occupancySource(false))
     expect(screen.getByRole('menuitem', { name: 'Alpha' })).toBeTruthy()
-    expect(screen.queryByRole('menuitem', { name: '打开本机文件夹（实时，不上传）' })).toBeNull()
-    expect(screen.queryByRole('menuitem', { name: '导入云端副本（独立副本）' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: '使用电脑上的文件夹' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: '高级选项' })).toBeNull()
   })
 
   it('shows the add entry when a flow package activates after the first paint', () => {
     const b = mount([workspace('alpha', 'Alpha')], vi.fn(), occupancySource(false))
-    expect(screen.queryByRole('menuitem', { name: '打开本机文件夹（实时，不上传）' })).toBeNull()
-    expect(screen.queryByRole('menuitem', { name: '导入云端副本（独立副本）' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: '使用电脑上的文件夹' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: '高级选项' })).toBeNull()
     // Registration changes flow through the subscription, no re-render needed.
     act(() => { b.occupancy.flip(true) })
-    expect(screen.getByRole('menuitem', { name: '打开本机文件夹（实时，不上传）' })).toBeTruthy()
-    expect(screen.getByRole('menuitem', { name: '导入云端副本（独立副本）' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: '使用电脑上的文件夹' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: '高级选项' })).toBeTruthy()
   })
 
   it('keeps Choose again inert while the flow occupant is gone, and snaps back a flow opened over an empty hole', async () => {
@@ -328,7 +330,7 @@ describe('WorkspacePicker', () => {
     act(() => { b.occupancy.flip(false) })
     expect(b.probe.owner!.open).toBe(false)
     expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: 'Alpha' }).disabled).toBe(false)
-    expect(screen.queryByRole('menuitem', { name: '打开本机文件夹（实时，不上传）' })).toBeNull()
-    expect(screen.queryByRole('menuitem', { name: '导入云端副本（独立副本）' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: '使用电脑上的文件夹' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: '高级选项' })).toBeNull()
   })
 })

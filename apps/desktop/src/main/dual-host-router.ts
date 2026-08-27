@@ -95,7 +95,7 @@ export class DualHostRouter implements RoutedClient {
       ? Object.fromEntries(Object.entries(payload as Record<string, unknown>).filter(([key]) => key !== 'location'))
       : payload
     return host.call<T>(method, stripResourceIds(request, location))
-      .then(value => policy === 'cloud' ? value : this.tagResult(location, value))
+      .then(value => this.tagResult(location, value))
   }
 
   private async aggregate<T>(method: string, payload: unknown): Promise<T> {

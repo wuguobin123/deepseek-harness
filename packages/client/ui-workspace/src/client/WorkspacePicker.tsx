@@ -4,9 +4,9 @@
  * wrapped by WorkspacePicker for the conversation empty-state slot
  * registration. Directory picking itself lives in the composed flow package's
  * slot occupant (see the contract module doc): this core only opens the flow,
- * adopts the picked path, and owns the error surface. The user explicitly
- * chooses whether the directory stays live on this device or is imported as
- * an independent cloud copy before the composed flow opens.
+ * adopts the picked path, and owns the error surface. The common action uses
+ * a live local directory; advanced options expose the explicit local and
+ * independent cloud-copy choices before the composed flow opens.
  */
 import type { ReactNode, RefObject } from 'react'
 import { useCallback, useEffect, useState } from 'react'
@@ -22,6 +22,8 @@ import css from './WorkspacePicker.module.css'
 
 const ADD_LOCAL = '::add-local-workspace'
 const ADD_CLOUD = '::add-cloud-workspace'
+const ADD_PRIMARY = '::add-primary-workspace'
+const ADVANCED = '::advanced-workspace-options'
 
 /** Core flow props: the owner supplies popover control and pick semantics. */
 export interface WorkspacePickFlowProps {
@@ -100,10 +102,16 @@ export function WorkspacePickFlow({
   useEffect(() => {
     if (flowOpen && !flowAvailable) setFlowOpen(false)
   }, [flowOpen, flowAvailable])
-  const addEntries: MenuEntry[] = flowAvailable
+  const advancedEntries = flowAvailable
     ? [
       { id: ADD_LOCAL, label: t('menu.openLocalWorkspace'), icon: <IconFolderClose16 size={16} />, disabled: flowBusy },
       { id: ADD_CLOUD, label: t('menu.importCloudCopy'), icon: <IconFolderClose16 size={16} />, disabled: flowBusy },
+    ] satisfies MenuEntry[]
+    : []
+  const addEntries: MenuEntry[] = flowAvailable
+    ? [
+      { id: ADD_PRIMARY, label: t('menu.useComputerFolder'), icon: <IconFolderClose16 size={16} />, disabled: flowBusy },
+      { id: ADVANCED, label: t('menu.advancedOptions'), submenu: advancedEntries, disabled: flowBusy },
     ]
     : []
   // With workspaces listed, the add action pins below the scroll region
@@ -167,8 +175,8 @@ export function WorkspacePickFlow({
   }
 
   const handleSelect = (id: string): void => {
-    if (id === ADD_LOCAL || id === ADD_CLOUD) {
-      setFlowLocation(id === ADD_LOCAL ? 'local' : 'cloud')
+    if (id === ADD_PRIMARY || id === ADD_LOCAL || id === ADD_CLOUD) {
+      setFlowLocation(id === ADD_CLOUD ? 'cloud' : 'local')
       openDirectoryFlow()
       return
     }

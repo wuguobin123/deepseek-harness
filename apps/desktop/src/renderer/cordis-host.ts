@@ -61,7 +61,6 @@ import { apply as modelSelectionApply } from '@deepseek-ai/dsh-client-ui-model-s
 import { apply as permissionPresetsApply } from '@deepseek-ai/dsh-client-ui-permission-presets/client'
 import { apply as dirPickerNativeApply } from '@deepseek-ai/dsh-client-ui-directory-picker-native/client'
 import { apply as directoryImportApply } from './directory-import-flow'
-import { apply as environmentSettingsApply } from './environment-settings'
 
 import { installPersistedTheme } from './theme-persist'
 import { resolveDirectoryFlowSurface } from './directory-flow'
@@ -245,7 +244,6 @@ export async function bootRenderer(
   //     step 7 above; these are the per-section registrants that declare
   //     the actual settings UI tree.
   await activate(settingsGeneralApply)
-  await activate(environmentSettingsApply)
   await activate(accountChromeApply)
   await activate(settingsModelsApply)
   await activate(settingsPluginsApply)

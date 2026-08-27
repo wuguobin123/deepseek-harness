@@ -7543,62 +7543,6 @@ body.is-mac .signin-gate {
   font-size: 12px;
 }
 
-.environment-settings-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 16px 0;
-  border-bottom: 1px solid var(--dsw-alias-border-l2);
-}
-
-.environment-settings-row__copy {
-  flex: 1;
-  min-width: 0;
-  padding-right: 48px;
-}
-
-.environment-settings-row__title {
-  color: var(--dsw-alias-label-primary);
-  font-size: 14px;
-  font-weight: 400;
-  line-height: 22px;
-}
-
-.environment-settings-row__description,
-.environment-settings-row__error {
-  margin-top: 4px;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 18px;
-}
-
-.environment-settings-row__error {
-  color: rgb(239, 68, 68);
-}
-
-.environment-settings-row select {
-  flex: 0 0 auto;
-  height: 36px;
-  padding: 0 38px 0 14px;
-  border: none;
-  border-radius: 18px;
-  color: var(--dsw-alias-label-primary);
-  background-color: var(--dsw-alias-bg-module-platform);
-  background-position: right 14px center;
-  font: inherit;
-  font-size: 14px;
-  line-height: 22px;
-}
-
-.environment-settings-row select:hover:not(:disabled) {
-  background-color: var(--dsw-alias-interactive-bg-hover);
-}
-
-.environment-settings-row select:disabled {
-  cursor: default;
-}
-
 .user-menu__guest-settings {
   display: flex;
   align-items: center;

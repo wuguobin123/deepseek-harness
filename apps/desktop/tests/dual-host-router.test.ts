@@ -69,6 +69,31 @@ describe('DualHostRouter', () => {
     await expect(router.call('account.plugins.list', {})).resolves.toEqual({ items: [{ pluginId: 'office-tools' }] })
   })
 
+  it('tags a cloud-only Workspace result at its creation boundary', async () => {
+    const cloud = client({ calls: {
+      'workspace.importDirectory': { workspace: { workspaceId: 'cloud-workspace', sessionIds: [] } },
+    } })
+    const router = new DualHostRouter(cloud as never, () => null)
+
+    const result = await router.call<{ workspace: { workspaceId: string } }>('workspace.importDirectory', {
+      importId: 'import-1', title: 'Quarterly report', files: [],
+    })
+
+    expect(decodeResourceId(result.workspace.workspaceId)).toEqual({ location: 'cloud', id: 'cloud-workspace' })
+  })
+
+  it('routes a resource-less default Session creation to the cloud Host', async () => {
+    const cloud = client({ calls: { 'session.create': { sessionId: 'default-session' } } })
+    const local = client()
+    const router = new DualHostRouter(cloud as never, () => local as never)
+
+    const result = await router.call<{ sessionId: string }>('session.create', {})
+
+    expect(cloud.call).toHaveBeenCalledWith('session.create', {})
+    expect(local.call).not.toHaveBeenCalled()
+    expect(decodeResourceId(result.sessionId)).toEqual({ location: 'cloud', id: 'default-session' })
+  })
+
   it('does not delay cloud frames while the device Host is starting', async () => {
     const cloud = client({ mux: [{ rpcId: 'cloud:1', method: 'session/changed', payload: { sessionId: 'cloud-session' } }] })
     const neverLocal = new Promise<never>(() => {})

@@ -414,7 +414,7 @@ describe('WorkspaceRuntime', () => {
     await expect(workspaces.insertBefore(wid('ghost'))).rejects.toThrow(/workspace-not-found: gone/)
   })
 
-  it('targets New Session at explicit, current-session, then recent Workspaces and clears with none', async () => {
+  it('targets New Session at explicit, current-session, then recent Workspaces and creates a default with none', async () => {
     const ctx = new Context()
     const api = new FakeApiClient()
     const sessions = new SessionRuntime(ctx, api, fakeRemote())
@@ -452,9 +452,37 @@ describe('WorkspaceRuntime', () => {
     const emptyApi = new FakeApiClient()
     const emptySessions = new SessionRuntime(emptyCtx, emptyApi, fakeRemote())
     const emptyWorkspaces = new WorkspaceRuntime(emptyCtx, emptyApi, emptySessions)
-    const clear = vi.spyOn(emptySessions, 'clear')
+    emptyApi.onCreate = () => Promise.resolve(ok({ sessionId: sid('default') }))
     emptyWorkspaces.startSession()
-    expect(clear).toHaveBeenCalledOnce()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(emptyApi.callsOf('session.create')).toEqual([{}])
+    expect(emptySessions.list.getSnapshot().current).toBe('default')
+  })
+
+  it('coalesces concurrent default-session starts and keeps the current selection on failure', async () => {
+    const ctx = new Context()
+    const api = new FakeApiClient()
+    const sessions = new SessionRuntime(ctx, api, fakeRemote())
+    const workspaces = new WorkspaceRuntime(ctx, api, sessions)
+    const gate = deferred<Awaited<ReturnType<FakeApiClient['onCreate']>>>()
+    api.onCreate = () => gate.promise
+
+    workspaces.startSession()
+    workspaces.startSession()
+    expect(api.callsOf('session.create')).toEqual([{}])
+    gate.resolve(err({ code: 'internal', message: 'default unavailable', details: {} }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(sessions.list.getSnapshot().current).toBeUndefined()
+
+    api.onList = () => Promise.resolve(ok({
+      items: [{ sessionId: sid('existing'), updatedAt: 1, running: false, blank: false }] as never[],
+    }))
+    await sessions.refresh()
+    sessions.open(sid('existing'))
+    api.onCreate = () => Promise.resolve(err({ code: 'internal', message: 'still unavailable', details: {} }))
+    workspaces.startSession()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(sessions.list.getSnapshot().current).toBe('existing')
   })
 
   it('archives a session, projects the set from the response, list, and frame, and clears only the current one', async () => {

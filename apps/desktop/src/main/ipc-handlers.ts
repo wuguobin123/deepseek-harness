@@ -128,7 +128,7 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
       const options: OpenDialogOptions = {
         title: '选择本机工作区',
         buttonLabel: '使用此目录',
-        message: '目录会作为本机实时工作区使用，不会上传目录副本。',
+        message: '本机目录不会整体复制到云端，但任务所需内容可能发送给模型服务。',
         properties: ['openDirectory'],
       }
       const window = deps.mainWindow()
@@ -153,7 +153,7 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
     const options: OpenDialogOptions = {
       title: '导入本机目录副本',
       buttonLabel: '导入副本',
-      message: '目录会复制到当前账号的私有工作区，后续本机修改不会自动同步。',
+      message: '云端副本独立保存且不自动同步；任务所需内容可能发送给模型服务。',
       properties: ['openDirectory'],
     }
     const window = deps.mainWindow()
@@ -165,7 +165,8 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
     try {
       const copy = await readLocalDirectory(pickedPath)
       const importId = randomUUID()
-      return { ok: true, value: await deps.apiClient.call('workspace.importDirectory', { importId, ...copy }) }
+      // The federation router tags the created Workspace before renderer selection.
+      return { ok: true, value: await (deps.router ?? deps.apiClient).call('workspace.importDirectory', { importId, ...copy }) }
     } catch (error) {
       return {
         ok: false,

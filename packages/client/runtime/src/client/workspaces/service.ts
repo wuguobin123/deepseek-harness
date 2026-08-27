@@ -59,6 +59,8 @@ export class WorkspaceRuntime implements IWorkspaces {
   private readonly pendingBlankByWorkspace = new Map<WorkspaceId, SessionId>()
   /** Guards the runtime-owned one-shot initial-selection subscription. */
   private initialSelectionStarted = false
+  /** In-flight Host default-session create, shared by concurrent New Session actions. */
+  private defaultConnecting: Promise<SessionId> | undefined
 
   /**
    * @param ctx - client root context.
@@ -185,7 +187,7 @@ export class WorkspaceRuntime implements IWorkspaces {
    * button, workspace browser): resolve the target Workspace — explicit wins,
    * then the current Session's Workspace, then the recent-Workspace
    * projection — connect its blank session and navigate there; with no
-   * Workspace at all, clear the selection into the New Session view state.
+   * Workspace at all, create and open the Host's authenticated default task.
    * Connect failures are non-fatal (console diagnostics; the current view
    * stays usable).
    * @param workspaceId - explicit target Workspace for scoped actions.
@@ -198,13 +200,25 @@ export class WorkspaceRuntime implements IWorkspaces {
       : workspace.items.find(item => item.sessionIds.includes(current))?.workspaceId
     const target = workspaceId ?? currentWorkspaceId ?? workspace.recentWorkspaceId
     if (target === undefined) {
-      this.sessions.clear()
+      const connecting = this.defaultConnecting ?? this.createDefaultSession()
+      this.defaultConnecting = connecting
+      void connecting.then(
+        (sessionId) => { this.sessions.open(sessionId) },
+        (reason: unknown) => { console.warn('new default session failed:', reason) },
+      ).finally(() => {
+        if (this.defaultConnecting === connecting) this.defaultConnecting = undefined
+      })
       return
     }
     void this.connectWorkspace(target).then(
       (sessionId) => { this.sessions.open(sessionId) },
       (reason: unknown) => { console.warn('new session failed:', reason) },
     )
+  }
+
+  /** Create the Host-resolved default task without sending a client path. */
+  private createDefaultSession(): Promise<SessionId> {
+    return this.sessions.create({})
   }
 
   /**

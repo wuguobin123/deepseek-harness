@@ -34,7 +34,7 @@ function deferredStream(events: string[], name: string): (signal: AbortSignal) =
   }
 }
 
-function setup(events: string[]) {
+function setup(events: string[], router?: { call: (method: string, payload: unknown) => Promise<unknown> }) {
   const apiClient = {
     call: vi.fn(async (method: string): Promise<unknown> => {
       if (method === 'account.signin') {
@@ -60,6 +60,7 @@ function setup(events: string[]) {
   }
   const ipc = createIpcHandlers({
     apiClient,
+    router,
     credentialStore,
     baseUrl: () => 'http://harness.test',
     updateChecker: () => ({ getState: () => ({ status: 'idle' }), check: async () => ({ status: 'idle' }), openDownload: async () => undefined }),
@@ -99,7 +100,8 @@ describe('desktop IPC account stream teardown', () => {
         title: '选择本机工作区',
         buttonLabel: '使用此目录',
       })
-      expect(dialogOptions?.message).toEqual(expect.stringContaining('不会上传目录副本'))
+      expect(dialogOptions?.message).toContain('本机目录不会整体复制到云端')
+      expect(dialogOptions?.message).toContain('任务所需内容可能发送给模型服务')
       expect(apiClient.call).toHaveBeenCalledWith('workspace.create', { path: await realpath(root), location: 'local' })
       expect(apiClient.call.mock.calls.map(call => call[0])).not.toContain('workspace.importDirectory')
       ipc.uninstall()
@@ -114,12 +116,16 @@ describe('desktop IPC account stream teardown', () => {
       await writeFile(join(root, 'hello.txt'), 'hello')
       showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: [root] })
       const events: string[] = []
-      const { apiClient, ipc } = setup(events)
-      apiClient.call.mockResolvedValueOnce({ workspace: { path: '/account/imports/copy' }, created: true })
+      const router = {
+        call: vi.fn(async (_method: string, _payload: unknown) => (
+          { workspace: { workspaceId: 'dsh:cloud:copy' }, created: true }
+        )),
+      }
+      const { ipc } = setup(events, router)
 
       await expect(handlers.get(IpcChannels.ImportDirectory)?.({}, { location: 'cloud' })).resolves.toMatchObject({
         ok: true,
-        value: { workspace: { path: '/account/imports/copy' }, created: true },
+        value: { workspace: { workspaceId: 'dsh:cloud:copy' }, created: true },
       })
       const dialogOptions = showOpenDialog.mock.lastCall?.at(-1) as {
         title?: unknown
@@ -130,8 +136,9 @@ describe('desktop IPC account stream teardown', () => {
         title: '导入本机目录副本',
         buttonLabel: '导入副本',
       })
-      expect(dialogOptions?.message).toEqual(expect.stringContaining('不会自动同步'))
-      const importCall = apiClient.call.mock.calls.find(call => call[0] === 'workspace.importDirectory') as
+      expect(dialogOptions?.message).toContain('云端副本独立保存且不自动同步')
+      expect(dialogOptions?.message).toContain('任务所需内容可能发送给模型服务')
+      const importCall = router.call.mock.calls.find(call => call[0] === 'workspace.importDirectory') as
         unknown as [string, { importId: string; title: string; files: { path: string; content: string }[] }]
       expect(importCall[1]).toMatchObject({
         title: basename(root),

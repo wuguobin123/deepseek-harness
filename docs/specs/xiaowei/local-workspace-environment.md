@@ -32,6 +32,10 @@ sdd:
       text: The local inference protocol derives account ownership only from the production Host bearer principal, never creates or looks up a cloud Session or Workspace, rejects owner, Workspace, path, file-reference, and local Session identifiers on the wire, and never returns the upstream model credential to Electron or the device runtime.
     - id: REQ-xiaowei-local-workspace-environment-013
       text: Every local platform-model attempt uses the same account-scoped provisioning, wallet reservation, usage settlement, cancellation, insufficient-balance, and audit behavior as a cloud Session, while sign-out, expiry, account switching, offline transport, and user cancellation terminate the affected inference stream without moving local execution to the cloud.
+    - id: REQ-xiaowei-local-workspace-environment-014
+      text: On an authenticated desktop with no current or recent Workspace, New Session creates and opens the account-default cloud task without asking the user to choose an execution location; an existing Session or Workspace continues to determine the immutable location of follow-up work.
+    - id: REQ-xiaowei-local-workspace-environment-015
+      text: The ordinary Workspace entry presents working with computer files as the primary action and places explicit local-versus-cloud-copy selection under advanced options; its copy distinguishes a directory copy from model-visible content that the selected model service receives.
   acceptance:
     - id: ACC-xiaowei-local-workspace-environment-001
       text: Desktop unit checks exhaustively classify RPC methods, encode and decode location-bearing resource identifiers, reject cross-Host relationships, and prove that local paths and bytes never enter cloud requests.
@@ -75,6 +79,14 @@ sdd:
         - packages/shell/bash-sandbox/tests/sandbox.spec.ts
         - packages/shell/pwsh-sandbox/tests/sandbox.spec.ts
         - apps/desktop/tests/dual-host-router.test.ts
+    - id: ACC-xiaowei-local-workspace-environment-013
+      text: Client runtime and renderer checks prove that New Session creates a Host-default task when no Workspace exists, existing work inherits its Workspace location, the primary directory action opens computer files locally, and explicit local or cloud-copy selection is available only through advanced options.
+      evidence:
+        - packages/client/runtime/tests/workspaces-service.client.spec.ts
+        - packages/client/ui-workspace/tests/workspace-picker.client.spec.tsx
+        - packages/client/ui-workspace/tests/workspace-browser.client.spec.tsx
+        - apps/desktop/tests/dual-host-router.test.ts
+        - apps/desktop/tests/ipc-handlers.test.ts
   evidence: []
   decisions:
     - .agents/notes/proposed/architecture/2026-08-27-workbuddy-federated-desktop.md
@@ -90,13 +102,13 @@ Xiaowei Desktop follows the WorkBuddy execution model: one complete product UI p
 
 ## Requirements
 
-### REQ-xiaowei-local-workspace-environment-001 through REQ-xiaowei-local-workspace-environment-014
+### REQ-xiaowei-local-workspace-environment-001 through REQ-xiaowei-local-workspace-environment-015
 
 The frontmatter owns the observable requirements. A signed-in local task may send its assembled model-visible conversation and tool schema through the account inference stream, but Electron retains the bearer, the production Host derives the account from that bearer, and neither side converts inference traffic into a cloud Workspace or Session.
 
 ## Acceptance
 
-### ACC-xiaowei-local-workspace-environment-001 through ACC-xiaowei-local-workspace-environment-012
+### ACC-xiaowei-local-workspace-environment-001 through ACC-xiaowei-local-workspace-environment-013
 
 Implementation must close routing, renderer, device Worker, cloud regressions, dependency closure, package size, and installed-client behavior separately. Source and unit checks cannot satisfy packaged desktop acceptance.
 

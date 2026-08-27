@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/proposed/architecture/2026-08-27-workbuddy-federated-desktop.md
-2026-08-27-workbuddy-federated-desktop.md: b90926d3fb0884e8660b80efdee26566907b04f8
-2026-08-27-workbuddy-federated-desktop.zh.md: 4392f53b8df51db4e17f4391cf52f743879b69a8
+2026-08-27-workbuddy-federated-desktop.md: 18b43a4b20348d5d7b6af6d41f7e1aeeea9f3405
+2026-08-27-workbuddy-federated-desktop.zh.md: 5c34a37794a6067192b87e2fcd767536d3650f63

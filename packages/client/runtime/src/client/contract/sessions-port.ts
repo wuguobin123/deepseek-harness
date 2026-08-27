@@ -32,11 +32,12 @@ export interface SessionsPort {
   /** Observable list snapshot (read face only; writes stay inside the sessions domain). */
   readonly list: ObservableSnapshot<SessionsPortList>
   /**
-   * Create a session on the host; the server resolves the Workspace directory.
-   * @param opts - target Workspace reference only; cwd is never client-supplied here.
+   * Create a session on the host; the server resolves the target Workspace or
+   * its authenticated default. Sibling domains never supply cwd.
+   * @param opts - optional target Workspace reference.
    * @returns the new session id.
    */
-  create(opts: { workspaceId: WorkspaceId }): Promise<SessionId>
+  create(opts?: { workspaceId?: WorkspaceId }): Promise<SessionId>
   /**
    * Select a session as current.
    * @param id - session id (must exist in the list store).
