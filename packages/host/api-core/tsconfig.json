@@ -9,6 +9,7 @@
   "references": [
     { "path": "../../../vendor/cordis" },
     { "path": "../../../vendor/schemastery" },
+    { "path": "../../api/gateway/tsconfig.host.json" },
     { "path": "../apiproxy" }
   ]
 }

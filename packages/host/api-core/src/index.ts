@@ -1,9 +1,9 @@
 /**
  * Loopback HTTP and WebSocket carrier for the Xiaowei device Host.
  *
- * The carrier exposes the existing ApiProxy wire without adding account or
- * cloud services. It binds to loopback only and gives every request the local
- * principal.
+ * The carrier exposes legacy ApiProxy unary methods and generated Typert
+ * Remotes without adding account or cloud services. It binds to loopback only
+ * and gives every ApiProxy request the local principal.
  * @module @deepseek-ai/dsh-host-api-core
  */
 
@@ -13,12 +13,16 @@ import { Readable } from 'node:stream'
 import { WebSocket, WebSocketServer } from 'ws'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import { clientRequestSchema } from '@deepseek-ai/dsh-host-apiproxy/api'
 import {
   RpcId,
   toFetchHandler,
   type ApiProxy,
+  type ClientRequest,
   type RpcPrincipal,
+  type RpcResult,
 } from '@deepseek-ai/dsh-host-apiproxy'
+import { invokeRemoteRpc, type TypertGateway } from '@deepseek-ai/dsh-api-gateway'
 
 const MUX_PATH = '/api/events.mux'
 const HOST_PATH = '/api/events.host'
@@ -27,8 +31,8 @@ const LOCAL_PRINCIPAL: RpcPrincipal = { kind: 'local' }
 /** Stable Cordis plugin name. */
 export const name = 'xiaowei-device-host'
 
-/** The carrier starts only after the local ApiProxy service is available. */
-export const inject = ['apiProxy']
+/** The carrier starts after both local unary dispatchers are available. */
+export const inject = ['apiProxy', 'typertGateway']
 
 /** Cordis plugin configuration for the loopback listener. */
 export interface Config {
@@ -50,6 +54,8 @@ export interface DeviceHostOptions {
   api: ApiProxy
   /** Requested loopback port. Zero selects an available port. */
   port?: number
+  /** Generated Remote dispatcher mounted beside the legacy ApiProxy. */
+  remote?: TypertGateway
 }
 
 /** A listening device Host and its shutdown operation. */
@@ -82,9 +88,13 @@ function fetchHeaders(input: IncomingHttpHeaders): Headers {
   return headers
 }
 
-/** Create the device-only loopback carrier for an existing ApiProxy service. */
+/**
+ * Create the device-only loopback carrier for the local unary dispatchers.
+ * @param options - local dispatchers and requested loopback port.
+ * @returns an unbound carrier whose listener owns its lifecycle.
+ */
 export function createDeviceHost(options: DeviceHostOptions): DeviceHost {
-  const { api, port = 0 } = options
+  const { api, port = 0, remote } = options
   const handler = toFetchHandler(api, LOCAL_PRINCIPAL)
   const sockets = new WebSocketServer({ noServer: true })
   const pumps = new Set<Promise<void>>()
@@ -98,9 +108,12 @@ export function createDeviceHost(options: DeviceHostOptions): DeviceHost {
         : { body: Readable.toWeb(request) as ReadableStream<Uint8Array>, duplex: 'half' }),
     }
     const fetchRequest = new Request(`http://127.0.0.1${request.url ?? '/'}`, init)
-    void handler.fetch(fetchRequest).then(async (result) => {
-      response.writeHead(result.status, Object.fromEntries(result.headers.entries()))
-      response.end(Buffer.from(await result.arrayBuffer()))
+    const result = remote !== undefined && claimedRemote(fetchRequest, remote)
+      ? remoteResponse(fetchRequest, remote)
+      : handler.fetch(fetchRequest)
+    void result.then(async (fetchResponse) => {
+      response.writeHead(fetchResponse.status, Object.fromEntries(fetchResponse.headers.entries()))
+      response.end(Buffer.from(await fetchResponse.arrayBuffer()))
     }).catch((error: unknown) => {
       response.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
       response.end(error instanceof Error ? error.message : String(error))
@@ -167,12 +180,53 @@ export function createDeviceHost(options: DeviceHostOptions): DeviceHost {
   }
 }
 
+function claimedRemote(request: Request, remote: TypertGateway): boolean {
+  const path = new URL(request.url).pathname
+  return path.startsWith('/api/') && remote.claims(path.slice('/api/'.length))
+}
+
+async function remoteResponse(request: Request, remote: TypertGateway): Promise<Response> {
+  if (request.method !== 'POST') return new Response('not found', { status: 404 })
+  const mediaType = request.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase()
+  if (mediaType !== 'application/json') return new Response('content type must be application/json', { status: 415 })
+  let body: unknown
+  try { body = await request.json() } catch { return new Response('body is not JSON', { status: 400 }) }
+  const parsed = clientRequestSchema.safeParse(body)
+  if (!parsed.success) {
+    const rawId = (body as { rpcId?: unknown } | null)?.rpcId
+    const rpcId = RpcId(typeof rawId === 'string' ? rawId : 'invalid-client-request')
+    return remoteEnvelope(rpcId, {
+      ok: false,
+      error: { code: 'bad-request', message: 'invalid client-request message', details: { issues: parsed.error.issues } },
+    })
+  }
+  const message: ClientRequest = parsed.data
+  const endpoint = new URL(request.url).pathname.slice('/api/'.length)
+  if (message.method !== endpoint) {
+    return remoteEnvelope(message.rpcId, {
+      ok: false,
+      error: {
+        code: 'bad-request',
+        message: `method "${message.method}" does not match path "${endpoint}"`,
+        details: { issues: [] },
+      },
+    })
+  }
+  return remoteEnvelope(message.rpcId, await invokeRemoteRpc(remote, endpoint, message.payload, request.signal))
+}
+
+function remoteEnvelope(rpcId: ReturnType<typeof RpcId>, result: RpcResult<unknown>): Response {
+  return Response.json({ type: 'server-response', rpcId, result })
+}
+
 /** Mount the loopback carrier inside the same Cordis realm as ApiProxy. */
 export async function apply(ctx: Context, config: Config): Promise<void> {
   await ctx.effect(async () => {
     const api = ctx.get('apiProxy')
     if (api === undefined) throw new Error('device Host requires the local ApiProxy service')
-    const ready = await createDeviceHost({ api, port: config.port ?? 0 }).listen()
+    const remote = ctx.get('typertGateway')
+    if (remote === undefined) throw new Error('device Host requires the Typert Remote Gateway')
+    const ready = await createDeviceHost({ api, remote, port: config.port ?? 0 }).listen()
     if (config.printUrl !== false) process.stdout.write(`dsh web: ${ready.url}\n`)
     return async () => { await ready.close() }
   })

@@ -38,6 +38,13 @@ export type TypertGatewayErrorCode =
 /** Host dispatcher consumed by Connection adapters. */
 export interface TypertGateway {
   /**
+   * Whether the active registry or source reflection owns one endpoint.
+   * @param endpoint - Canonical `<namespace>/<method>` endpoint.
+   * @returns Whether a carrier may dispatch the endpoint to this Gateway.
+   */
+  claims(endpoint: string): boolean
+
+  /**
    * Invoke one live Remote method without assuming a carrier or response envelope.
    * @param request - decoded endpoint and named wire arguments.
    * @returns the validated business result.

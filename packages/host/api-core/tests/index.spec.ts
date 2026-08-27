@@ -6,6 +6,7 @@ import {
   type RpcPrincipal,
   type RpcRequest,
 } from '@deepseek-ai/dsh-host-apiproxy'
+import type { TypertGateway } from '@deepseek-ai/dsh-api-gateway'
 import { createDeviceHost } from '../src/index.ts'
 
 function testApi(observePrincipal?: (principal: RpcPrincipal) => void): ApiProxy {
@@ -51,8 +52,9 @@ describe('Xiaowei device Host carrier', () => {
           payload: {},
         }),
       })
-      expect(response.status).toBe(200)
-      expect(await response.json()).toEqual({
+      const responseText = await response.text()
+      expect(response.status, responseText).toBe(200)
+      expect(JSON.parse(responseText)).toEqual({
         type: 'server-response',
         rpcId: 'workspace-list',
         result: { ok: true, value: { items: [], archivedSessionIds: [] } },
@@ -63,12 +65,64 @@ describe('Xiaowei device Host carrier', () => {
     }
   })
 
+  it('dispatches claimed generated Remotes through the Typert Gateway', async () => {
+    const invoked: unknown[] = []
+    const remote: TypertGateway = {
+      claims: endpoint => endpoint === 'commands/list',
+      invoke(request) {
+        invoked.push(request)
+        return Promise.resolve([{ name: 'compact', description: 'Compact context' }])
+      },
+    }
+    const ready = await createDeviceHost({ api: testApi(), remote }).listen()
+    try {
+      const response = await fetch(`${ready.url}/api/commands/list`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          type: 'client-request',
+          rpcId: 'command-list',
+          method: 'commands/list',
+          payload: { args: { agentId: 'session-local' } },
+        }),
+      })
+      const responseText = await response.text()
+      expect(response.status, responseText).toBe(200)
+      expect(JSON.parse(responseText)).toEqual({
+        type: 'server-response',
+        rpcId: 'command-list',
+        result: { ok: true, value: [{ name: 'compact', description: 'Compact context' }] },
+      })
+      expect(invoked).toMatchObject([{
+        namespace: 'commands',
+        method: 'list',
+        args: { agentId: 'session-local' },
+      }])
+
+      const unknown = await fetch(`${ready.url}/api/commands/missing`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      })
+      expect(unknown.status).toBe(404)
+    } finally {
+      await ready.close()
+    }
+  })
+
   it('projects mux events onto the desktop WebSocket envelope', async () => {
     const ready = await createDeviceHost({ api: testApi() }).listen()
     const socket = new WebSocket(`${ready.url.replace('http:', 'ws:')}/api/events.mux`)
     try {
       const frame = await new Promise<unknown>((resolve, reject) => {
-        socket.once('message', (data) => { resolve(JSON.parse(data.toString())) })
+        socket.once('message', (data) => {
+          const bytes = Array.isArray(data)
+            ? Buffer.concat(data)
+            : Buffer.isBuffer(data)
+              ? data
+              : Buffer.from(data)
+          resolve(JSON.parse(bytes.toString('utf8')))
+        })
         socket.once('error', reject)
       })
       expect(frame).toMatchObject({

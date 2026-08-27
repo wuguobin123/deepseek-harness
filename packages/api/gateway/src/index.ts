@@ -104,14 +104,19 @@ export class TypertGatewayService extends Service implements TypertGateway {
     ctx.inject(['connection'], (connectionCtx) => {
       connectionCtx.connection.rpc.intercept(
         '/api',
-        endpoint => this.claimsEndpoint(endpoint),
-        (endpoint, payload, signal) => this.dispatchRpc(endpoint, payload, signal),
+        endpoint => this.claims(endpoint),
+        (endpoint, payload, signal) => invokeRemoteRpc(this, endpoint, payload, signal),
         { authority: 'trusted-host' },
       )
     })
   }
 
-  private claimsEndpoint(endpoint: string): boolean {
+  /**
+   * Return whether the active registry or source reflection owns one endpoint.
+   * @param endpoint - canonical `<namespace>/<method>` endpoint.
+   * @returns whether a carrier may dispatch the endpoint to this Gateway.
+   */
+  claims(endpoint: string): boolean {
     const segments = endpoint.split('/')
     if (segments.length !== 2 || segments[0] === '' || segments[1] === '') return false
     if (this.ctx.typert.local.get(endpoint) !== undefined || this.ctx.typert.local.hasSeen(endpoint)) return true
@@ -181,44 +186,6 @@ export class TypertGatewayService extends Service implements TypertGateway {
     // keeps its schema: there, undefined has to be a declared result.
     if (result === undefined && descriptor.result.mode !== 'strict') return result
     return decode(descriptor.result, result, 'result-invalid', endpoint, 'result')
-  }
-
-  private async dispatchRpc(
-    endpoint: string,
-    payload: unknown,
-    signal: AbortSignal,
-  ): Promise<ConnectionRpcResult> {
-    return this.invokeRpc(endpoint, payload, signal)
-  }
-
-  private async invokeRpc(endpoint: string, payload: unknown, signal: AbortSignal): Promise<ConnectionRpcResult> {
-    try {
-      const segments = endpoint.split('/')
-      if (segments.length !== 2 || segments[0] === '' || segments[1] === '') {
-        throw new Error(`invalid Remote endpoint ${JSON.stringify(endpoint)}`)
-      }
-      const [namespace, method] = segments as [string, string]
-      if (!isObject(payload)
-        || !isPlainObject(payload)
-        || Reflect.ownKeys(payload).length !== 1
-        || !Object.hasOwn(payload, 'args')
-        || !isObject(payload.args)
-        || !isPlainObject(payload.args)) {
-        throw new Error('Remote payload must contain exactly one plain-object args field')
-      }
-      const value = await this.invoke({
-        namespace,
-        method,
-        args: payload.args,
-        signal,
-      })
-      // A void or explicitly absent business result carries no `value` field;
-      // JSON has no `undefined`, and the envelope's optional slot is the one
-      // representation of absence that both args and results already use.
-      return { ok: true, value }
-    } catch (error) {
-      return rpcFailure(error)
-    }
   }
 
   private resolveDescriptor(namespace: string, method: string, endpoint: string): InvocationDescriptor {
@@ -465,6 +432,44 @@ export class TypertGatewayService extends Service implements TypertGateway {
       )
     }
     return resolved
+  }
+}
+
+/**
+ * Validate and dispatch one generated Remote payload for a physical carrier.
+ * @param gateway - Active Typert Gateway that owns the endpoint.
+ * @param endpoint - Canonical `<namespace>/<method>` endpoint.
+ * @param payload - Wire payload containing exactly one plain-object `args` field.
+ * @param signal - Carrier cancellation signal.
+ * @returns Existing unary RPC success or error result.
+ */
+export async function invokeRemoteRpc(
+  gateway: TypertGateway,
+  endpoint: string,
+  payload: unknown,
+  signal: AbortSignal,
+): Promise<ConnectionRpcResult> {
+  try {
+    const segments = endpoint.split('/')
+    if (segments.length !== 2 || segments[0] === '' || segments[1] === '') {
+      throw new Error(`invalid Remote endpoint ${JSON.stringify(endpoint)}`)
+    }
+    const [namespace, method] = segments as [string, string]
+    if (!isObject(payload)
+      || !isPlainObject(payload)
+      || Reflect.ownKeys(payload).length !== 1
+      || !Object.hasOwn(payload, 'args')
+      || !isObject(payload.args)
+      || !isPlainObject(payload.args)) {
+      throw new Error('Remote payload must contain exactly one plain-object args field')
+    }
+    const value = await gateway.invoke({ namespace, method, args: payload.args, signal })
+    // A void or explicitly absent business result carries no `value` field;
+    // JSON has no `undefined`, and the envelope's optional slot is the one
+    // representation of absence that both args and results already use.
+    return { ok: true, value }
+  } catch (error) {
+    return rpcFailure(error)
   }
 }
 

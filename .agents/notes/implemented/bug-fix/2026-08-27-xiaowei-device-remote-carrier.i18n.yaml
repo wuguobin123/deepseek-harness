@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-27-xiaowei-device-remote-carrier.md
+2026-08-27-xiaowei-device-remote-carrier.md: cc962039fcbe1da407e0a4bbf710c3edf9abc398
+2026-08-27-xiaowei-device-remote-carrier.zh.md: fc1f23a4efe4d172f10f99d5e61795f56a578e3f

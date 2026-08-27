@@ -179,6 +179,13 @@ type TypertGatewayErrorCode =
 /** Host dispatcher consumed by Connection adapters. */
 interface TypertGateway {
   /**
+   * Whether the active registry or source reflection owns one endpoint.
+   * @param endpoint - Canonical `<namespace>/<method>` endpoint.
+   * @returns Whether a carrier may dispatch the endpoint to this Gateway.
+   */
+  claims(endpoint: string): boolean
+
+  /**
    * Invoke one live Remote method without assuming a carrier or response envelope.
    * @param request - decoded endpoint and named wire arguments.
    * @returns the validated business result.
@@ -324,6 +331,12 @@ Source: [`packages/typert/registry/src/service.ts`](../../packages/typert/regist
 Resolve strict generated definitions or conservative SRC markers against current Cordis Services and Typert providers.
 
 ```ts cordis-catalog
+/**
+ * Return whether the active registry or source reflection owns one endpoint.
+ * @param endpoint - canonical `<namespace>/<method>` endpoint.
+ * @returns whether a carrier may dispatch the endpoint to this Gateway.
+ */
+claims(endpoint: string): boolean
 /**
  * Invoke one live Remote method through strict generated reflection or SRC markers.
  * @param request - decoded endpoint and exact named wire arguments.

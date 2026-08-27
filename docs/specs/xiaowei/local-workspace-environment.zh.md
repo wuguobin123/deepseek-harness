@@ -36,6 +36,8 @@ sdd:
       text: On an authenticated desktop with no current or recent Workspace, New Session creates and opens the account-default cloud task without asking the user to choose an execution location; an existing Session or Workspace continues to determine the immutable location of follow-up work.
     - id: REQ-xiaowei-local-workspace-environment-015
       text: The ordinary Workspace entry presents working with computer files as the primary action and places explicit local-versus-cloud-copy selection under advanced options; its copy distinguishes a directory copy from model-visible content that the selected model service receives.
+    - id: REQ-xiaowei-local-workspace-environment-016
+      text: The loopback device Host carries every generated Remote claimed by its active Typert registry, preserves the existing request and response envelopes, and returns unknown slash endpoints as not found instead of routing local Session operations to the production Host.
   acceptance:
     - id: ACC-xiaowei-local-workspace-environment-001
       text: Desktop unit checks exhaustively classify RPC methods, encode and decode location-bearing resource identifiers, reject cross-Host relationships, and prove that local paths and bytes never enter cloud requests.
@@ -87,10 +89,17 @@ sdd:
         - packages/client/ui-workspace/tests/workspace-browser.client.spec.tsx
         - apps/desktop/tests/dual-host-router.test.ts
         - apps/desktop/tests/ipc-handlers.test.ts
+    - id: ACC-xiaowei-local-workspace-environment-014
+      text: Gateway, device-carrier, and desktop routing checks prove that a generated Remote for a local Session reaches the device service, keeps its local Agent identity, returns the generated result, and leaves unknown slash endpoints unclaimed.
+      evidence:
+        - packages/api/gateway/tests/gateway.host.spec.ts
+        - packages/host/api-core/tests/index.spec.ts
+        - apps/desktop/tests/dual-host-router.test.ts
   evidence: []
   decisions:
     - .agents/notes/proposed/architecture/2026-08-27-workbuddy-federated-desktop.md
     - .agents/notes/implemented/bug-fix/2026-08-27-xiaowei-local-runtime-interaction-reliability.md
+    - .agents/notes/implemented/bug-fix/2026-08-27-xiaowei-device-remote-carrier.md
 ---
 # 小薇本机与云端工作区
 
@@ -102,16 +111,16 @@ sdd:
 
 ## Requirements
 
-### REQ-xiaowei-local-workspace-environment-001 through REQ-xiaowei-local-workspace-environment-015
+### REQ-xiaowei-local-workspace-environment-001 through REQ-xiaowei-local-workspace-environment-016
 
 文档头部定义可观察需求。已登录的本机任务可以通过账号推理流发送组装后的模型可见对话与工具 schema，但 Bearer 仍由 Electron 持有，生产 Host 只从该 Bearer 解析账号，且任何一方都不会将推理流量转换成云端 Workspace 或 Session。
 
 ## Acceptance
 
-### ACC-xiaowei-local-workspace-environment-001 through ACC-xiaowei-local-workspace-environment-013
+### ACC-xiaowei-local-workspace-environment-001 through ACC-xiaowei-local-workspace-environment-014
 
 实现必须分别完成路由、渲染器、设备 Worker、云端回归、依赖闭包、包体与已安装客户端验收。源码与单元检查不能替代桌面端安装包验收。
 
 ## Decisions
 
-[联邦桌面端提案](../../../.agents/notes/proposed/architecture/2026-08-27-workbuddy-federated-desktop.zh.md)记录 Host 联邦、资源身份、本机 Worker、迁移与打包决策。[本机运行时可靠性决策](../../../.agents/notes/implemented/bug-fix/2026-08-27-xiaowei-local-runtime-interaction-reliability.zh.md)记录沙箱缓存位置与交互问题关联。
+[联邦桌面端提案](../../../.agents/notes/proposed/architecture/2026-08-27-workbuddy-federated-desktop.zh.md)记录 Host 联邦、资源身份、本机 Worker、迁移与打包决策。[本机运行时可靠性决策](../../../.agents/notes/implemented/bug-fix/2026-08-27-xiaowei-local-runtime-interaction-reliability.zh.md)记录沙箱缓存位置与交互问题关联。[设备 Remote carrier 决策](../../../.agents/notes/implemented/bug-fix/2026-08-27-xiaowei-device-remote-carrier.zh.md)记录回环 Host 上的生成 Remote 传输。
