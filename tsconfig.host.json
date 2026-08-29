@@ -141,6 +141,7 @@
     { "path": "./packages/knowledge/knowledge" },
     { "path": "./packages/knowledge/knowledge-sqlite-local" },
     { "path": "./packages/knowledge/tool-knowledge" },
+    { "path": "./packages/memory/user-context" },
     { "path": "./packages/account/identity" },
     { "path": "./packages/account/email-verification" },
     { "path": "./packages/account/wallet" },
