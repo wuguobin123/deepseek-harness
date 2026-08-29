@@ -13,9 +13,11 @@ import type {
   AuthState,
   ClientResponse,
   HostFrame,
+  InstalledSkillRecord,
   MuxFrame,
   RequestEmailCodeValue,
   SessionState,
+  SkillDirectoryInstallResult,
 } from '../shared/contracts'
 import { withArtifactCsp } from '../shared/artifact-html'
 
@@ -37,7 +39,6 @@ export function buildDevBridge(): WorkbenchApiWithExtras {
   let baseUrl = getBaseUrl()
 
   // The caller selects R from the RPC method; payload does not carry the response type.
-  // oxlint-disable-next-line typescript/no-unnecessary-type-parameters
   async function request<R>(
     method: string,
     payload: unknown,
@@ -78,7 +79,6 @@ export function buildDevBridge(): WorkbenchApiWithExtras {
     },
 
     // Implements WorkbenchApi's caller-selected RPC result type.
-    // oxlint-disable-next-line typescript/no-unnecessary-type-parameters
     request<R = unknown>(
       method: string,
       payload: unknown,
@@ -203,6 +203,20 @@ export function buildDevBridge(): WorkbenchApiWithExtras {
       preview.location.replace(url)
       setTimeout(() =>{  URL.revokeObjectURL(url) }, 30 * 60 * 1000)
       return { ok: true as const, value: { opened: true as const } }
+    },
+
+    listSkills(): Promise<{ ok: true; value: readonly InstalledSkillRecord[] } | { ok: false; error: { code: string; message: string } }> {
+      return Promise.resolve({
+        ok: false,
+        error: { code: 'NATIVE_DESKTOP_REQUIRED', message: '本机技能清单仅在小薇桌面客户端中可用' },
+      })
+    },
+
+    installSkill(): Promise<{ ok: true; value: SkillDirectoryInstallResult | { status: 'cancelled' } } | { ok: false; error: { code: string; message: string } }> {
+      return Promise.resolve({
+        ok: false,
+        error: { code: 'NATIVE_DESKTOP_REQUIRED', message: '安装技能目录需要小薇桌面客户端的原生目录选择器' },
+      })
     },
 
     subscribeAppUpdateState(listener: (state: { status: 'up-to-date'; currentVersion: string }) => void) {

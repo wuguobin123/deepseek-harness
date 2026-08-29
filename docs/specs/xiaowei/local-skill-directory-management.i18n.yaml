@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/specs/xiaowei/local-skill-directory-management.md
+local-skill-directory-management.md: 4ec82f4232a302a739e3ce6398ed3481ccf38f39
+local-skill-directory-management.zh.md: 428a5e44d6d6e0a1857973fca454145c39f33b5a

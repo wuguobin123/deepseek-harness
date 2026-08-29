@@ -16,7 +16,8 @@
     "@deepseek-ai/dsh-account-identity": "workspace:^",
     "@deepseek-ai/dsh-account-model-keys": "workspace:^",
     "@deepseek-ai/dsh-account-plugin-factory": "workspace:^",
-    "@deepseek-ai/dsh-account-wallet": "workspace:^"
+    "@deepseek-ai/dsh-account-wallet": "workspace:^",
+    "@deepseek-ai/dsh-web": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
@@ -25,6 +26,7 @@
     "@deepseek-ai/dsh-account-model-keys": "workspace:^",
     "@deepseek-ai/dsh-account-plugin-factory": "workspace:^",
     "@deepseek-ai/dsh-account-wallet": "workspace:^",
+    "@deepseek-ai/dsh-web": "workspace:^",
     "typescript": "^6.0.3"
   }
 }

@@ -28,6 +28,8 @@ import {
   SessionStateSchema,
   SignInInputSchema,
   SignUpInputSchema,
+  InstalledSkillRecordSchema,
+  SkillDirectoryInstallResultSchema,
   WORKBENCH_API_KEYS,
   type AppUpdateState,
   type AuthState,
@@ -167,6 +169,28 @@ const api = {
       return { ok: false, error: { code: 'INVALID_INPUT', message: parsed.error.message } }
     }
     return ipcRenderer.invoke(IpcChannels.OpenArtifactInBrowser, parsed.data) as Promise<IpcResult<{ opened: true }>>
+  },
+
+  /** List the installed local Skills without exposing their filesystem paths. */
+  async listSkills(): Promise<IpcResult<readonly import('../shared/contracts').InstalledSkillRecord[]>> {
+    const result: unknown = await ipcRenderer.invoke(IpcChannels.ListSkills)
+    if (result && typeof result === 'object' && 'ok' in result && result.ok === true && 'value' in result) {
+      return { ok: true, value: InstalledSkillRecordSchema.array().parse(result.value) }
+    }
+    return result as IpcResult<readonly import('../shared/contracts').InstalledSkillRecord[]>
+  },
+
+  /** Open the native directory chooser and install the selected Skill locally. */
+  async installSkill(): Promise<IpcResult<import('../shared/contracts').SkillDirectoryInstallResult | { status: 'cancelled' }>> {
+    const result: unknown = await ipcRenderer.invoke(IpcChannels.InstallSkill)
+    if (result && typeof result === 'object' && 'ok' in result && result.ok === true && 'value' in result) {
+      const value = result.value as unknown
+      if (value && typeof value === 'object' && 'status' in value && value.status === 'cancelled') {
+        return { ok: true, value: { status: 'cancelled' } }
+      }
+      return { ok: true, value: SkillDirectoryInstallResultSchema.parse(value) }
+    }
+    return result as IpcResult<import('../shared/contracts').SkillDirectoryInstallResult | { status: 'cancelled' }>
   },
 
   /** Subscribe to AppUpdateState fan-out from the main-process checker. */

@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-harness/desktop",
-  "version": "0.3.25",
+  "version": "0.3.32",
   "private": true,
   "description": "Electron desktop client for the Xiaowei ops deployment",
   "main": "dist/main/main/index.js",
@@ -64,7 +64,6 @@
     "@deepseek-ai/dsh-client-ui-subagent": "workspace:^",
     "@deepseek-ai/dsh-client-ui-theme": "workspace:^",
     "@deepseek-ai/dsh-client-ui-tool": "workspace:^",
-    "@deepseek-ai/dsh-client-ui-trajectory": "workspace:^",
     "@deepseek-ai/dsh-client-ui-user-questions": "workspace:^",
     "@deepseek-ai/dsh-client-ui-workflow-run": "workspace:^",
     "@deepseek-ai/dsh-client-ui-workspace": "workspace:^",
@@ -73,6 +72,7 @@
     "@deepseek-ai/dsh-llm-account-inference": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "@deepseek-ai/dsh-typert-registry": "workspace:^",
+    "@deepseek-ai/dsh-web-search-account-remote": "workspace:^",
     "pdfjs-dist": "4.10.38",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -80,6 +80,7 @@
     "react-router-dom": "^6.26.2",
     "remark-gfm": "^4.0.1",
     "ws": "^8.18.0",
+    "yaml": "^2.9.0",
     "zod": "^3.23.8",
     "zustand": "^4.5.5"
   },

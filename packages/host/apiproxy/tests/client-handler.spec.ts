@@ -35,6 +35,7 @@ function scriptedApi(overrides: {
   artifactRegistry?: Partial<ApiProxy['artifactRegistry']>
   userContext?: Partial<ApiProxy['userContext']>
   accountInference?: Partial<ApiProxy['accountInference']>
+  accountWeb?: Partial<ApiProxy['accountWeb']>
   respond?: ApiProxy['respond']
 } = {}): ApiProxy {
   async function *empty<F>(): AsyncGenerator<RpcRequest<F>> { /* no frames */ }
@@ -209,6 +210,10 @@ function scriptedApi(overrides: {
         yield { version: 1, type: 'done' }
       },
       ...overrides.accountInference,
+    },
+    accountWeb: {
+      search: r => ok(r, { sources: [], truncated: false }),
+      ...overrides.accountWeb,
     },
     respond: overrides.respond ?? (() => Promise.resolve({ accepted: false as const, reason: 'not-pending' as const })),
     downloads: { sessionLog: async () => new Response('stub', { status: 404 }) },

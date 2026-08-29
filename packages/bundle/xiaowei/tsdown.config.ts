@@ -4,6 +4,7 @@ export default {
     'lib/types/index.js',
     'lib/types/invariant.js',
     'lib/types/startup.js',
+    'lib/types/tool-capabilities.js',
     'lib/types/webserver.js',
   ],
   outDir: 'lib',

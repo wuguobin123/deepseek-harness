@@ -28,6 +28,13 @@ import {
   type AccountInferenceRequest,
 } from '@deepseek-ai/dsh-llm-account-inference'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
+import {
+  accountWebSearchRequestSchema,
+  accountWebSearchValueSchema,
+} from '@deepseek-ai/dsh-host-apiproxy/api/account-web.schema'
+import type { AccountSearchResult } from '@deepseek-ai/dsh-web-search-account-remote/ipc'
+
+type WebSearchResult = AccountSearchResult['result']
 
 export interface ApiClientOptions {
   baseUrl: string
@@ -106,7 +113,7 @@ export class ApiClient {
    * unwrapped `value` or throws `ApiClientError` on protocol/business failure.
    * Business-layer second parse (the `value` shape) is the caller's job.
    */
-  async call<T = unknown>(method: string, payload: unknown): Promise<T> {
+  async call<T = unknown>(method: string, payload: unknown, signal?: AbortSignal): Promise<T> {
     const envelope: ClientRequest = {
       type: 'client-request',
       rpcId: randomUUID(),
@@ -117,6 +124,9 @@ export class ApiClient {
     const url = `${this.baseUrl}/api/${method}`
     const controller = new AbortController()
     const timer = setTimeout(() =>{  controller.abort() }, this.requestTimeoutMs)
+    const abort = (): void => { controller.abort(signal?.reason) }
+    if (signal?.aborted) abort()
+    else signal?.addEventListener('abort', abort, { once: true })
     let response: Response
     try {
       response = await this.fetchImpl(url, {
@@ -127,9 +137,12 @@ export class ApiClient {
       })
     } catch (err) {
       clearTimeout(timer)
+      signal?.removeEventListener('abort', abort)
+      if (signal?.aborted) throw new ApiClientError(method, 'ABORTED', '请求已取消', 0, err)
       throw new ApiClientError(method, 'NETWORK_ERROR', 'request failed', 0, err)
     }
     clearTimeout(timer)
+    signal?.removeEventListener('abort', abort)
     const text = await response.text()
     let parsedJson: unknown = null
     if (text) {
@@ -156,6 +169,26 @@ export class ApiClient {
     }
     const error = parsed.result.error
     throw new ApiClientError(method, error.code, error.message, response.status, error)
+  }
+
+  /** Run account-authenticated Web Search without exposing the bearer to the local Worker. */
+  async searchAccountWeb(request: unknown, signal: AbortSignal): Promise<WebSearchResult> {
+    const method = 'account.web.search'
+    if (this.token === null) {
+      throw new ApiClientError(method, 'ACCOUNT_AUTH_REQUIRED', '请先登录后使用网络搜索', 401)
+    }
+    let payload: unknown
+    try {
+      payload = accountWebSearchRequestSchema.parse(request)
+    } catch (error) {
+      throw new ApiClientError(method, 'BAD_REQUEST', '网络搜索请求格式无效', 400, error)
+    }
+    const value = await this.call(method, payload, signal)
+    try {
+      return accountWebSearchValueSchema.parse(value)
+    } catch (error) {
+      throw new ApiClientError(method, 'BAD_RESPONSE', '云端搜索响应格式无效', 200, error)
+    }
   }
 
   /**

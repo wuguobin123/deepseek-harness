@@ -38,6 +38,14 @@
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
+.iconButton:focus-visible,
+.searchButton:focus-visible,
+.locationToggle:focus-visible,
+.locationAddButton:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: -2px;
+}
+
 /* Section header: title, an inline search control, and the two trailing
    actions. Expanding search collapses the action cluster and takes its room. */
 .sectionHeader {
@@ -67,6 +75,8 @@
   overflow: hidden;
   white-space: nowrap;
   line-height: 20px;
+  margin: 0;
+  font: inherit;
   opacity: 1;
   visibility: visible;
   transition:
@@ -378,6 +388,77 @@
   margin-top: 4px;
 }
 
+.locationHeader {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  margin-top: 4px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.locationHeader + .groupSection {
+  margin-top: 2px;
+}
+
+.locationToggle {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  border-radius: 8px;
+  padding: 0 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+.locationToggle:hover,
+.locationAddButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.locationTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.locationChevron {
+  flex: none;
+  margin-left: auto;
+  color: var(--dsw-alias-label-tertiary);
+  transform: rotate(0deg);
+  transition: transform 160ms var(--ds-ease-in-out);
+}
+
+.locationChevronExpanded {
+  transform: rotate(90deg);
+}
+
+.locationAddButton {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
 .listTopDropIndicator,
 .workspaceDropBefore::before,
 .workspaceDropAfter::after {
@@ -500,7 +581,8 @@
   .sectionLabel,
   .searchSlot,
   .searchInput,
-  .headerActions {
+  .headerActions,
+  .locationChevron {
     transition: none;
   }
 }

@@ -1055,6 +1055,19 @@ describe('user-explicit invocation injection', () => {
     expect(injections).toHaveLength(1)
   })
 
+  it('injects once when overlapping scopes mount the consumer twice', async () => {
+    const { ctx, agent } = await invokeHarness()
+    const { scope } = await mintAgentScope(ctx, agent)
+    await scope.ctx.plugin(toolSkill)
+    const decision = await proposeStep(ctx, agent, [gesture('/shared-skill go')])
+    if (decision.kind !== 'enter') throw new Error('expected enter')
+    const injections = decision.messages.filter((message) => {
+      const source = message.source as { kind?: string; name?: string }
+      return source.kind === 'skill-invocation' && source.name === 'shared-skill'
+    })
+    expect(injections).toHaveLength(1)
+  })
+
   it('passes a downstream reject through both pre-step listeners untouched', async () => {
     const { ctx, agent } = await invokeHarness()
     const signal = new AbortController().signal

@@ -308,6 +308,11 @@ function fakeApi(overrides: Partial<{
         }
       },
     },
+    accountWeb: {
+      async search(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { sources: [], truncated: false } } }
+      },
+    },
     account: {
       async signup(request) {
         return { rpcId: request.rpcId, result: { ok: true, value: { userId: 'u-test', displayName: null, sessionToken: 'tok-test', expiresAt: 0 } } }
@@ -863,6 +868,27 @@ describe('account inference carrier', () => {
       body: JSON.stringify({ version: 1, model: 'MiniMax-M3', messages: [], cwd: '/Users/alice/private' }),
     }))
     expect(response.status).toBe(400)
+  })
+})
+
+describe('account Web Search carrier', () => {
+  const body = (payload: unknown): string => JSON.stringify({
+    type: 'client-request', rpcId: 'web-search-1', method: 'account.web.search', payload,
+  })
+
+  it('accepts only the credential-free search request fields', async () => {
+    const handler = toFetchHandler(fakeApi(), { kind: 'account', userId: 'user-local' })
+    const accepted = await handler.fetch(new Request('http://x/api/account.web.search', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: body({ query: 'example', maxResults: 3 }),
+    }))
+    expect(accepted.status).toBe(200)
+    const rejected = await handler.fetch(new Request('http://x/api/account.web.search', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: body({ query: 'example', userId: 'u-other' }),
+    }))
+    expect(rejected.status).toBe(200)
+    await expect(rejected.json()).resolves.toMatchObject({
+      result: { ok: false, error: { code: 'bad-request' } },
+    })
   })
 })
 

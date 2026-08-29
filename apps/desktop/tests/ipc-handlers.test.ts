@@ -34,7 +34,14 @@ function deferredStream(events: string[], name: string): (signal: AbortSignal) =
   }
 }
 
-function setup(events: string[], router?: { call: (method: string, payload: unknown) => Promise<unknown> }) {
+function setup(
+  events: string[],
+  router?: { call: (method: string, payload: unknown) => Promise<unknown> },
+  localSkillDirectory?: {
+    list(): Promise<readonly unknown[]>
+    install(sourceDirectory: string): Promise<unknown>
+  },
+) {
   const apiClient = {
     call: vi.fn(async (method: string): Promise<unknown> => {
       if (method === 'account.signin') {
@@ -68,6 +75,7 @@ function setup(events: string[], router?: { call: (method: string, payload: unkn
       save: vi.fn(async () => ({ status: 'saved' as const })),
       openHtmlInBrowser: vi.fn(async () => ({ opened: true as const })),
     },
+    localSkillDirectory,
     mainWindow: () => null,
     broadcastAuthState: (state: AuthState) => { events.push(`broadcast:${String(state.signedIn)}`) },
     cancelLocalInferenceStreams: vi.fn(async (code?: string) => { events.push(`inference:${code ?? 'cancelled'}`) }),
@@ -149,6 +157,42 @@ describe('desktop IPC account stream teardown', () => {
     } finally {
       await rm(root, { recursive: true, force: true })
     }
+  })
+
+  it('keeps local Skill paths inside the native main-process install flow', async () => {
+    const selectedDirectory = '/private/selected/frontend-slides'
+    const skill = {
+      directoryName: 'frontend-slides',
+      name: 'frontend-slides',
+      description: 'Presentation Skill',
+      fileCount: 163,
+      totalBytes: 3_532_176,
+      valid: true,
+    }
+    const localSkillDirectory = {
+      list: vi.fn(async () => [skill]),
+      install: vi.fn(async () => ({ status: 'installed', skill })),
+    }
+    const { ipc } = setup([], undefined, localSkillDirectory)
+
+    await expect(handlers.get(IpcChannels.ListSkills)?.({}, { path: '/renderer-supplied' })).resolves.toEqual({
+      ok: true,
+      value: [skill],
+    })
+    showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: [selectedDirectory] })
+    const result = await handlers.get(IpcChannels.InstallSkill)?.({}, { path: '/renderer-supplied' })
+    expect(localSkillDirectory.install).toHaveBeenCalledWith(selectedDirectory)
+    expect(JSON.stringify(result)).not.toContain(selectedDirectory)
+    expect(JSON.stringify(result)).not.toContain('renderer-supplied')
+    expect(showOpenDialog.mock.lastCall?.at(-1)).toMatchObject({ properties: ['openDirectory'] })
+
+    showOpenDialog.mockResolvedValueOnce({ canceled: true, filePaths: [] })
+    await expect(handlers.get(IpcChannels.InstallSkill)?.({}, { path: '/renderer-supplied' })).resolves.toEqual({
+      ok: true,
+      value: { status: 'cancelled' },
+    })
+    expect(localSkillDirectory.install).toHaveBeenCalledOnce()
+    ipc.uninstall()
   })
 
   it('sends a valid terminal frame when a downlink fails', async () => {

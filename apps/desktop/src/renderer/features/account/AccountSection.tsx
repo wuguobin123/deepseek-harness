@@ -10,14 +10,13 @@
  *     revoked timestamps. Revoke is loopback-only on the wire — the
  *     renderer button is disabled with a tooltip explaining why.
  *
- * Reads the userId off `useAuthStore`. Signed-out users get the account form
- * in place, so cloud access remains available without replacing the complete
- * local-and-cloud workspace UI.
+ * Reads the userId off `useAuthStore`. The root renderer owns signed-out
+ * presentation; this section only reports the brief transition while the
+ * authenticated workbench is being disposed.
  */
 import React from 'react'
 import { useAuthStore } from '../../stores/auth'
 import { formatCnyFromMicros, modelKeys, wallet, invites, type ModelKeyView, type WalletView } from '../../api'
-import { SignInCard } from '../auth/SignInCard'
 
 const DATE_FMT = new Intl.DateTimeFormat('zh-CN', {
   year: 'numeric',
@@ -111,7 +110,6 @@ export function AccountSection({ reloadKey }: AccountSectionProps): React.JSX.El
       area.style.opacity = '0'
       document.body.append(area)
       area.select()
-      // oxlint-disable-next-line typescript/no-deprecated -- Electron file origins need a clipboard fallback.
       if (!document.execCommand('copy')) throw new Error('copy rejected')
       setCopiedInvitation(code)
     } catch {
@@ -168,9 +166,8 @@ export function AccountSection({ reloadKey }: AccountSectionProps): React.JSX.El
       <section className="settings-section settings-section--account" data-testid="settings-account-signedout">
         <header className="settings-section__header">
           <h2 className="settings-section__title">账户</h2>
-          <p className="settings-section__subtitle">登录后可使用云端工作区；本机工作区不需登录。</p>
+          <p className="settings-section__subtitle">登录已退出，正在返回登录页面…</p>
         </header>
-        <SignInCard compact eagerSignedOut className="signin-card signin-card--settings" />
       </section>
     )
   }

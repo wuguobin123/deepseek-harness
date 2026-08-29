@@ -11,6 +11,16 @@
     host: '127.0.0.1'
     port: !!js "Number(process.env.DSH_LOCAL_PORT ?? 0)"
 
+- id: web
+  config:
+    searchProvider: account-remote
+
+- id: web-search-deepseek
+  disabled: true
+
+- id: web-search-account-remote
+  name: '@deepseek-ai/dsh-web-search-account-remote'
+
 # Host rows from web-app are disabled; local sessions mount their own tools.
 - id: session-telemetry-otel
   disabled: true

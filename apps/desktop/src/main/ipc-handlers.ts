@@ -38,6 +38,8 @@ import {
   type HostFrame,
   type MuxFrame,
   type RequestEmailCodeValue,
+  type InstalledSkillRecord,
+  type SkillDirectoryInstallResult,
 } from '../shared/contracts'
 import { ApiClient } from './api-client'
 import { CredentialStore } from './credential-store'
@@ -62,6 +64,11 @@ interface HandlersDeps {
   broadcastAuthState: (state: AuthState) => void
   /** Stop device model streams before the bearer, account, or cloud authority changes. */
   cancelLocalInferenceStreams?: (code?: string, message?: string) => Promise<void>
+  /** On-device Skill store; only the main process handles its paths. */
+  localSkillDirectory?: {
+    list(): Promise<readonly InstalledSkillRecord[]>
+    install(sourceDirectory: string): Promise<SkillDirectoryInstallResult>
+  }
 }
 
 const RequestInputSchema = z.object({
@@ -172,6 +179,43 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
         ok: false,
         error: { code: 'IMPORT_FAILED', message: error instanceof Error ? error.message : String(error) },
       }
+    }
+  }
+
+  async function handleListSkills(): Promise<
+    { ok: true; value: readonly InstalledSkillRecord[] }
+    | { ok: false; error: { code: string; message: string } }
+  > {
+    if (deps.localSkillDirectory === undefined) {
+      return { ok: false, error: { code: 'SKILL_STORE_UNAVAILABLE', message: '本机技能目录尚未就绪' } }
+    }
+    try {
+      return { ok: true, value: await deps.localSkillDirectory.list() }
+    } catch (error) {
+      return { ok: false, error: { code: 'SKILL_LIST_FAILED', message: error instanceof Error ? error.message : String(error) } }
+    }
+  }
+
+  async function handleInstallSkill(): Promise<
+    { ok: true; value: SkillDirectoryInstallResult | { status: 'cancelled' } }
+    | { ok: false; error: { code: string; message: string } }
+  > {
+    if (deps.localSkillDirectory === undefined) {
+      return { ok: false, error: { code: 'SKILL_STORE_UNAVAILABLE', message: '本机技能目录尚未就绪' } }
+    }
+    const options: OpenDialogOptions = {
+      title: '选择技能目录',
+      buttonLabel: '安装技能',
+      properties: ['openDirectory'],
+    }
+    const window = deps.mainWindow()
+    const picked = window === null ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(window, options)
+    const sourceDirectory = picked.filePaths.at(0)
+    if (picked.canceled || sourceDirectory === undefined) return { ok: true, value: { status: 'cancelled' } }
+    try {
+      return { ok: true, value: await deps.localSkillDirectory.install(sourceDirectory) }
+    } catch (error) {
+      return { ok: false, error: { code: 'SKILL_INSTALL_FAILED', message: error instanceof Error ? error.message : String(error) } }
     }
   }
 
@@ -557,6 +601,8 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
     ipcMain.handle(IpcChannels.OpenAppUpdateDownload, handleOpenAppUpdateDownload)
     ipcMain.handle(IpcChannels.SaveArtifact, handleSaveArtifact)
     ipcMain.handle(IpcChannels.OpenArtifactInBrowser, handleOpenArtifactInBrowser)
+    ipcMain.handle(IpcChannels.ListSkills, handleListSkills)
+    ipcMain.handle(IpcChannels.InstallSkill, handleInstallSkill)
     ipcMain.handle(IpcChannels.GetAuthState, handleGetAuthState)
     ipcMain.handle(IpcChannels.RequestEmailCode, handleRequestEmailCode)
     ipcMain.handle(IpcChannels.SignUp, handleSignUp)
@@ -579,6 +625,8 @@ export function createIpcHandlers(deps: HandlersDeps): IpcHandlers {
     ipcMain.removeHandler(IpcChannels.OpenAppUpdateDownload)
     ipcMain.removeHandler(IpcChannels.SaveArtifact)
     ipcMain.removeHandler(IpcChannels.OpenArtifactInBrowser)
+    ipcMain.removeHandler(IpcChannels.ListSkills)
+    ipcMain.removeHandler(IpcChannels.InstallSkill)
     ipcMain.removeHandler(IpcChannels.GetAuthState)
     ipcMain.removeHandler(IpcChannels.RequestEmailCode)
     ipcMain.removeHandler(IpcChannels.SignUp)

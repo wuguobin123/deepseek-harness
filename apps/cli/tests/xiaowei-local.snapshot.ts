@@ -6,9 +6,9 @@ import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import { boot, loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { CallId, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import { agentEvents, type Agent } from '@deepseek-ai/dsh-agent'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import type {} from '@deepseek-ai/dsh-skill'
@@ -157,6 +157,26 @@ describe('Xiaowei local workspace assembled profile', () => {
         if (installed.isError) {
           throw new Error(`local Skill installation failed: ${JSON.stringify(installed.content)}`)
         }
+        const skillGesture = createUserMessage({
+          content: [{ type: 'text', text: '/local-proof verify' }],
+          source: { kind: 'user' },
+        })
+        const skillDecision = await agentEvents(ctx, handle.agent).waterfall(
+          'agent/pre-step',
+          {
+            messages: [skillGesture],
+            turn: 1,
+            step: 1,
+            signal: new AbortController().signal,
+          },
+          () => Promise.resolve({ kind: 'enter' as const, messages: [skillGesture] }),
+        )
+        const skillInvocationCount = skillDecision.kind === 'enter'
+          ? skillDecision.messages.filter((message) => {
+            const source = message.source as { kind?: string; name?: string }
+            return source.kind === 'skill-invocation' && source.name === 'local-proof'
+          }).length
+          : -1
         handle.agent.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
         const skill = await readFile(join(home, 'skills/local-proof/SKILL.md'), 'utf8')
         const discoveredSkills = (await ctx.skills.list({ scope: handle.agent })).map(item => item.name)
@@ -181,6 +201,7 @@ describe('Xiaowei local workspace assembled profile', () => {
           grepFailed: grep.isError,
           skillInstallFailed: installed.isError,
           skillDiscoveredWithoutRestart: discoveredSkills.includes('local-proof'),
+          skillInvocationCount,
           skill,
         }).toMatchInlineSnapshot(`
           {
@@ -263,6 +284,7 @@ describe('Xiaowei local workspace assembled profile', () => {
           ",
             "skillDiscoveredWithoutRestart": true,
             "skillInstallFailed": false,
+            "skillInvocationCount": 1,
             "subagentProviders": [
               "fork",
               "spawn",

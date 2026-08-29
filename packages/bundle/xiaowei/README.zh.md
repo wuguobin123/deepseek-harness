@@ -8,6 +8,8 @@
 
 同一组合独立于 Session 的对话模型暴露 `web_search` 与 `web_fetch`。搜索使用 Firecrawl，并在缺少凭据时回退到回环 SearXNG。抓取首先使用固定 DNS 公网地址的 HTTP provider，只在安全取得 HTTP 403 或 429 响应后才尝试 Firecrawl；因此读取普通公开页面与 raw 文件不要求 Firecrawl 凭据。
 
+`tool-capabilities` export 是发布版本地与云端 preset 的机器可读 manifest（元数据清单）。它列出共享工具、位置专属工具及允许的位置感知描述。装配后的 profile 测试会读取已注册定义，并比较每项共享工具的输入和输出 schema、超时、展示回调及并发分类；未声明的差异会被拒绝。只有 manifest 明确声明时，位置感知描述才可以不同，让模型能够判断持久化数据属于本机还是账户。
+
 ## 模型体验
 
 ### 已安装账户能力

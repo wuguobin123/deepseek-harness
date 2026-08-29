@@ -8,13 +8,15 @@ Status: implemented
 
 xiaowei PR 2 已经把多用户后端、桌面 auth IPC 桥接、credential-store v3 的 token 持久化、ApiClient 的 bearer 注入都落地了。但是渲染入口的 `apps/desktop/src/renderer/index.html` 仍然指向旧的 `app.tsx` HashRouter shell — 六个页面（`HomePanel`、`HistoryPanel`、`AssistantPage`、`SettingsPage`、`ApprovalQueue`，外加之前就存在的 `tasks` 和 `approvals` tab 内容），再叠一个对 `WorkbenchApi` 的全局增强。PR 1 step D 写好的 Cordis 入口 `main.new.tsx` — `bootRenderer` + `useAuthStore` + `SignInCard` 覆盖层 — 虽然已经提交到树里，但实际上根本没被加载。在 `index.html` 切换之前，xiaowei 的 auth 流程根本没有可见的表面：没有 `SignInCard` 渲染，没有 `bindAuthStore` 的 IPC 订阅，signed-in 时不会引导 Cordis，主进程发出的「auth state broadcast」只会送到一个根本没订阅的渲染进程。
 
+未登录时挂载完整 Cordis 渲染端还会让用户无需账号即可使用本机工作区，退出登录后也会留在设置中，而不是返回独立账号页面。小薇让本机与云端工作区共用一个认证后的产品入口，因此该门禁同时控制冷启动和退出登录。
+
 紧随其后的验收问题是：入口切换之后，怎么证明 gate 真的挂载上来了？Vitest 已经覆盖了 `CredentialStore` 和 `ApiClient.setToken`；typecheck 覆盖了 `AuthState` 判别联合和 IPC 的 Zod schema。但两者都不能证明渲染进程真的启动了、SignInCard 真的挂载到 `.signin-gate` 里了、`getAuthState()` 真的从 preload 桥一路回到 credential-store 的实时读。已有的桌面探针（`desktop-boot-probe.mjs`、`desktop-acceptance.mjs`）都连的是 Electron 的 CDP 端点，但探的是旧的 app shell。没有任何 CDP 探针专门驱动 auth-gate 的契约。
 
 ## 决策
 
 把 `apps/desktop/src/renderer/index.html` 里 Vite 的模块入口从 `./main.tsx` 切到 `./main.new.tsx`。旧的 `main.tsx` 仍然留在树里 — Vite alias 保持有效，方便偶发的 dev 调试；线上应用加载的是 Cordis 入口。
 
-`main.new.tsx` 同时只持有两个互斥挂载之一 — `.signin-gate` 的 React 根节点（只有 SignInCard）或者 Cordis host — 在挂下一个之前先把当前这个 unmount 掉。两个挂载共享 `#root`（一个已经断言为非空的 `HTMLDivElement`）。auth store 的订阅在 boot 时跑一次：当 `useAuthStore.state.signedIn` 翻转时触发交换。同一个 subscriber 也处理冷启动时 credential 已经包含有效 `sessionToken` 的情况 — `bindAuthStore()` 通过 `getAuthState()` 读一次，要么挂载 gate（signed-out）要么挂载 Cordis host（signed-in）。主进程发来的 auth 广播让两个窗口保持一致：`IpcChannels.AuthStateEvent` 扇出到每个 BrowserWindow 的 webContents，Zustand store 通过订阅的 listener 更新。
+`main.new.tsx` 同时只持有两个互斥挂载之一 — `.signin-gate` 的 React 根节点（只有 SignInCard）或者 Cordis host — 在挂下一个之前先把当前这个 unmount 掉。两个挂载共享 `#root`（一个已经断言为非空的 `HTMLDivElement`）。启动时先通过 `bindAuthStore()` 接入广播，再由 `refresh()` 读取持久账号，然后选择初始挂载。后续 auth 广播会在已登录用户键变化时切换挂载。若工作台在退出登录后才完成启动，它会被销毁，不能成为当前挂载。主进程发来的 auth 广播让两个窗口保持一致：`IpcChannels.AuthStateEvent` 扇出到每个 BrowserWindow 的 webContents，Zustand store 通过订阅的 listener 更新。
 
 `container` 在做完非空断言后被捕获进一个 `const: HTMLDivElement`，而不是直接用 `document.getElementById('root')` 的结果。TypeScript 在闭包（`showSignInGate`、`showXiaowei`）跨越 `await` 边界后会丢失「非空」的窄化结果，因为源绑定在原理上可能被两个 await 之间的代码重新赋值。捕获模式保证窄化后的类型能活着进 async 函数体，不用每个闭包都重新断言或重新查 DOM。同一个 `#root` 元素被两个挂载复用；每次挂载都负责在下一个挂上来之前清理干净。
 
@@ -44,6 +46,6 @@ xiaowei PR 2 已经把多用户后端、桌面 auth IPC 桥接、credential-stor
 
 桌面渲染端现在就是 Cordis 入口 — `app.tsx` 和六个旧页面留在树里但不再被加载。auth gate 是用户看到的第一印象：safeStorage 为空的冷启动渲染 SignInCard；带持久化 bearer 的冷启动渲染 Cordis shell（workspace 选择器、sidebar、conversation）。sign-out 拆掉 Cordis host 重挂 gate；sign-in 反过来。主进程的 IPC 广播让两个窗口保持同步。
 
-CDP 探针是 CI 里一个无 key 的验收门槛。当 `sanity-account-signup.mjs` 和 `sanity-wallet-quota.mjs` 后续为 wallet / model-keys 步骤落地时，auth-gate 探针将成为前置条件（得先看到 gate 才能去试真的 signup）。渲染端入口是单向的 — `main.tsx` 和 `main.new.tsx` 之间没有 A/B。删掉旧的 `main.tsx` 是单独的清理动作，不在这次变更里。
+渲染入口测试通过实时 auth-store 订阅固定未登录冷启动、登录与退出流程，同时用确定性 DOM 挂载替代 Cordis host。CDP 探针继续作为独立门禁与 preload 桥的无 key 真实 Electron 检查。渲染端入口是单向的 — `main.tsx` 和 `main.new.tsx` 之间没有 A/B。
 
-`.signin-gate` overlay 挂载拥有 auth gate 的生命周期，但它依赖 `useAuthStore` 在 boot 时处在一个自洽的状态。如果 `bindAuthStore()` 失败（比如 `getAuthState` IPC 抛了），subscriber 就永远接不上，渲染端永远停在 gate 上。当前的实现是在订阅之前先 `await bindAuthStore()`；未来给 Cordis shell 加 sign-out 兜底时也要保留这个顺序。
+`.signin-gate` overlay 挂载拥有 auth gate 的生命周期。如果认证恢复失败，`refresh()` 会投影未登录状态，渲染端以独立账号页面安全失败。工作台永远不会成为未登录兜底，内嵌账号页面也不提供本机工作区旁路。

@@ -114,6 +114,7 @@ describe('LocalRuntimeSupervisor', () => {
             aborted = true
             resolve()
           }, { once: true }))
+          yield* []
         },
       },
     })
@@ -131,6 +132,94 @@ describe('LocalRuntimeSupervisor', () => {
       type: 'xiaowei/inference/error', requestId: 'req-old',
       error: { code: 'ACCOUNT_SESSION_CHANGED', message: '账号已切换' },
     })
+    await supervisor.stop()
+  })
+
+  it('relays credential-free search requests through the account bridge', async () => {
+    const proc = child()
+    const search = vi.fn(async (request: unknown) => {
+      expect(request).toEqual({ query: 'OpenAI', maxResults: 2 })
+      return {
+        sources: [{ url: 'https://example.test/result', title: 'Result' }],
+        truncated: false,
+      }
+    })
+    const supervisor = new LocalRuntimeSupervisor({
+      userDataPath: '/tmp/test', runtimeBin: '/runtime', spawnImpl: () => proc as never,
+      searchBridge: { search },
+    })
+    const started = supervisor.start()
+    proc.stdout.write('dsh web: http://127.0.0.1:4321\n')
+    await started
+    proc.emit('message', JSON.stringify({
+      type: 'xiaowei/web-search/start', requestId: 'search-1',
+      request: { query: 'OpenAI', maxResults: 2 },
+    }))
+    await vi.waitFor(() => { expect(proc.sent).toHaveLength(1) })
+    expect(JSON.parse(proc.sent[0])).toEqual({
+      type: 'xiaowei/web-search/result', requestId: 'search-1',
+      result: {
+        sources: [{ url: 'https://example.test/result', title: 'Result' }],
+        truncated: false,
+      },
+    })
+    await supervisor.stop()
+  })
+
+  it('aborts account search and reports the account transition to the Worker', async () => {
+    const proc = child()
+    let aborted = false
+    const supervisor = new LocalRuntimeSupervisor({
+      userDataPath: '/tmp/test', runtimeBin: '/runtime', spawnImpl: () => proc as never,
+      searchBridge: {
+        search: async (_request, signal) => await new Promise((_, reject) => {
+          signal.addEventListener('abort', () => {
+            aborted = true
+            reject(signal.reason instanceof Error ? signal.reason : new Error('search aborted'))
+          }, { once: true })
+        }),
+      },
+    })
+    const started = supervisor.start()
+    proc.stdout.write('dsh web: http://127.0.0.1:4321\n')
+    await started
+    proc.emit('message', JSON.stringify({
+      type: 'xiaowei/web-search/start', requestId: 'search-old', request: { query: 'old account' },
+    }))
+    await vi.waitFor(() => { expect(aborted).toBe(false) })
+    await supervisor.cancelAccountRequests('ACCOUNT_SESSION_CHANGED', '账号已切换')
+    expect(aborted).toBe(true)
+    expect(proc.sent.map(message => JSON.parse(message))).toContainEqual({
+      type: 'xiaowei/web-search/error', requestId: 'search-old',
+      error: { code: 'ACCOUNT_SESSION_CHANGED', message: '账号已切换' },
+    })
+    await supervisor.stop()
+  })
+
+  it('rejects duplicate in-flight search request identifiers', async () => {
+    const proc = child()
+    const supervisor = new LocalRuntimeSupervisor({
+      userDataPath: '/tmp/test', runtimeBin: '/runtime', spawnImpl: () => proc as never,
+      searchBridge: { search: async (_request, signal) => await new Promise((_, reject) => {
+        signal.addEventListener('abort', () => {
+          reject(signal.reason instanceof Error ? signal.reason : new Error('search aborted'))
+        }, { once: true })
+      }) },
+    })
+    const started = supervisor.start()
+    proc.stdout.write('dsh web: http://127.0.0.1:4321\n')
+    await started
+    const request = JSON.stringify({
+      type: 'xiaowei/web-search/start', requestId: 'search-duplicate', request: { query: 'x' },
+    })
+    proc.emit('message', request)
+    proc.emit('message', request)
+    await vi.waitFor(() => { expect(proc.sent).toHaveLength(1) })
+    expect(JSON.parse(proc.sent[0])).toEqual({
+      type: 'xiaowei/web-search/error', requestId: 'search-duplicate',
+      error: { code: 'IPC_DUPLICATE_REQUEST', message: '搜索请求标识重复' },
+    })
+    await supervisor.cancelAccountRequests()
     await supervisor.stop()
   })
 })

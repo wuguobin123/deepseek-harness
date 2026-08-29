@@ -8,6 +8,8 @@ The Xiaowei-safe agent composition mounts the `skill_install` tool when the acco
 
 The same composition exposes `web_search` and `web_fetch` independently of the Session's conversation model. Search uses Firecrawl with loopback SearXNG as its missing-credential fallback. Fetch uses the DNS-pinned public HTTP provider first and tries Firecrawl only after a safely retrieved HTTP 403 or 429 response; a Firecrawl credential is therefore optional for ordinary public pages and raw files.
 
+The `tool-capabilities` export is the machine-readable manifest for the shipped local and cloud presets. It names shared tools, location-only tools, and permitted location-aware descriptions. The assembled profile test reads the registered definitions and compares each shared input and output schema, timeout, presentation callbacks, and concurrency classification; it rejects an undeclared difference. A location-aware description may differ only when the manifest declares it, so the model can see whether persistent data belongs to the computer or the account.
+
 ## Model Experience
 
 ### Installed account capabilities

@@ -131,6 +131,7 @@ import { canOpenNativePath, openNativePath, openNativeTextFile } from './native-
 import { mountAccountPluginsIfConfigured } from './account-plugin-mount.ts'
 import { accountInferenceOptions } from './api/account-inference.ts'
 import type { AccountInferenceFrame } from '@deepseek-ai/dsh-llm-account-inference'
+import type { WebSearchResult } from '@deepseek-ai/dsh-web'
 
 /** Optional user-context provider consumed by the host RPC adapter. */
 interface UserContextProvider {
@@ -4730,6 +4731,17 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       },
       async uninstall(request) {
         return accountPluginMutation(ctx, request, 'uninstall')
+      },
+    },
+    accountWeb: {
+      async search(request, signal) {
+        if (request.principal?.kind !== 'account') return err(request, { code: 'unauthenticated', message: 'account authentication required', details: {} })
+        try {
+          const result: WebSearchResult = await ctx.web.search(request.payload, signal)
+          return { rpcId: request.rpcId, result: { ok: true, value: result } }
+        } catch (error) {
+          return err(request, { code: 'internal', message: error instanceof Error ? error.message : String(error), details: {} })
+        }
       },
     },
     accountInference: {

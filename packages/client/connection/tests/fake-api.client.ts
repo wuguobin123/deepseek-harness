@@ -337,6 +337,13 @@ export class FakeApiClient implements IApiClient {
     }))),
   }
 
+  readonly accountWeb: IApiClient['accountWeb'] = {
+    search: payload => this.record('account.web.search', payload, Promise.resolve(ok({
+      sources: [],
+      truncated: false,
+    }))),
+  }
+
   readonly artifactRegistry: IApiClient['artifactRegistry'] = {
     list: (payload: unknown) => this.record('artifact.list', payload, Promise.resolve(ok({ items: [] }))),
     read: (payload: unknown) => this.record('artifact.read', payload, Promise.resolve(ok({

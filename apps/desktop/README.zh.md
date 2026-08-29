@@ -16,6 +16,8 @@ dsh-ops 部署的 Electron 桌面客户端。客户端使用与 dsh Web 前端�
 
 桌面端组合拥有小薇产品身份。它的 renderer 插件使用小薇标志填充共享侧边栏和对话品牌 slot，打包应用、浏览器和原生窗口标题使用「小薇」。Electron Builder 将 `features/brand/xiaowei-logo.png` 转换为 macOS、Windows 和 Linux 的原生应用及安装器图标。通用 DSH 客户端保留由各自构建选择的品牌。
 
+桌面端的 Session 主体仅提供对话视图，不注册通用 Web 客户端中的可选「轨迹」Tab。
+
 ## 执行环境
 
 全新安装默认使用**本机**环境。main 进程会在操作系统分配的 `127.0.0.1` 端口监管一个 `xiaowei-local` Host。在该环境中添加 Workspace 时，桌面端只把所选目录的规范路径传给回环 Host 的 `workspace.create`，不会枚举、编码、上传或复制该目录，因此不受云端副本文件大小限制。外部修改与 Agent 编辑都作用于同一个源目录。
@@ -23,6 +25,8 @@ dsh-ops 部署的 Electron 桌面客户端。客户端使用与 dsh Web 前端�
 **云端**是一个显式的替代环境。在该环境中添加 Workspace 时，桌面端会保留有界的 `workspace.importDirectory` 流程，并创建一份独立的账号私有副本；后续本机修改不会自动同步。Session、Workspace id、事件流和产物读取始终归属于创建它们的环境。切换环境时，桌面端会中止旧事件流，并让 renderer 针对所选 Host 重新加载。
 
 本机 Host 会把模型配置、凭证、Session、元数据和已安装 Skill 保存在 Electron 应用数据目录下。对话中经过批准的 Skill 安装只会写入该本机 Skill 根目录。目录不会作为云端 Workspace 上传，但用户有意加入模型请求的内容仍会发送给本机配置的模型提供方。本机模式不会静默使用云端账号钱包。
+
+「设置 → 技能」列出正式桌面运行时中安装的完整 Skill 目录。「安装 Skill 目录」会打开原生目录选择器；主进程校验嵌套普通文件并以原子方式复制到 `<userData>/local-runtime/skills`，既不向渲染进程暴露源路径或目标路径，也不上传目录。已有不同内容时只报告冲突，不会覆盖。该清单表示设备上的安装状态，并不证明某个 Session 已加载 Skill；有效条目继续使用现有 `/<skill-name>` 调用约定。
 
 ## 布局
 
@@ -42,6 +46,7 @@ apps/desktop/
     │   ├── sse-proxy.ts      # WebSocket downlink + heartbeat → typed IPC fan-out
     │   ├── credential-store.ts # connection preferences + encrypted account session
     │   ├── ipc-handlers.ts   # Typed ipcMain handlers
+    │   ├── local-skill-directory.ts # Bounded, atomic local Skill bundle store
     │   └── update-checker.ts # Same-origin release-manifest polling
     ├── preload/index.ts      # contextBridge.exposeInMainWorld('workbenchApi')
     └── renderer/             # React + HashRouter

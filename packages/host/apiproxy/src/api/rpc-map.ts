@@ -22,6 +22,7 @@ import type { ArtifactsApi } from './artifacts.ts'
 import type { UserContextApi } from './user-context.ts'
 import type { RpcResponse } from './rpc.ts'
 import type { AccountPluginsApi } from './account-plugins.ts'
+import type { AccountWebApi } from './account-web.ts'
 
 /**
  * Method name → method signature. Signatures are the single source of truth; payload/value
@@ -114,6 +115,7 @@ export interface RpcMethodMap {
   'account.plugins.list': AccountPluginsApi['list']
   'account.plugins.install': AccountPluginsApi['install']
   'account.plugins.uninstall': AccountPluginsApi['uninstall']
+  'account.web.search': AccountWebApi['search']
 }
 
 /** Business request payload of method K (reaches through the RpcRequest narrow form to payload). */

@@ -3196,6 +3196,9 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         return ok(request, { ...plugin })
       },
     },
+    accountWeb: {
+      search: request => ok(request, { sources: [], truncated: false }),
+    },
     wallet: {
       get: request => ok(request, { userId: 'fx-user', balanceMicros: 0, updatedAt: Date.now() }),
       credit: request => ok(request, { userId: 'fx-user', balanceMicros: 0, updatedAt: Date.now() }),
@@ -3438,6 +3441,7 @@ export class FixtureApiClient extends AbstractApiClient {
       case 'account.plugins.list': return this.api.accountPlugins.list(request)
       case 'account.plugins.install': return this.api.accountPlugins.install(request)
       case 'account.plugins.uninstall': return this.api.accountPlugins.uninstall(request)
+      case 'account.web.search': return this.api.accountWeb.search(request, signal)
       case 'account.wallet.get': return this.api.wallet.get(request)
       case 'account.wallet.credit': return this.api.wallet.credit(request)
       case 'account.wallet.debit': return this.api.wallet.debit(request)

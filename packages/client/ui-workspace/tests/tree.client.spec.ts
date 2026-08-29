@@ -392,18 +392,20 @@ describe('deriveSearchResults', () => {
 })
 
 describe('createWorkspaceViewStore', () => {
-  it('stores grouping, ordering, Workspace expansion, and recent-session view order', () => {
+  it('stores grouping, ordering, location and Workspace expansion, and recent-session view order', () => {
     const store = createWorkspaceViewStore().create()
     expect(store.getSnapshot().groupBy).toBe('workspace')
     expect(store.getSnapshot().orderBy).toBe('updated')
     store.actions.setGroupBy('flat')
     store.actions.setOrderBy('updated')
+    store.actions.setLocationExpanded('cloud', false)
     store.actions.setGroupExpanded('alpha', true)
     store.actions.syncSessionOrderAccount('alpha', ['two', 'one'], { one: 1, two: 2 })
     store.actions.setSessionOrder('alpha', ['one', 'two'])
     expect(store.getSnapshot().groupBy).toBe('flat')
     expect(store.getSnapshot()).toMatchObject({
       orderBy: 'updated',
+      locationExpansion: { local: true, cloud: false },
       groupExpansion: { alpha: true },
       sessionOrderByAccount: { alpha: ['one', 'two'] },
       sessionUpdatedAtByAccount: { alpha: { one: 1, two: 2 } },

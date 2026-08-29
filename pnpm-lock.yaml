@@ -761,9 +761,6 @@ importers:
       '@deepseek-ai/dsh-client-ui-tool':
         specifier: workspace:^
         version: link:../../packages/client/ui-tool
-      '@deepseek-ai/dsh-client-ui-trajectory':
-        specifier: workspace:^
-        version: link:../../packages/client/ui-trajectory
       '@deepseek-ai/dsh-client-ui-user-questions':
         specifier: workspace:^
         version: link:../../packages/client/ui-user-questions
@@ -788,6 +785,9 @@ importers:
       '@deepseek-ai/dsh-typert-registry':
         specifier: workspace:^
         version: link:../../packages/typert/registry
+      '@deepseek-ai/dsh-web-search-account-remote':
+        specifier: workspace:^
+        version: link:../../packages/web/web-search-account-remote
       pdfjs-dist:
         specifier: 4.10.38
         version: 4.10.38
@@ -809,6 +809,9 @@ importers:
       ws:
         specifier: ^8.18.0
         version: 8.21.0
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
       zod:
         specifier: ^3.23.8
         version: 3.25.76
@@ -1305,9 +1308,9 @@ importers:
       '@deepseek-ai/dsh-web':
         specifier: workspace:^
         version: link:../../packages/web/web
-      '@deepseek-ai/dsh-web-search-deepseek':
+      '@deepseek-ai/dsh-web-search-account-remote':
         specifier: workspace:^
-        version: link:../../packages/web/web-search-deepseek
+        version: link:../../packages/web/web-search-account-remote
       '@deepseek-ai/dsh-workflow':
         specifier: workspace:^
         version: link:../../packages/workflow/workflow
@@ -1714,6 +1717,9 @@ importers:
       '@deepseek-ai/dsh-account-wallet':
         specifier: workspace:^
         version: link:../wallet
+      '@deepseek-ai/dsh-web':
+        specifier: workspace:^
+        version: link:../../web/web
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -2931,6 +2937,9 @@ importers:
       '@deepseek-ai/dsh-tool-skill-install-local':
         specifier: workspace:^
         version: link:../../skill/tool-skill-install-local
+      '@deepseek-ai/dsh-web-search-account-remote':
+        specifier: workspace:^
+        version: link:../../web/web-search-account-remote
       '@deepseek-ai/schemastery':
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
@@ -6637,6 +6646,9 @@ importers:
       '@deepseek-ai/dsh-typert-registry':
         specifier: workspace:^
         version: link:../../typert/registry
+      '@deepseek-ai/dsh-web':
+        specifier: workspace:^
+        version: link:../../web/web
 
   packages/host/directory-picker:
     devDependencies:
@@ -10479,6 +10491,18 @@ importers:
       '@deepseek-ai/dsh-launch-environment':
         specifier: workspace:^
         version: link:../../util/launch-environment
+      '@deepseek-ai/dsh-web':
+        specifier: workspace:^
+        version: link:../web
+
+  packages/web/web-search-account-remote:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
       '@deepseek-ai/dsh-web':
         specifier: workspace:^
         version: link:../web

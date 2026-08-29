@@ -10,6 +10,7 @@ import { IdentityError } from '@deepseek-ai/dsh-account-identity'
 import { EmailVerificationError } from '@deepseek-ai/dsh-account-email-verification'
 import { WalletError } from '@deepseek-ai/dsh-account-wallet'
 import { ModelKeyError } from '@deepseek-ai/dsh-account-model-keys'
+import type {} from '@deepseek-ai/dsh-web'
 
 // The cloud assembly owns these seams. Re-exporting their public contracts
 // keeps the gateway's dependency edge pointed at this provider package.
@@ -28,6 +29,7 @@ export interface AccountProviderRequest {
   rpcId: string
   payload: Record<string, unknown>
   principal?: AccountPrincipal | { kind: 'local' }
+  signal?: AbortSignal
 }
 
 /** Narrow response returned by the provider adapter. */
@@ -46,6 +48,7 @@ export const ACCOUNT_RPC_METHODS = [
   'account.modelKeys.revoke', 'account.customModels.create', 'account.customModels.list',
   'account.customModels.remove', 'account.plugins.list', 'account.plugins.install',
   'account.plugins.uninstall',
+  'account.web.search',
 ] as const
 
 /** A cloud route name. */
@@ -289,6 +292,15 @@ export function createAccountApiProvider(ctx: Context): {
             if (method === 'account.plugins.list') return success(request, { items: await plugins.list({ userId }) })
             const pluginId = String(payload.pluginId)
             return success(request, await plugins[method === 'account.plugins.install' ? 'install' : 'uninstall']({ userId, pluginId }))
+          }
+          case 'account.web.search': {
+            owner(request)
+            const web = ctx.get('web'); if (web === undefined) throw new Error('web service is not mounted')
+            const result = await web.search({
+              query: String(payload.query),
+              ...(payload.maxResults === undefined ? {} : { maxResults: Number(payload.maxResults) }),
+            }, request.signal)
+            return success(request, result)
           }
         }
       } catch (error) {

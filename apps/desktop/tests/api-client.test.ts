@@ -210,3 +210,65 @@ describe('ApiClient account inference', () => {
       .rejects.toMatchObject({ code: 'BAD_RESPONSE' })
   })
 })
+
+describe('ApiClient account Web Search', () => {
+  it('keeps the bearer in Electron and validates the cloud result', async () => {
+    const client = new ApiClient({ baseUrl: 'http://cloud.test', fetchImpl: buildFetch() })
+    client.setToken('account-token')
+    nextBody = {
+      type: 'server-response', rpcId: 'search',
+      result: { ok: true, value: {
+        sources: [{ url: 'https://example.test', title: 'Example' }], truncated: false,
+      } },
+    }
+    await expect(client.searchAccountWeb(
+      { query: 'example', maxResults: 3 }, new AbortController().signal,
+    )).resolves.toEqual({
+      sources: [{ url: 'https://example.test', title: 'Example' }], truncated: false,
+    })
+    expect(findBearerHeader(calls[0])).toBe('Bearer account-token')
+    expect(calls[0].body).toMatchObject({
+      type: 'client-request', method: 'account.web.search', payload: { query: 'example', maxResults: 3 },
+    })
+  })
+
+  it('requires an account before sending a search request', async () => {
+    const client = new ApiClient({ baseUrl: 'http://cloud.test', fetchImpl: buildFetch() })
+    await expect(client.searchAccountWeb({ query: 'example' }, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'ACCOUNT_AUTH_REQUIRED' })
+    expect(calls).toHaveLength(0)
+  })
+
+  it('rejects identity fields and malformed cloud results', async () => {
+    const client = new ApiClient({ baseUrl: 'http://cloud.test', fetchImpl: buildFetch() })
+    client.setToken('account-token')
+    await expect(client.searchAccountWeb(
+      { query: 'example', userId: 'must-not-cross' }, new AbortController().signal,
+    )).rejects.toMatchObject({ code: 'BAD_REQUEST' })
+    nextBody = {
+      type: 'server-response', rpcId: 'search',
+      result: { ok: true, value: { sources: [{ title: 'missing URL' }], truncated: false } },
+    }
+    await expect(client.searchAccountWeb({ query: 'example' }, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'BAD_RESPONSE' })
+  })
+
+  it('propagates cancellation to the remote request', async () => {
+    let aborted = false
+    const client = new ApiClient({
+      baseUrl: 'http://cloud.test',
+      fetchImpl: async (_input, init) => await new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          aborted = true
+          reject(new Error('aborted'))
+        }, { once: true })
+      }),
+    })
+    client.setToken('account-token')
+    const controller = new AbortController()
+    const request = client.searchAccountWeb({ query: 'example' }, controller.signal)
+    controller.abort()
+    await expect(request).rejects.toMatchObject({ code: 'ABORTED' })
+    expect(aborted).toBe(true)
+  })
+})

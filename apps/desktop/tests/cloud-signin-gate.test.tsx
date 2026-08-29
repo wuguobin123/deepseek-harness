@@ -24,23 +24,11 @@ afterEach(async () => {
   host.remove()
 })
 
-describe('cloud sign-in environment recovery', () => {
-  it('switches a signed-out user back to local with the persisted base URL', async () => {
-    const updateSession = vi.fn(async () => ({ ok: true as const, value: { baseUrl: 'https://cloud.example.test' } }))
-    const api = {
-      getSession: vi.fn(async () => ({ baseUrl: 'https://cloud.example.test', environment: 'cloud' as const, lastLocation: 'cloud' as const, version: '3' as const })),
-      updateSession,
-    }
-    await act(async () => { root.render(<CloudSignInGate api={api} />) })
+describe('cloud sign-in gate', () => {
+  it('does not offer a signed-out shortcut to local workspaces', async () => {
+    await act(async () => { root.render(<CloudSignInGate />) })
 
-    await act(async () => {
-      host.querySelector<HTMLButtonElement>('[data-testid="return-local"]')!.click()
-      await Promise.resolve()
-    })
-
-    expect(updateSession).toHaveBeenCalledWith({
-      baseUrl: 'https://cloud.example.test',
-      lastLocation: 'local',
-    })
+    expect(host.querySelector('[data-testid="sign-in-card"]')).not.toBeNull()
+    expect(host.querySelector('[data-testid="return-local"]')).toBeNull()
   })
 })

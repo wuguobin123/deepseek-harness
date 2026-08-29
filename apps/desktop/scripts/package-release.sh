@@ -64,8 +64,16 @@ pnpm run build:renderer
 step "[5/5] electron-builder package"
 for platform in "${PLATFORMS[@]}"; do
   case "$platform" in
-    mac)     echo "==> mac arm64 dmg";  pnpm run package:mac ;;
-    mac:x64) echo "==> mac x64 dmg";    pnpm run package:mac:x64 ;;
+    mac)
+      echo "==> mac arm64 dmg"
+      pnpm run package:mac
+      node scripts/verify-packaged-main-runtime.mjs release/mac-arm64/小薇.app
+      ;;
+    mac:x64)
+      echo "==> mac x64 dmg"
+      pnpm run package:mac:x64
+      node scripts/verify-packaged-main-runtime.mjs release/mac/小薇.app
+      ;;
     linux)   echo "==> Linux AppImage"; pnpm run package:linux ;;
     win)     echo "==> Windows NSIS";   pnpm run package:win ;;
   esac

@@ -19,8 +19,8 @@
  *
  * The card subscribes to the auth store on mount; broadcast events from the
  * main process keep the store coherent across windows.
- * Non-compact account gates also show the Xiaowei product mark and title above
- * the form heading; compact settings embeds retain the form-only layout.
+ * The standalone account gate shows the Xiaowei product mark and title above
+ * the form heading.
  */
 import { useEffect, useState } from 'react'
 import { useAuthStore } from '../../stores/auth'

@@ -35,7 +35,7 @@
   ],
   "license": "MIT",
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
-  "dependencies": { "@deepseek-ai/dsh-agent-presets": "workspace:^", "@deepseek-ai/dsh-app-boot": "workspace:^", "@deepseek-ai/dsh-skill-filesystem": "workspace:^", "@deepseek-ai/dsh-tool-fs": "workspace:^", "@deepseek-ai/dsh-tool-fs-search": "workspace:^", "@deepseek-ai/dsh-tool-skill": "workspace:^", "@deepseek-ai/dsh-tool-skill-install-local": "workspace:^", "@deepseek-ai/schemastery": "workspace:^", "readdirp": "^5.0.0" },
+  "dependencies": { "@deepseek-ai/dsh-agent-presets": "workspace:^", "@deepseek-ai/dsh-app-boot": "workspace:^", "@deepseek-ai/dsh-skill-filesystem": "workspace:^", "@deepseek-ai/dsh-tool-fs": "workspace:^", "@deepseek-ai/dsh-tool-fs-search": "workspace:^", "@deepseek-ai/dsh-tool-skill": "workspace:^", "@deepseek-ai/dsh-tool-skill-install-local": "workspace:^", "@deepseek-ai/dsh-web-search-account-remote": "workspace:^", "@deepseek-ai/schemastery": "workspace:^", "readdirp": "^5.0.0" },
   "peerDependencies": { "@deepseek-ai/cordis-plugin-loader": "workspace:^", "@deepseek-ai/cordis": "workspace:^", "@deepseek-ai/dsh-invariants": "workspace:^" },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",

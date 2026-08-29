@@ -25,6 +25,7 @@ import type { UserContextApi } from './user-context.ts'
 import type { AccountPluginsApi } from './account-plugins.ts'
 import type { ClientResponse, RpcPrincipal, RpcReceipt } from './rpc.ts'
 import type { AccountInferenceApi } from './account-inference.ts'
+import type { AccountWebApi } from './account-web.ts'
 export type { AccountInferenceApi } from './account-inference.ts'
 export type { AccountInferenceMessage, AccountInferenceRequest, AccountInferenceFrame } from '@deepseek-ai/dsh-llm-account-inference'
 export { ACCOUNT_INFERENCE_VERSION, accountInferenceRequestSchema, parseAccountInferenceRequest, accountInferenceFrameSchema, parseAccountInferenceFrame, parseAccountInferenceFrames } from '@deepseek-ai/dsh-llm-account-inference'
@@ -63,6 +64,8 @@ export interface ApiProxy {
   accountPlugins: AccountPluginsApi
   /** Session-free account-owned model inference stream. */
   accountInference: AccountInferenceApi
+  /** Authenticated account-owned web search. */
+  accountWeb: AccountWebApi
   /**
    * Response entry for server requests; not a domain method.
    * @param message - Client response carrying the server request's rpcId.
@@ -106,6 +109,8 @@ export type {
 } from './artifacts.ts'
 export type { UserContextApi, UserContextKey, UserContextKind, UserContextView } from './user-context.ts'
 export type { AccountPluginsApi } from './account-plugins.ts'
+export type { AccountWebApi, WebSearchResult } from './account-web.ts'
+export { accountWebSearchRequestSchema, accountWebSearchValueSchema } from './account-web.schema.ts'
 export type { ApprovalResponsePayload } from './approvals.ts'
 
 export type { QuestionResponsePayload } from './questions.ts'

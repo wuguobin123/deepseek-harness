@@ -54,7 +54,7 @@ describe('desktop account entry', () => {
     await act(async () => { root.unmount() })
   })
 
-  it('keeps cloud sign-in reachable from Settings while local workspaces remain available', () => {
+  it('does not embed a local-workspace bypass after sign-out', () => {
     useAuthStore.setState({
       initialized: true,
       state: { signedIn: false },
@@ -65,9 +65,9 @@ describe('desktop account entry', () => {
     })
 
     const markup = renderToStaticMarkup(<AccountSection />)
-    expect(markup).toContain('登录后可使用云端工作区')
-    expect(markup).toContain('data-testid="signin-brand"')
-    expect(markup).toContain('>登录</button>')
+    expect(markup).toContain('正在返回登录页面')
+    expect(markup).not.toContain('本机工作区不需登录')
+    expect(markup).not.toContain('data-testid="signin-brand"')
   })
 
   it('shows three invitation slots in the signed-in account section', async () => {

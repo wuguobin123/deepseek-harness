@@ -291,6 +291,7 @@ describe('connection node half', () => {
       'account.wallet.credit', 'account.wallet.debit', 'account.wallet.setQuota',
       'account.wallet.refreshDaily', 'account.wallet.grantWelcomeBonus',
       'account.modelKeys.provision', 'account.modelKeys.revoke',
+      'account.web.search',
       // A composition names the plugins a session runs: reading one is
       // reconnaissance, and copy/remove/openDocument manage the roster and
       // drive the host desktop.
@@ -336,6 +337,7 @@ describe('connection node half', () => {
       'account.customModels.create',
       'account.customModels.list',
       'account.customModels.remove',
+      'account.web.search',
     ]) {
       const allowed = fakeResponse()
       await routes[0]!.handler(fakeRequest({ host: 'harness.example', authorization: 'Bearer valid-token' }, `${API_PATH}/${method}`), allowed.response)

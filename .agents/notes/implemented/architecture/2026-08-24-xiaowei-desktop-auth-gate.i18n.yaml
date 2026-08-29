@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-24-xiaowei-desktop-auth-gate.md
-2026-08-24-xiaowei-desktop-auth-gate.md: 98cadc3fbea7b87f83950ae6ce91fc448567a25a
-2026-08-24-xiaowei-desktop-auth-gate.zh.md: 3a26242ab03ef99757553538a43ab0736dec3bef
+2026-08-24-xiaowei-desktop-auth-gate.md: 08530cb216f59bef9e0f99b13ff0d712de014b45
+2026-08-24-xiaowei-desktop-auth-gate.zh.md: 1e502eefd3434f1f29fc3f98696bc133e9ce3597

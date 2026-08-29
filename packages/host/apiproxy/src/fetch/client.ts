@@ -90,6 +90,7 @@ import {
   userContextSetValueSchema, userContextDeleteValueSchema,
 } from '../api/user-context.schema.ts'
 import { accountPluginsListValueSchema, accountPluginsInstallValueSchema, accountPluginsUninstallValueSchema } from '../api/account-plugins.schema.ts'
+import { accountWebSearchValueSchema } from '../api/account-web.schema.ts'
 
 /**
  * Client consumption face of the contract (shape a): same domain tree as ApiProxy, but unary
@@ -236,6 +237,9 @@ export interface IApiClient {
     install(payload: RequestPayload<'account.plugins.install'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.plugins.install'>>>
     uninstall(payload: RequestPayload<'account.plugins.uninstall'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.plugins.uninstall'>>>
   }
+  accountWeb: {
+    search(payload: RequestPayload<'account.web.search'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.web.search'>>>
+  }
   /** client-response passthrough (rpcId is a backfill of the server-request's id — never minted here). */
   respond(message: ClientResponse, signal?: AbortSignal): Promise<RpcReceipt>
 }
@@ -330,6 +334,7 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
   'account.plugins.list': accountPluginsListValueSchema,
   'account.plugins.install': accountPluginsInstallValueSchema,
   'account.plugins.uninstall': accountPluginsUninstallValueSchema,
+  'account.web.search': accountWebSearchValueSchema,
 }
 
 /** Default timeout for bounded unary calls (rpc-compare 2026-07-19: a hung host must not leave callers pending forever). */
@@ -633,6 +638,10 @@ export abstract class AbstractApiClient implements IApiClient {
     list: (payload, signal) => this.callUnary('account.plugins.list', payload, signal),
     install: (payload, signal) => this.callUnary('account.plugins.install', payload, signal),
     uninstall: (payload, signal) => this.callUnary('account.plugins.uninstall', payload, signal),
+  }
+
+  readonly accountWeb: IApiClient['accountWeb'] = {
+    search: (payload, signal) => this.callUnary('account.web.search', payload, signal),
   }
 
   readonly wallet: IApiClient['wallet'] = {

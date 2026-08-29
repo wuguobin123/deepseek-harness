@@ -14,11 +14,15 @@ export const FLAT_SESSION_ORDER_KEY = '__flat_session_order__'
 export type SessionGroupBy = 'workspace' | 'flat'
 /** Session order: user-arranged only, or user-arranged plus activity promotion. */
 export type SessionOrderBy = 'manual' | 'updated'
+/** Workspace execution location shown as one collapsible sidebar section. */
+export type WorkspaceLocation = 'local' | 'cloud'
 
 /** Workspace browser viewing state persisted across surface remounts and reloads. */
 type WorkspaceViewState = {
   groupBy: SessionGroupBy
   orderBy: SessionOrderBy
+  /** Persisted visibility of the local and cloud Workspace sections. */
+  locationExpansion?: Record<WorkspaceLocation, boolean>
   /** Explicit zero-or-five-session state keyed by Workspace group identity. */
   groupExpansion: Record<string, boolean>
   /** Shared editable order per Workspace group plus the browser-local flat-list account. */
@@ -34,6 +38,7 @@ type WorkspaceViewState = {
 type WorkspaceViewActions = {
   setGroupBy: (draft: WorkspaceViewState, mode: SessionGroupBy) => void
   setOrderBy: (draft: WorkspaceViewState, mode: SessionOrderBy) => void
+  setLocationExpanded: (draft: WorkspaceViewState, location: WorkspaceLocation, expanded: boolean) => void
   setGroupExpanded: (draft: WorkspaceViewState, key: string, expanded: boolean) => void
   retainAccountKeys: (draft: WorkspaceViewState, workspaceKeys: readonly string[]) => void
   syncSessionOrderAccount: (
@@ -54,6 +59,7 @@ export function createWorkspaceViewStore(): EngineStoreHandle<WorkspaceViewState
     init: (): WorkspaceViewState => ({
       groupBy: 'workspace',
       orderBy: 'updated',
+      locationExpansion: { local: true, cloud: true },
       groupExpansion: {},
       sessionOrderByAccount: {},
       sessionUpdatedAtByAccount: {},
@@ -62,6 +68,10 @@ export function createWorkspaceViewStore(): EngineStoreHandle<WorkspaceViewState
     actions: {
       setGroupBy: (d, mode: SessionGroupBy) => { d.groupBy = mode },
       setOrderBy: (d, mode: SessionOrderBy) => { d.orderBy = mode },
+      setLocationExpanded: (d, location: WorkspaceLocation, expanded: boolean) => {
+        d.locationExpansion ??= { local: true, cloud: true }
+        d.locationExpansion[location] = expanded
+      },
       setGroupExpanded: (d, key: string, expanded: boolean) => { d.groupExpansion[key] = expanded },
       retainAccountKeys: (d, workspaceKeys: readonly string[]) => {
         const retained = new Set(workspaceKeys)

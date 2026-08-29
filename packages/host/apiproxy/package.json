@@ -13,6 +13,7 @@
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
+  "typesVersions": { "*": { "api/*": ["lib/types/api/*"] } },
   "exports": {
     ".": {
       "types": "./lib/types/index.d.ts",
@@ -81,6 +82,7 @@
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-agent-presets": "workspace:^",
     "@deepseek-ai/dsh-cordis-host-runner": "workspace:^",
+    "@deepseek-ai/dsh-web": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^"
   },
   "peerDependenciesMeta": {
@@ -96,6 +98,7 @@
     "@deepseek-ai/dsh-storage-domain": "workspace:^",
     "@deepseek-ai/dsh-typert-protocol": "workspace:^",
     "@deepseek-ai/dsh-typert-registry": "workspace:^",
+    "@deepseek-ai/dsh-web": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   }
 }

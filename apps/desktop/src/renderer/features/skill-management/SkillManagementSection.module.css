@@ -1,0 +1,14 @@
+.section { display: grid; gap: 12px; }
+.heading { margin: 0; }
+.intro, .empty { color: var(--ds-text-secondary, #68707d); margin: 0; }
+.actions { display: flex; gap: 8px; }
+.actions input { flex: 1; min-width: 0; padding: 7px 9px; }
+.actions button { padding: 7px 12px; }
+.list { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.list li { border: 1px solid var(--ds-border, #d9dde5); border-radius: 8px; padding: 10px 12px; }
+.list li div { display: flex; justify-content: space-between; gap: 8px; }
+.list li p { margin: 5px 0; }
+.list li small { color: var(--ds-text-secondary, #68707d); }
+.valid { border-left: 3px solid #2d9c5b !important; }
+.invalid { border-left: 3px solid #c74646 !important; }
+.error { color: #c74646; margin: 0; }

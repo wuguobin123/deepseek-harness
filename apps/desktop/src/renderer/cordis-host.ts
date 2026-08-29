@@ -47,7 +47,6 @@ import { apply as commandsApply } from '@deepseek-ai/dsh-client-ui-commands/clie
 import { apply as referenceApply } from '@deepseek-ai/dsh-client-ui-reference/client'
 import { apply as planApply } from '@deepseek-ai/dsh-client-ui-plan/client'
 import { apply as goalApply } from '@deepseek-ai/dsh-client-ui-goal/client'
-import { apply as trajectoryApply } from '@deepseek-ai/dsh-client-ui-trajectory/client'
 import { apply as jobsApply } from '@deepseek-ai/dsh-client-ui-jobs/client'
 import { apply as subagentApply } from '@deepseek-ai/dsh-client-ui-subagent/client'
 import { apply as workflowRunApply } from '@deepseek-ai/dsh-client-ui-workflow-run/client'
@@ -61,6 +60,8 @@ import { apply as modelSelectionApply } from '@deepseek-ai/dsh-client-ui-model-s
 import { apply as permissionPresetsApply } from '@deepseek-ai/dsh-client-ui-permission-presets/client'
 import { apply as dirPickerNativeApply } from '@deepseek-ai/dsh-client-ui-directory-picker-native/client'
 import { apply as directoryImportApply } from './directory-import-flow'
+import { apply as skillManagementApply } from './features/skill-management'
+import type { SkillManagementApi } from './features/skill-management'
 
 import { installPersistedTheme } from './theme-persist'
 import { resolveDirectoryFlowSurface } from './directory-flow'
@@ -77,6 +78,9 @@ export interface HostHandles {
   ctx: Context
   dispose: () => Promise<void>
 }
+
+/** Complete preload surface consumed while constructing the desktop renderer. */
+export type DesktopWorkbenchApi = WorkbenchApiTransport & SkillManagementApi
 
 /**
  * Drain every pending fiber so the next `apply` reads fully-constructed
@@ -123,7 +127,7 @@ async function drainFibers(ctx: Context): Promise<void> {
  */
 export async function bootRenderer(
   container: HTMLElement,
-  api: WorkbenchApiTransport,
+  api: DesktopWorkbenchApi,
   baseUrl: string,
   environment?: 'local' | 'cloud',
 ): Promise<HostHandles> {
@@ -234,7 +238,6 @@ export async function bootRenderer(
   // 12. Orchestrator and plan.
   await activate(planApply)
   await activate(goalApply)
-  await activate(trajectoryApply)
   await activate(jobsApply)
   await activate(subagentApply)
   await activate(workflowRunApply)
@@ -250,6 +253,7 @@ export async function bootRenderer(
   await activate(settingsPluginInventoryApply)
   await activate(modelSelectionApply)
   await activate(permissionPresetsApply)
+  await activate(ctx => skillManagementApply(ctx, api))
 
   // 14. Directory-flow surface — explicit desktop environments always use
   //    Electron's native chooser. Main then either attaches the selected real

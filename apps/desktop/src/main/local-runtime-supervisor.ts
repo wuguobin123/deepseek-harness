@@ -7,10 +7,21 @@ import {
   serializeAccountInferenceMessage,
   type AccountInferenceMessage,
 } from '@deepseek-ai/dsh-llm-account-remote/ipc'
+import {
+  parseAccountSearchMessage,
+  serializeAccountSearchMessage,
+  type AccountSearchMessage,
+  type AccountSearchResult,
+} from '@deepseek-ai/dsh-web-search-account-remote/ipc'
 
 /** Authenticated cloud inference owned by the Electron parent process. */
 export interface LocalInferenceBridge {
   stream(request: unknown, signal: AbortSignal): AsyncIterable<unknown>
+}
+
+/** Authenticated cloud Web Search owned by the Electron parent process. */
+export interface LocalSearchBridge {
+  search(request: unknown, signal: AbortSignal): Promise<AccountSearchResult['result']>
 }
 
 export interface LocalRuntimeSupervisorOptions {
@@ -24,6 +35,7 @@ export interface LocalRuntimeSupervisorOptions {
     options: { env: NodeJS.ProcessEnv; stdio: ['ignore', 'pipe', 'pipe', 'ipc'] },
   ) => ChildProcess
   inferenceBridge?: LocalInferenceBridge
+  searchBridge?: LocalSearchBridge
 }
 
 /** Owns the one supervised loopback dsh process used by local sessions. */
@@ -32,6 +44,7 @@ export class LocalRuntimeSupervisor {
   private url: string | null = null
   private starting: Promise<string> | null = null
   private readonly inference = new Map<string, { controller: AbortController; task: Promise<void> }>()
+  private readonly searches = new Map<string, { controller: AbortController; task: Promise<void> }>()
   private readonly options: Required<Pick<LocalRuntimeSupervisorOptions, 'timeoutMs' | 'shutdownGraceMs'>>
   constructor(private readonly input: LocalRuntimeSupervisorOptions) {
     this.options = { timeoutMs: input.timeoutMs ?? 15_000, shutdownGraceMs: input.shutdownGraceMs ?? 2_000 }
@@ -70,7 +83,7 @@ export class LocalRuntimeSupervisor {
       },
     )
     this.child = child
-    child.on('message', (value) => { this.handleInferenceMessage(child, value) })
+    child.on('message', (value) => { this.handleAccountMessage(child, value) })
     const ready = new Promise<string>((resolve, reject) => {
       let stderr = ''
       const timer = setTimeout(() => {
@@ -121,7 +134,7 @@ export class LocalRuntimeSupervisor {
   }
 
   async stop(): Promise<void> {
-    await this.cancelInferenceStreams('IPC_UNAVAILABLE', '本机运行时已停止')
+    await this.cancelAccountRequests('IPC_UNAVAILABLE', '本机运行时已停止')
     const child = this.child
     this.child = null
     this.url = null
@@ -146,6 +159,43 @@ export class LocalRuntimeSupervisor {
       stream.controller.abort()
     }
     await Promise.all(active.map(([, stream]) => stream.task.catch(() => undefined)))
+  }
+
+  /** Abort every account search before credentials or account identity change. */
+  async cancelSearches(code = 'ACCOUNT_SESSION_CHANGED', message = '账号状态已变更，请重试'): Promise<void> {
+    const active = [...this.searches.entries()]
+    for (const [requestId, search] of active) {
+      this.sendSearchToChild({ type: 'xiaowei/web-search/error', requestId, error: { code, message } })
+      search.controller.abort()
+    }
+    await Promise.all(active.map(([, search]) => search.task.catch(() => undefined)))
+  }
+
+  /** Abort all account-owned work before the account authority changes. */
+  async cancelAccountRequests(code = 'ACCOUNT_SESSION_CHANGED', message = '账号状态已变更，请重试'): Promise<void> {
+    await Promise.all([
+      this.cancelInferenceStreams(code, message),
+      this.cancelSearches(code, message),
+    ])
+  }
+
+  private handleAccountMessage(child: ChildProcess, value: unknown): void {
+    const type = this.readMessageType(value)
+    if (type?.startsWith('xiaowei/inference/')) {
+      this.handleInferenceMessage(child, value)
+      return
+    }
+    if (type?.startsWith('xiaowei/web-search/')) this.handleSearchMessage(child, value)
+  }
+
+  private readMessageType(value: unknown): string | undefined {
+    let parsed = value
+    if (typeof parsed === 'string') {
+      try { parsed = JSON.parse(parsed) as unknown } catch { return undefined }
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
+    const type = (parsed as Record<string, unknown>).type
+    return typeof type === 'string' ? type : undefined
   }
 
   private handleInferenceMessage(child: ChildProcess, value: unknown): void {
@@ -211,10 +261,79 @@ export class LocalRuntimeSupervisor {
     }
   }
 
+  private handleSearchMessage(child: ChildProcess, value: unknown): void {
+    let message: AccountSearchMessage
+    try {
+      message = parseAccountSearchMessage(value)
+    } catch {
+      return
+    }
+    if (message.type === 'xiaowei/web-search/cancel') {
+      this.searches.get(message.requestId)?.controller.abort()
+      return
+    }
+    if (message.type !== 'xiaowei/web-search/start') return
+    if (this.searches.has(message.requestId)) {
+      this.sendSearchToChild({
+        type: 'xiaowei/web-search/error', requestId: message.requestId,
+        error: { code: 'IPC_DUPLICATE_REQUEST', message: '搜索请求标识重复' },
+      }, child)
+      return
+    }
+    const controller = new AbortController()
+    const task = this.runSearch(child, message.requestId, message.request, controller)
+    this.searches.set(message.requestId, { controller, task })
+    const cleanup = (): void => {
+      if (this.searches.get(message.requestId)?.task === task) this.searches.delete(message.requestId)
+    }
+    void task.then(cleanup, cleanup)
+  }
+
+  private async runSearch(
+    child: ChildProcess,
+    requestId: string,
+    request: unknown,
+    controller: AbortController,
+  ): Promise<void> {
+    const bridge = this.input.searchBridge
+    if (bridge === undefined) {
+      this.sendSearchToChild({
+        type: 'xiaowei/web-search/error', requestId,
+        error: { code: 'CLOUD_WEB_UNAVAILABLE', message: '云端搜索中继未配置' },
+      }, child)
+      return
+    }
+    try {
+      const result = await bridge.search(request, controller.signal)
+      if (!controller.signal.aborted) {
+        this.sendSearchToChild({ type: 'xiaowei/web-search/result', requestId, result }, child)
+      }
+    } catch (error) {
+      if (controller.signal.aborted) return
+      this.sendSearchToChild({
+        type: 'xiaowei/web-search/error', requestId,
+        error: {
+          code: typeof (error as { code?: unknown }).code === 'string'
+            ? (error as { code: string }).code
+            : 'CLOUD_WEB_FAILED',
+          message: error instanceof Error ? error.message : String(error),
+        },
+      }, child)
+    }
+  }
+
   private sendToChild(message: AccountInferenceMessage, child = this.child): void {
+    this.sendSerializedToChild(serializeAccountInferenceMessage(message), child)
+  }
+
+  private sendSearchToChild(message: AccountSearchMessage, child = this.child): void {
+    this.sendSerializedToChild(serializeAccountSearchMessage(message), child)
+  }
+
+  private sendSerializedToChild(message: string, child: ChildProcess | null): void {
     if (child === null || typeof child.send !== 'function' || !child.connected) return
     try {
-      child.send(serializeAccountInferenceMessage(message))
+      child.send(message)
     } catch {
       // The child may exit between the connected check and send. Its stream
       // listeners disappear with the process, so there is no remaining peer.

@@ -7,7 +7,7 @@ import type {
 } from '@deepseek-ai/dsh-client-runtime/client'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
-import type { WorkspaceBrowserProps } from '../src/client/contract/slots.ts'
+import type { DirectoryFlowOwnerProps, WorkspaceBrowserProps } from '../src/client/contract/slots.ts'
 import { createWorkspaceViewStore, FLAT_SESSION_ORDER_KEY } from '../src/client/stores.ts'
 import { UNGROUPED_KEY } from '../src/client/tree.ts'
 import { WorkspaceBrowser } from '../src/client/WorkspaceBrowser.tsx'
@@ -178,6 +178,60 @@ describe('WorkspaceBrowser', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryByRole('menu')).toBeNull()
     expect(b.store.getSnapshot().groupBy).toBe('workspace')
+  })
+
+  it('folds local and cloud Workspace sections independently and persists the choice', () => {
+    const b = mount({
+      useWorkspaces: hook(workspaceState([
+        workspace('dsh:local:alpha', [], 'alpha'),
+        workspace('dsh:cloud:beta', [], 'beta'),
+      ])),
+    })
+
+    expect(screen.getByRole('region', { name: '工作区' })).toBeTruthy()
+    const localToggle = screen.getByRole('button', { name: '收起本机工作区' })
+    expect(localToggle.firstElementChild?.tagName).toBe('SPAN')
+    expect(localToggle.lastElementChild?.tagName).toBe('svg')
+    fireEvent.click(localToggle)
+    expect(screen.queryByText('alpha')).toBeNull()
+    expect(screen.getByText('beta')).toBeTruthy()
+    expect(b.store.getSnapshot().locationExpansion).toEqual({ local: false, cloud: true })
+
+    fireEvent.click(screen.getByRole('button', { name: '展开本机工作区' }))
+    fireEvent.click(screen.getByRole('button', { name: '收起云端工作区' }))
+    expect(screen.getByText('alpha')).toBeTruthy()
+    expect(screen.queryByText('beta')).toBeNull()
+    expect(b.store.getSnapshot().locationExpansion).toEqual({ local: true, cloud: false })
+  })
+
+  it('keeps both location add controls available when the Workspace list is empty', () => {
+    mount()
+    expect(screen.getByRole('button', { name: '添加本机工作区' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '添加云端工作区' })).toBeTruthy()
+    expect(screen.getByText('暂无会话')).toBeTruthy()
+  })
+
+  it('opens each section add button directly in its matching directory flow', async () => {
+    let flowOwner: DirectoryFlowOwnerProps | undefined
+    mount({
+      useWorkspaces: hook(workspaceState([
+        workspace('dsh:local:alpha', [], 'alpha'),
+        workspace('dsh:cloud:beta', [], 'beta'),
+      ])),
+      renderSlot: ((_name: string, owner: DirectoryFlowOwnerProps) => {
+        flowOwner = owner
+        return owner.open ? <div data-testid="directory-flow" /> : null
+      }) as never,
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '添加本机工作区' }))
+    await waitFor(() => { expect(flowOwner).toMatchObject({ open: true, location: 'local' }) })
+    expect(screen.queryByRole('menu')).toBeNull()
+    act(() => { flowOwner?.onCancel() })
+
+    fireEvent.click(screen.getByRole('button', { name: '添加云端工作区' }))
+    await waitFor(() => { expect(flowOwner).toMatchObject({ open: true, location: 'cloud' }) })
+    expect(screen.queryByRole('menu')).toBeNull()
   })
 
   it('persists flat-list drag order locally and applies Last updated within that account', async () => {
@@ -388,7 +442,7 @@ describe('WorkspaceBrowser', () => {
     })
     fireEvent.click(screen.getByText('alpha'))
     expect(screen.getByText('child-s')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /展开|收起/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: '收起' })).toBeNull()
     expect(screen.getByText('child-s').closest('[role="treeitem"]')?.getAttribute('draggable')).toBe('true')
   })
 

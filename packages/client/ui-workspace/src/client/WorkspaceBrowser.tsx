@@ -12,8 +12,9 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
-  Button, IconCloseFill14, IconPersonalizationOutline16,
-  IconProjectAddOutline16, IconSearchOutline16, Menu, Modal, Tooltip,
+  Button, IconChevronRightOutline14, IconCloseFill14,
+  IconPersonalizationOutline16, IconProjectAddOutline16,
+  IconSearchOutline16, Menu, Modal, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   SessionId, SessionListState, SessionSearchResultItem, WorkspaceId, WorkspaceView,
@@ -22,7 +23,7 @@ import type { WorkspaceBrowserProps } from './contract/slots.ts'
 import type { SessionNode, SessionOrderBy } from './tree.ts'
 import { deriveFlat, deriveGroups, deriveSearchResults, UNGROUPED_KEY } from './tree.ts'
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './rows/Rows.tsx'
-import { FLAT_SESSION_ORDER_KEY } from './stores.ts'
+import { FLAT_SESSION_ORDER_KEY, type WorkspaceLocation } from './stores.ts'
 import { WorkspacePickFlow } from './WorkspacePicker.tsx'
 import css from './WorkspaceBrowser.module.css'
 
@@ -192,6 +193,48 @@ function ViewOptionsMenu({ groupBy, orderBy, onGroupPick, onOrderPick, t }: {
   )
 }
 
+/** One location section header with independent disclosure and add actions. */
+function WorkspaceLocationHeader({
+  location, expanded, canAdd, onToggle, onAdd, t,
+}: {
+  location: WorkspaceLocation
+  expanded: boolean
+  canAdd: boolean
+  onToggle: () => void
+  onAdd: () => void
+  t: WorkspaceBrowserProps['t']
+}) {
+  const titleKey = location === 'local' ? 'group.local' : 'group.cloud'
+  const toggleKey = location === 'local'
+    ? expanded ? 'group.local.collapse' : 'group.local.expand'
+    : expanded ? 'group.cloud.collapse' : 'group.cloud.expand'
+  const addKey = location === 'local' ? 'group.local.add' : 'group.cloud.add'
+  return (
+    <div className={css.locationHeader} role="heading" aria-level={3}>
+      <button
+        type="button"
+        className={css.locationToggle}
+        aria-expanded={expanded}
+        aria-label={t(toggleKey)}
+        onClick={onToggle}
+      >
+        <span className={css.locationTitle}>{t(titleKey)}</span>
+        <IconChevronRightOutline14
+          className={clsx(css.locationChevron, expanded && css.locationChevronExpanded)}
+          size={12}
+        />
+      </button>
+      {canAdd && (
+        <Tooltip label={t(addKey)} side="bottom" delayMs={500}>
+          <button type="button" className={css.locationAddButton} aria-label={t(addKey)} onClick={onAdd}>
+            <IconProjectAddOutline16 size={14} />
+          </button>
+        </Tooltip>
+      )}
+    </div>
+  )
+}
+
 /** In-flight root-row drag: source identity plus the current insert marker. */
 interface DragState {
   /** Workspace id, or {@link UNGROUPED_KEY} for the browser-local loose-session account. */
@@ -223,6 +266,14 @@ type SessionTreeProps = Pick<
   workspaces: readonly WorkspaceView[]
   /** Explicit persisted zero-or-five-session state by Workspace group. */
   groupExpansion: Readonly<Record<string, boolean>>
+  /** Persisted visibility of each location section. */
+  locationExpansion: Readonly<Partial<Record<WorkspaceLocation, boolean>>>
+  /** Persist one location section's visibility. */
+  setLocationExpanded: (location: WorkspaceLocation, expanded: boolean) => void
+  /** Whether the composed runtime can open a directory flow. */
+  directoryFlowAvailable: boolean
+  /** Open the directory flow for one explicit Workspace location. */
+  onAddLocation: (location: WorkspaceLocation) => void
   /** Persist one Workspace group's zero-or-five-session state. */
   setGroupExpanded: (key: string, expanded: boolean) => void
   /** Shared editable orders used by Workspace groups and the flat-list account. */
@@ -253,6 +304,7 @@ function SessionTree({
   onRenameRequest, onDeleteRequest, onSessionRename, onSessionArchive,
   insertWorkspaceBefore, insertSessionBefore, orderBy,
   groupExpansion, setGroupExpanded,
+  locationExpansion, setLocationExpanded, directoryFlowAvailable, onAddLocation,
   sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t,
 }: SessionTreeProps) {
   const list = useSessions(s => s)
@@ -331,8 +383,8 @@ function SessionTree({
   )
   const displayGroups = useMemo(() => [...groups].sort((a, b) => {
     const location = (id: string | undefined): number => id?.startsWith('dsh:local:') ? 0 : id?.startsWith('dsh:cloud:') ? 1 : 2
-    return location((a.workspaceId ?? ungroupedSessionIds[0]) as string | undefined)
-      - location((b.workspaceId ?? ungroupedSessionIds[0]) as string | undefined)
+    return location(a.workspaceId ?? ungroupedSessionIds[0])
+      - location(b.workspaceId ?? ungroupedSessionIds[0])
   }), [groups, ungroupedSessionIds])
   const now = Date.now()
   const commitSessionDrag = (activeDrag: DragState, over: NonNullable<DragState['over']>): void => {
@@ -373,7 +425,7 @@ function SessionTree({
     const source = workspaces.find(workspace => workspace.workspaceId === activeDrag.workspaceId)
     const target = workspaces.find(workspace => workspace.workspaceId === over.id)
     if (source === undefined || target === undefined) return
-    const sourceLocal = String(source?.workspaceId).startsWith('dsh:local:')
+    const sourceLocal = String(source.workspaceId).startsWith('dsh:local:')
     const targetLocal = String(target.workspaceId).startsWith('dsh:local:')
     if (sourceLocal !== targetLocal) return
     const sameHost = workspaces.filter(workspace => String(workspace.workspaceId).startsWith('dsh:local:') === sourceLocal)
@@ -393,6 +445,8 @@ function SessionTree({
   const workspaceDropAtListStart = groups[0]?.workspaceId !== undefined
     && workspaceDrag?.over?.id === groups[0].workspaceId
     && workspaceDrag.over.half === 'before'
+  const hasLocalGroups = displayGroups.some(group => String(group.workspaceId ?? ungroupedSessionIds[0]).startsWith('dsh:local:'))
+  const hasCloudGroups = displayGroups.some(group => !String(group.workspaceId ?? ungroupedSessionIds[0]).startsWith('dsh:local:'))
 
   return (
     <div className={clsx(css.treeBody, css.wide)}>
@@ -402,11 +456,25 @@ function SessionTree({
         role="tree"
         aria-label={t('section.sessions')}
       >
-        {groups.length === 0 && (
-          <div className={css.empty}>{t('empty.none')}</div>
+        {!hasLocalGroups && (
+          <WorkspaceLocationHeader
+            location="local"
+            expanded={locationExpansion.local ?? true}
+            canAdd={directoryFlowAvailable}
+            onToggle={() => { setLocationExpanded('local', !(locationExpansion.local ?? true)) }}
+            onAdd={() => { onAddLocation('local') }}
+            t={t}
+          />
         )}
         {displayGroups.map((group, groupIndex) => {
           const location = String(group.workspaceId ?? ungroupedSessionIds[0]).startsWith('dsh:local:') ? 'local' : 'cloud'
+          const previousLocation = groupIndex === 0
+            ? undefined
+            : String(displayGroups[groupIndex - 1]?.workspaceId ?? ungroupedSessionIds[0]).startsWith('dsh:local:')
+              ? 'local'
+              : 'cloud'
+          const startsLocation = previousLocation !== location
+          const locationExpanded = locationExpansion[location] ?? true
           const workspaceId = group.workspaceId
           const workspaceMarker = workspaceId !== undefined && workspaceDrag?.over?.id === workspaceId
             ? workspaceDrag.over.half
@@ -440,11 +508,18 @@ function SessionTree({
             }
           return (
             <Fragment key={group.key}>
-              {(groupIndex === 0 || (String(displayGroups[groupIndex - 1]?.workspaceId ?? ungroupedSessionIds[0]).startsWith('dsh:local:') !== String(group.workspaceId ?? ungroupedSessionIds[0]).startsWith('dsh:local:'))) && (
-                <div className={css.sectionLabel} role="heading">{t(location === 'local' ? 'group.local' : 'group.cloud')}</div>
+              {startsLocation && (
+                <WorkspaceLocationHeader
+                  location={location}
+                  expanded={locationExpanded}
+                  canAdd={directoryFlowAvailable}
+                  onToggle={() => { setLocationExpanded(location, !locationExpanded) }}
+                  onAdd={() => { onAddLocation(location) }}
+                  t={t}
+                />
               )}
               {/* Group section spacing is owned by WorkspaceBrowser.module.css. */}
-              <div
+              {locationExpanded && <div
                 className={clsx(
                   css.groupSection,
                   workspaceMarker === 'before' && css.workspaceDropBefore,
@@ -550,10 +625,21 @@ function SessionTree({
                       : t('sessions.expand', { n: group.sessions.length - COLLAPSED_SESSION_LIMIT })}
                   </button>
                 )}
-              </div>
+              </div>}
             </Fragment>
           )
         })}
+        {!hasCloudGroups && (
+          <WorkspaceLocationHeader
+            location="cloud"
+            expanded={locationExpansion.cloud ?? true}
+            canAdd={directoryFlowAvailable}
+            onToggle={() => { setLocationExpanded('cloud', !(locationExpansion.cloud ?? true)) }}
+            onAdd={() => { onAddLocation('cloud') }}
+            t={t}
+          />
+        )}
+        {groups.length === 0 && <div className={css.empty}>{t('empty.none')}</div>}
       </div>
       <span className={css.fade} />
     </div>
@@ -790,6 +876,7 @@ export function WorkspaceBrowser({
   const groupBy = useStore(s => s.groupBy)
   const orderBy = useStore(s => s.orderBy)
   const groupExpansion = useStore(s => s.groupExpansion)
+  const locationExpansion = useStore(s => s.locationExpansion ?? { local: true, cloud: true })
   const sessionOrderByAccount = useStore(s => s.sessionOrderByAccount)
   const sessionUpdatedAtByAccount = useStore(s => s.sessionUpdatedAtByAccount)
   const currentBlankSessionId = useSessions((state) => {
@@ -841,6 +928,7 @@ export function WorkspaceBrowser({
   // Section-header ＋ opens the picker menu (same popover in wide and rail
   // states; the menu anchors on this button).
   const [wsPickerOpen, setWsPickerOpen] = useState(false)
+  const [wsPickerLocation, setWsPickerLocation] = useState<WorkspaceLocation | undefined>(undefined)
   const wsPlusRef = useRef<HTMLButtonElement>(null)
   const composingRef = useRef(false)
 
@@ -1023,12 +1111,15 @@ export function WorkspaceBrowser({
   }
 
   return (
-    <div className={clsx(css.root, !wide && css.rail)}>
+    <section
+      className={clsx(css.root, !wide && css.rail)}
+      aria-label={groupBy === 'flat' ? t('section.sessions') : t('section.workspaces')}
+    >
       <div className={css.sectionHeader}>
         {wide && (
-          <span className={clsx(css.sectionLabel, css.wide, searchExpanded && css.sectionLabelHidden)}>
+          <h2 className={clsx(css.sectionLabel, css.wide, searchExpanded && css.sectionLabelHidden)}>
             {groupBy === 'flat' ? t('section.sessions') : t('section.workspaces')}
-          </span>
+          </h2>
         )}
         {wide && (
           <div className={clsx(css.searchSlot, searchExpanded && css.searchSlotExpanded)}>
@@ -1108,6 +1199,7 @@ export function WorkspaceBrowser({
                 className={css.iconButton}
                 aria-label={t('workspace.add')}
                 onClick={() => {
+                  setWsPickerLocation(undefined)
                   setWsPickerOpen(v => !v)
                 }}
               >
@@ -1126,12 +1218,13 @@ export function WorkspaceBrowser({
           useDirectoryFlow={useDirectoryFlow}
           renderDirectoryFlow={owner => renderSlot('sidebar.workspaces.directoryFlow', owner)}
           addOnly
+          directLocation={wsPickerLocation}
           side="right"
           onPick={(workspaceId) => {
             setWsPickerOpen(false)
             startSession(workspaceId)
           }}
-          onClose={() => { setWsPickerOpen(false) }}
+          onClose={() => { setWsPickerOpen(false); setWsPickerLocation(undefined) }}
         />
       </div>
 
@@ -1192,6 +1285,14 @@ export function WorkspaceBrowser({
                 workspaces={workspaces}
                 groupExpansion={groupExpansion}
                 setGroupExpanded={actions.setGroupExpanded}
+                locationExpansion={locationExpansion}
+                setLocationExpanded={actions.setLocationExpanded}
+                directoryFlowAvailable={directoryFlowAvailable}
+                onAddLocation={(location) => {
+                  setSearchExpanded(false)
+                  setWsPickerLocation(location)
+                  setWsPickerOpen(true)
+                }}
                 sessionOrderByAccount={sessionOrderByAccount}
                 sessionUpdatedAtByAccount={sessionUpdatedAtByAccount}
                 syncSessionOrderAccount={actions.syncSessionOrderAccount}
@@ -1308,6 +1409,6 @@ export function WorkspaceBrowser({
         {deleting && <div className={css.deleteStatus} role="status">{t('delete.pending')}</div>}
         {deleteError !== null && <div className={css.renameError} role="alert">{deleteError}</div>}
       </Modal>
-    </div>
+    </section>
   )
 }

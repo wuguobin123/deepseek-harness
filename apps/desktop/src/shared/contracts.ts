@@ -279,6 +279,29 @@ export const ArtifactActionInputSchema = z.object({
 export type ArtifactActionInput = z.infer<typeof ArtifactActionInputSchema>
 
 // ---------------------------------------------------------------------------
+// Local Skill directory inventory (renderer-safe projection)
+// ---------------------------------------------------------------------------
+
+/** Installed local Skill metadata; filesystem paths never cross IPC. */
+export const InstalledSkillRecordSchema = z.object({
+  directoryName: z.string().min(1),
+  name: z.string().optional(),
+  description: z.string().optional(),
+  fileCount: z.number().int().nonnegative(),
+  totalBytes: z.number().int().nonnegative(),
+  valid: z.boolean(),
+  error: z.string().optional(),
+})
+export type InstalledSkillRecord = z.infer<typeof InstalledSkillRecordSchema>
+
+/** Result of choosing and installing one local Skill directory. */
+export const SkillDirectoryInstallResultSchema = z.object({
+  status: z.enum(['installed', 'unchanged']),
+  skill: InstalledSkillRecordSchema,
+})
+export type SkillDirectoryInstallResult = z.infer<typeof SkillDirectoryInstallResultSchema>
+
+// ---------------------------------------------------------------------------
 // IPC channels (main ↔ renderer)
 // ---------------------------------------------------------------------------
 
@@ -307,6 +330,8 @@ export const IpcChannels = {
   OpenAppUpdateDownload: 'workbench:update:open-download',
   SaveArtifact: 'workbench:artifact:save',
   OpenArtifactInBrowser: 'workbench:artifact:open-browser',
+  ListSkills: 'workbench:skills:list',
+  InstallSkill: 'workbench:skills:install',
   // auth: bearer session lifecycle (xiaowei multi-user surface)
   GetAuthState: 'workbench:auth:get-state',
   RequestEmailCode: 'workbench:auth:request-email-code',
@@ -336,6 +361,8 @@ export const WORKBENCH_API_KEYS = [
   'subscribeAppUpdateState',
   'saveArtifact',
   'openArtifactInBrowser',
+  'listSkills',
+  'installSkill',
   'getAuthState',
   'requestEmailCode',
   'signUp',

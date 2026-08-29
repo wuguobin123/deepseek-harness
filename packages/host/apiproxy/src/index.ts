@@ -23,6 +23,7 @@ import {
 } from './session-export.ts'
 
 export type * from './api/index.ts'
+export { accountWebSearchRequestSchema, accountWebSearchValueSchema } from './api/account-web.schema.ts'
 export { RpcId } from './api/rpc.ts'
 export { toFetchHandler } from './fetch/handler.ts'
 export { AbstractApiClient, InProcessApiClient } from './fetch/client.ts'
@@ -75,7 +76,7 @@ export interface Config {
 export class ApiProxyService extends Service implements ApiProxy {
   static inject = [
     'agentDefaultModel', 'agents', 'attachments', 'directoryPicker', 'llm', 'sessions', 'subagents', 'sessionQuery',
-    'tools', 'userQuestions', 'workspaceRegistry',
+    'tools', 'userQuestions', 'web', 'workspaceRegistry',
     // ---- xiaowei multi-user account seam (read through ctx.get; these are
     // optional, so they are NOT declared on the inject list) ----
   ]
@@ -112,6 +113,7 @@ export class ApiProxyService extends Service implements ApiProxy {
   readonly artifactRegistry: ApiProxy['artifactRegistry']
   readonly userContext: ApiProxy['userContext']
   readonly accountPlugins: ApiProxy['accountPlugins']
+  readonly accountWeb: ApiProxy['accountWeb']
   readonly accountInference: ApiProxy['accountInference']
   readonly respond: ApiProxy['respond']
 
@@ -150,6 +152,7 @@ export class ApiProxyService extends Service implements ApiProxy {
     this.artifactRegistry = api.artifactRegistry
     this.userContext = api.userContext
     this.accountPlugins = api.accountPlugins
+    this.accountWeb = api.accountWeb
     this.accountInference = api.accountInference
     // createApiProxy returns closures (no `this` capture), so the bind is
     // behavior-neutral.

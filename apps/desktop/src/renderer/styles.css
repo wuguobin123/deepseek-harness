@@ -7524,25 +7524,6 @@ body.is-mac .signin-gate {
   gap: 12px;
 }
 
-.cloud-signin-gate > button {
-  border: 0;
-  color: var(--fg-3);
-  background: transparent;
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.cloud-signin-gate > button:hover:not(:disabled) {
-  color: var(--accent-strong);
-}
-
-.cloud-signin-gate > p {
-  margin: 0;
-  color: rgb(239, 68, 68);
-  font-size: 12px;
-}
-
 .user-menu__guest-settings {
   display: flex;
   align-items: center;

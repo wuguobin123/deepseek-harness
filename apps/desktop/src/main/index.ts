@@ -26,6 +26,7 @@ import { createIpcHandlers, installSecurityGuards } from './ipc-handlers'
 import { AuthStateSchema, IpcChannels, type AuthState } from '../shared/contracts'
 import { registerArtifactPreviewProtocol, registerArtifactPreviewScheme } from './artifact-preview-protocol'
 import { LocalRuntimeSupervisor } from './local-runtime-supervisor'
+import { LocalSkillDirectoryManager } from './local-skill-directory'
 import { DualHostRouter } from './dual-host-router'
 import { parseAccountInferenceRequest } from '@deepseek-ai/dsh-llm-account-inference'
 
@@ -76,6 +77,14 @@ async function bootstrap(): Promise<void> {
         return apiClient.streamAccountInference(parseAccountInferenceRequest(request), signal)
       },
     },
+    searchBridge: {
+      search(request, signal) {
+        return apiClient.searchAccountWeb(request, signal)
+      },
+    },
+  })
+  const localSkillDirectory = new LocalSkillDirectoryManager({
+    dshHome: path.join(app.getPath('userData'), 'local-runtime'),
   })
   let localClient: ApiClient | null = null
   const ensureLocal = async (): Promise<ApiClient> => {
@@ -136,9 +145,10 @@ async function bootstrap(): Promise<void> {
     baseUrl: () => credentialStore.snapshot().baseUrl || DEFAULT_BASE_URL,
     updateChecker: () => updateChecker,
     artifactFiles,
+    localSkillDirectory,
     mainWindow: () => mainWindow,
     broadcastAuthState,
-    cancelLocalInferenceStreams: (code, message) => localSupervisor.cancelInferenceStreams(code, message),
+    cancelLocalInferenceStreams: (code, message) => localSupervisor.cancelAccountRequests(code, message),
   })
   ipc.install()
 
@@ -158,9 +168,10 @@ async function bootstrap(): Promise<void> {
         baseUrl: () => credentialStore.snapshot().baseUrl || DEFAULT_BASE_URL,
         updateChecker: () => updateChecker,
         artifactFiles,
+        localSkillDirectory,
         mainWindow: () => mainWindow,
         broadcastAuthState,
-        cancelLocalInferenceStreams: (code, message) => localSupervisor.cancelInferenceStreams(code, message),
+        cancelLocalInferenceStreams: (code, message) => localSupervisor.cancelAccountRequests(code, message),
       })
       fresh.install()
       installSecurityGuards(mainWindow)

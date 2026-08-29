@@ -8,6 +8,7 @@
     { "path": "../email-verification" },
     { "path": "../wallet" },
     { "path": "../model-keys" },
-    { "path": "../plugin-factory" }
+    { "path": "../plugin-factory" },
+    { "path": "../../web/web" }
   ]
 }

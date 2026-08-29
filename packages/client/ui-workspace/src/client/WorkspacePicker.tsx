@@ -49,6 +49,8 @@ export interface WorkspacePickFlowProps {
   addOnly?: boolean
   /** Menu opening direction relative to the anchor. */
   side?: 'bottom' | 'top' | 'right'
+  /** Skip the menu and open the directory flow for this explicit location. */
+  directLocation?: 'local' | 'cloud' | undefined
   /** Currently active workspace (trailing check in the picker list). */
   selectedId?: WorkspaceId | undefined
 }
@@ -70,6 +72,7 @@ export function WorkspacePickFlow({
   onClose,
   addOnly = false,
   side = 'bottom',
+  directLocation,
   selectedId,
 }: WorkspacePickFlowProps) {
   const workspaceSnapshot = useWorkspaces(state => state)
@@ -153,6 +156,12 @@ export function WorkspacePickFlow({
     setFlowOpen(true)
   }, [onClose])
 
+  useEffect(() => {
+    if (!open || directLocation === undefined || !flowAvailable || flowBusy) return
+    setFlowLocation(directLocation)
+    openDirectoryFlow()
+  }, [directLocation, flowAvailable, flowBusy, open, openDirectoryFlow])
+
   /** Owner side of the flow conversation: adopt keeps the flow open (busy) until the Host answers. */
   const flowOwner: DirectoryFlowOwnerProps = {
     open: flowOpen,
@@ -186,7 +195,7 @@ export function WorkspacePickFlow({
   return (
     <>
       <Menu
-        open={open && !menuIsEmpty}
+        open={open && directLocation === undefined && !menuIsEmpty}
         anchor={null}
         items={items}
         {...pinAdd ? { footer: addEntries } : {}}
@@ -197,7 +206,7 @@ export function WorkspacePickFlow({
         portal
         getAnchorRect={getAnchorRect}
       />
-      {open && !menuIsEmpty && workspaceSnapshot.phase === 'pending' && <div className={css.menuStatus} role="status">{t('picker.loading')}</div>}
+      {open && directLocation === undefined && !menuIsEmpty && workspaceSnapshot.phase === 'pending' && <div className={css.menuStatus} role="status">{t('picker.loading')}</div>}
       {renderDirectoryFlow(flowOwner)}
       <Modal
         open={errorOpen}

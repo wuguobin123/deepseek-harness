@@ -26,6 +26,8 @@ Electron Builder converts `features/brand/xiaowei-logo.png` into the native
 macOS, Windows, and Linux application and installer icons. Generic DSH clients
 retain their own build-selected branding.
 
+The desktop Session body exposes the conversation view only; it does not register the optional Trajectory tab available in the generic Web client.
+
 ## Execution environments
 
 A fresh installation defaults to **Local**. The main process supervises one `xiaowei-local` Host on an operating-system-assigned `127.0.0.1` port. Adding a Workspace in this environment passes only the canonical selected path to that loopback Host's `workspace.create`; it does not enumerate, encode, upload, or duplicate the directory, so cloud-copy file-size limits do not apply. External changes and Agent edits address the same source directory.
@@ -33,6 +35,8 @@ A fresh installation defaults to **Local**. The main process supervises one `xia
 **Cloud** is an explicit alternative. Adding a Workspace there retains the bounded `workspace.importDirectory` flow and creates an independent account-private copy; later local changes do not synchronize automatically. Sessions, Workspace ids, event streams, and artifact reads stay with the environment that created them. Switching environments aborts the old streams and reloads the renderer against the selected Host.
 
 The local Host stores its model configuration, credentials, Sessions, metadata, and installed Skills below Electron application data. An approved conversational Skill installation writes only to that local Skill root. The directory is not uploaded as a cloud Workspace, but content intentionally included in a model request still reaches the locally configured model provider. Local mode does not silently use the cloud account wallet.
+
+Settings → Skills lists the complete Skill bundles installed in the formal desktop runtime. “Install Skill directory” opens a native directory picker; the main process validates and atomically copies nested regular files below `<userData>/local-runtime/skills` without exposing either path to the renderer or uploading the bundle. Existing different content is reported as a conflict and is never overwritten. This installed inventory is device state, not proof that a particular Session has loaded the Skill; valid entries retain the existing `/<skill-name>` invocation contract.
 
 ## Layout
 
@@ -52,6 +56,7 @@ apps/desktop/
     │   ├── sse-proxy.ts      # WebSocket downlink + heartbeat → typed IPC fan-out
     │   ├── credential-store.ts # connection preferences + encrypted account session
     │   ├── ipc-handlers.ts   # Typed ipcMain handlers
+    │   ├── local-skill-directory.ts # Bounded, atomic local Skill bundle store
     │   └── update-checker.ts # Same-origin release-manifest polling
     ├── preload/index.ts      # contextBridge.exposeInMainWorld('workbenchApi')
     └── renderer/             # React + HashRouter

@@ -88,6 +88,7 @@ import {
   userContextSetRequestSchema, userContextDeleteRequestSchema,
 } from '../api/user-context.schema.ts'
 import { accountPluginsListRequestSchema, accountPluginsInstallRequestSchema, accountPluginsUninstallRequestSchema } from '../api/account-plugins.schema.ts'
+import { accountWebSearchRequestSchema } from '../api/account-web.schema.ts'
 import { assertCloudRoutePartition } from '../route-partition.ts'
 import {
   subagentHistoryRequestSchema,
@@ -207,6 +208,7 @@ const UNARY_ROUTES: UnaryRoutes = {
   'account.plugins.list': { schema: accountPluginsListRequestSchema, invoke: (api, r) => api.accountPlugins.list(r) },
   'account.plugins.install': { schema: accountPluginsInstallRequestSchema, invoke: (api, r) => api.accountPlugins.install(r) },
   'account.plugins.uninstall': { schema: accountPluginsUninstallRequestSchema, invoke: (api, r) => api.accountPlugins.uninstall(r) },
+  'account.web.search': { schema: accountWebSearchRequestSchema, invoke: (api, r, signal) => api.accountWeb.search(r, signal) },
 }
 
 /**

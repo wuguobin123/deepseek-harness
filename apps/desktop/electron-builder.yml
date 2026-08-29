@@ -10,6 +10,9 @@ directories:
 
 files:
   - dist/**/*
+  # The device runtime is copied once by extraResources. Keeping its pnpm tree
+  # in app.asar expands content-addressed hard links into duplicate bytes.
+  - "!dist/local-runtime/**/*"
   - package.json
   - "!**/*.map"
   - "!**/*.tsbuildinfo"

@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, stat, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { boot, healProfilesModuleFallback, loadOverlayPatches, loadProfile } from '@deepseek-ai/dsh-app-boot'
@@ -26,6 +26,12 @@ import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-token-meter'
 import type {} from '@deepseek-ai/dsh-web'
+import {
+  XIAOWEI_CLOUD_ONLY_TOOL_CAPABILITIES,
+  XIAOWEI_LOCATION_AWARE_TOOL_DESCRIPTIONS,
+  XIAOWEI_LOCAL_ONLY_TOOL_CAPABILITIES,
+  XIAOWEI_SHARED_TOOL_CAPABILITIES,
+} from '@deepseek-ai/dsh-xiaowei/tool-capabilities'
 
 const CONFIG_DIR = fileURLToPath(new URL('../config/', import.meta.url))
 const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url))
@@ -35,6 +41,8 @@ const WEB_PATCH = join(REPO_ROOT, 'packages/bundle/web-app/cordis.patch.yml')
 const CODEX_PACKAGE_DIR = join(REPO_ROOT, 'packages/subagent/subagent-codex')
 const CLAUDE_CODE_PACKAGE_DIR = join(REPO_ROOT, 'packages/subagent/subagent-claude-code')
 const XIAOWEI_PACKAGE_DIR = join(REPO_ROOT, 'packages/bundle/xiaowei')
+const XIAOWEI_LOCAL_PACKAGE_DIR = join(REPO_ROOT, 'packages/bundle/xiaowei-local')
+const XIAOWEI_DEVICE_RUNTIME = join(REPO_ROOT, 'apps/xiaowei-device-runtime')
 /** The installation anchor whose dependency surface the preset module fallback mirrors. */
 const INSTALL_ANCHOR = join(REPO_ROOT, 'apps/cli/package.json')
 const MINIMAL_PROMPT = 'You are a helpful software engineer assistant.'
@@ -163,6 +171,45 @@ async function bootWeb(
 
 const toolNames = (ctx: Context, agent?: Agent): string[] =>
   ctx.tools.schemas(agent).map(schema => schema.name).sort()
+
+async function bootLocalXiaowei(home: string): Promise<Context> {
+  process.env.DSH_HOME = home
+  process.env.XIAOWEI_LOCAL_PRESET_ROOT = join(XIAOWEI_LOCAL_PACKAGE_DIR, 'agent-presets')
+  return await boot(
+    'xiaowei-tool-parity',
+    join(XIAOWEI_DEVICE_RUNTIME, 'cordis.yml'),
+    [
+      ...loadOverlayPatches('xiaowei-tool-parity', join(XIAOWEI_DEVICE_RUNTIME, 'cordis.base.patch.yml')),
+      ...loadOverlayPatches('xiaowei-tool-parity', join(XIAOWEI_DEVICE_RUNTIME, 'cordis.patch.yml')),
+      { id: 'device-host', disabled: true },
+    ],
+    undefined,
+    pathToFileURL(join(XIAOWEI_DEVICE_RUNTIME, 'package.json')).href,
+  )
+}
+
+function schemasByName(ctx: Context, agent: Agent): Map<string, ReturnType<Context['tools']['schemas']>[number]> {
+  return new Map(ctx.tools.schemas(agent).map(schema => [schema.name, schema]))
+}
+
+function comparableToolContract(ctx: Context, agent: Agent, name: string, locationAwareDescription: boolean): unknown {
+  const definition = ctx.tools.get(name, agent)
+  if (definition === undefined) throw new Error(`missing tool definition ${name}`)
+  return {
+    name: definition.name,
+    description: locationAwareDescription ? '{{location-aware}}' : definition.description,
+    parameters: definition.parameters,
+    output: definition.output.schema,
+    timeoutMs: definition.timeoutMs ?? null,
+    presentation: {
+      call: definition.presentCall !== undefined,
+      result: definition.presentResult !== undefined,
+      meta: definition.output.presentationMeta !== undefined,
+      finalizer: definition.finalizeContent !== undefined,
+    },
+    concurrencyClassified: definition.isConcurrencySafe !== undefined,
+  }
+}
 
 function toolParameterNames(ctx: Context, agent: Agent, toolName: string): string[] {
   const schema = ctx.tools.schemas(agent).find(tool => tool.name === toolName)
@@ -1063,6 +1110,68 @@ describe('the shipped Xiaowei composition', () => {
       await standard.dispose()
     }
   })
+
+  it('keeps shared local and cloud tool contracts identical and differences explicit', async () => {
+    const cloudHandle = await xiaowei.agents.create({
+      sessionId: SessionId(`xiaowei-tool-parity-cloud-${randomUUID()}`),
+      setup: agentCtx => xiaowei.agentPresets.mount(agentCtx, 'xiaowei-safe').then(() => undefined),
+    })
+    const root = await mkdtemp(join(tmpdir(), 'dsh-xiaowei-tool-parity-'))
+    const localHome = join(root, '.dsh')
+    const localWorkspace = join(root, 'workspace')
+    const cloudHome = process.env.DSH_HOME
+    const previousPresetRoot = process.env.XIAOWEI_LOCAL_PRESET_ROOT
+    let local: Context | undefined
+    try {
+      await mkdir(localWorkspace, { recursive: true })
+      local = await bootLocalXiaowei(localHome)
+      const workspace = await local.workspaceRegistry.create(localWorkspace)
+      const localHandle = await local.agents.create({
+        sessionId: SessionId(`xiaowei-tool-parity-local-${randomUUID()}`),
+        meta: { cwd: workspace.path, agentPreset: 'xiaowei-local-safe' },
+        setup: agentCtx => local!.agentPresets.mount(agentCtx, 'xiaowei-local-safe').then(() => undefined),
+      })
+      try {
+        const shared = new Set<string>(XIAOWEI_SHARED_TOOL_CAPABILITIES)
+        const localSchemas = schemasByName(local, localHandle.agent)
+        const cloudSchemas = schemasByName(xiaowei, cloudHandle.agent)
+        const localOnly = [...localSchemas.keys()].filter(name => !shared.has(name)).sort()
+        const cloudOnly = [...cloudSchemas.keys()].filter(name => !shared.has(name)).sort()
+        const expectedLocalOnly = XIAOWEI_LOCAL_ONLY_TOOL_CAPABILITIES
+          .filter(name => name !== (process.platform === 'win32' ? 'bash' : 'pwsh'))
+          .slice()
+          .sort()
+
+        expect(localOnly).toEqual(expectedLocalOnly)
+        expect(cloudOnly).toEqual(XIAOWEI_CLOUD_ONLY_TOOL_CAPABILITIES.slice().sort())
+        const locationAwareDescriptions = new Set<string>(XIAOWEI_LOCATION_AWARE_TOOL_DESCRIPTIONS)
+        for (const name of XIAOWEI_SHARED_TOOL_CAPABILITIES) {
+          const localSchema = localSchemas.get(name)
+          const cloudSchema = cloudSchemas.get(name)
+          expect(localSchema, `missing local shared tool ${name}`).toBeDefined()
+          expect(cloudSchema, `missing cloud shared tool ${name}`).toBeDefined()
+          const locationAwareDescription = locationAwareDescriptions.has(name)
+          if (locationAwareDescription) {
+            expect(localSchema?.description).not.toEqual(cloudSchema?.description)
+          }
+          expect(
+            comparableToolContract(local, localHandle.agent, name, locationAwareDescription),
+            `tool contract drift for ${name}`,
+          ).toEqual(comparableToolContract(xiaowei, cloudHandle.agent, name, locationAwareDescription))
+        }
+      } finally {
+        await localHandle.dispose()
+      }
+    } finally {
+      await local?.fiber.dispose()
+      await cloudHandle.dispose()
+      if (cloudHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = cloudHome
+      if (previousPresetRoot === undefined) delete process.env.XIAOWEI_LOCAL_PRESET_ROOT
+      else process.env.XIAOWEI_LOCAL_PRESET_ROOT = previousPresetRoot
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 120_000)
 
   it('gives the platform model enough output budget for artifact tool calls', async () => {
     await expect(xiaowei.llm.resolveModelInfo('xiaowei-minimax', 'MiniMax-M3'))

@@ -200,6 +200,7 @@
       "@deepseek-ai/dsh-llm-account-remote": ["./packages/llm/llm-account-remote/src"],
       "@deepseek-ai/dsh-xiaowei-local": ["./packages/bundle/xiaowei-local/src"],
       "@deepseek-ai/dsh-xiaowei-local/invariant": ["./packages/bundle/xiaowei-local/src/invariant.ts"],
+      "@deepseek-ai/dsh-xiaowei/tool-capabilities": ["./packages/bundle/xiaowei/src/tool-capabilities.ts"],
       "@deepseek-ai/dsh-xiaowei/startup": ["./packages/bundle/xiaowei/src/startup.ts"],
       "@deepseek-ai/dsh-xiaowei/webserver": ["./packages/bundle/xiaowei/src/webserver.ts"],
       "@deepseek-ai/dsh-client-ui-slots": ["./packages/client/ui-slots/src"],

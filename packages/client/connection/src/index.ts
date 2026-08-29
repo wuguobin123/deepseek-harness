@@ -111,6 +111,8 @@ const PUBLIC_METHODS = new Set(['account.signup', 'account.signin', 'account.ema
 const AUTHENTICATED_ACCOUNT_METHODS = new Set(['account.invites.create', 'account.invites.list', 'account.invites.rotate'])
 /** Direct inference is account-only even on loopback; never downgrade to local. */
 const ACCOUNT_INFERENCE_METHOD = 'account.inference.stream'
+/** Account web search is cloud-only and requires the authenticated bearer principal. */
+const ACCOUNT_WEB_SEARCH_METHOD = 'account.web.search'
 
 /**
  * Mounts the API gateway under the browser transport prefix. Every request on
@@ -157,6 +159,10 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
         const principal = await requestPrincipal(request, ctx, trustedHosts)
         if (principal?.kind !== 'account') return new Response('forbidden', { status: 403 })
       }
+      if (method === ACCOUNT_WEB_SEARCH_METHOD) {
+        const principal = await requestPrincipal(request, ctx, trustedHosts)
+        if (principal?.kind !== 'account') return new Response('forbidden', { status: 403 })
+      }
       if (request.method === 'GET' && (pathname === MUX_EVENTS_PATH || pathname === HOST_EVENTS_PATH)) {
         return new Response('upgrade required', {
           status: 426,
@@ -181,6 +187,14 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
       if (method === ACCOUNT_INFERENCE_METHOD) {
         const inferencePrincipal = await requestPrincipal(req, ctx, trustedHosts)
         if (inferencePrincipal?.kind !== 'account') {
+          res.writeHead(403)
+          res.end('forbidden')
+          return
+        }
+      }
+      if (method === ACCOUNT_WEB_SEARCH_METHOD) {
+        const searchPrincipal = await requestPrincipal(req, ctx, trustedHosts)
+        if (searchPrincipal?.kind !== 'account') {
           res.writeHead(403)
           res.end('forbidden')
           return

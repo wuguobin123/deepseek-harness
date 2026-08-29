@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/specs/xiaowei/desktop-authentication-gate.md
+desktop-authentication-gate.md: 2f30ed662d1618552d14509e60621263baa8fbe4
+desktop-authentication-gate.zh.md: 1e4f757da2b6e262f28729b1b503a8af074962ca

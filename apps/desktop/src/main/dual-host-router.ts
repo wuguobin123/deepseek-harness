@@ -13,6 +13,7 @@ const CLOUD_ONLY_METHODS = [
   'account.modelKeys.provision', 'account.modelKeys.list', 'account.modelKeys.revoke',
   'account.customModels.create', 'account.customModels.list', 'account.customModels.remove',
   'account.plugins.list', 'account.plugins.install', 'account.plugins.uninstall',
+  'account.web.search',
   'userContext.list', 'userContext.get', 'userContext.set', 'userContext.delete',
 ] as const
 const RESOURCE_OR_CLOUD_METHODS = [

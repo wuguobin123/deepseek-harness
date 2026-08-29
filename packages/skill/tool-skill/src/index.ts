@@ -189,8 +189,15 @@ export function apply(ctx: Context, config: Config = {}): void {
     if (names.length === 0) return decision
     signal.throwIfAborted()
     const lookup = { cwd: agent.session.header.cwd, ownerId: agent.session.header.ownerId, signal, scope: agent }
+    const proposed = new Set(decision.messages.flatMap((message) => {
+      const source = message.source as { kind?: unknown; name?: unknown }
+      return source.kind === 'skill-invocation' && typeof source.name === 'string'
+        ? [source.name]
+        : []
+    }))
     const injections: UserMessage[] = []
     for (const name of names) {
+      if (proposed.has(name)) continue
       const skill = await ctx.skills.get(name, lookup)
       signal.throwIfAborted()
       // Unknown names and user-disabled skills stay plain prose: the
@@ -203,6 +210,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         content: [{ type: 'text', text: renderSkillContent(skill) }],
         source,
       }))
+      proposed.add(name)
     }
     if (injections.length === 0) return decision
     return { kind: 'enter', messages: [...decision.messages, ...injections] }

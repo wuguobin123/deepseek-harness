@@ -133,7 +133,6 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     reference: unknown
     subagent: unknown
     tool: unknown
-    trajectory: unknown
     userQuestions: unknown
     workflowRun: unknown
     sidebar: unknown
