@@ -22,6 +22,7 @@ import type { ArtifactsApi } from './artifacts.ts'
 import type { UserContextApi } from './user-context.ts'
 import type { RpcResponse } from './rpc.ts'
 import type { AccountPluginsApi } from './account-plugins.ts'
+import type { BusinessSkillsApi } from './business-skills.ts'
 import type { AccountWebApi } from './account-web.ts'
 
 /**
@@ -115,6 +116,11 @@ export interface RpcMethodMap {
   'account.plugins.list': AccountPluginsApi['list']
   'account.plugins.install': AccountPluginsApi['install']
   'account.plugins.uninstall': AccountPluginsApi['uninstall']
+  'account.businessSkills.list': BusinessSkillsApi['list']
+  'account.businessSkills.validate': BusinessSkillsApi['validate']
+  'account.businessSkills.publish': BusinessSkillsApi['publish']
+  'account.businessSkills.disable': BusinessSkillsApi['disable']
+  'account.businessSkills.rollback': BusinessSkillsApi['rollback']
   'account.web.search': AccountWebApi['search']
 }
 

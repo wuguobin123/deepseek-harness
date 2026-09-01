@@ -420,6 +420,23 @@ function fakeApi(overrides: Partial<{
         return { rpcId: request.rpcId, result: { ok: true, value: { pluginId: request.payload.pluginId, title: 'Stub', description: 'Fixture', version: '1', systemDefault: false, installed: false } } }
       },
     },
+    businessSkills: {
+      async list(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { items: [] } } }
+      },
+      async validate(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { valid: true, issues: [] } } }
+      },
+      async publish(request) {
+        return { rpcId: request.rpcId, result: { ok: false, error: { code: 'bad-request', message: 'not configured', details: { issues: [] } } } }
+      },
+      async disable(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { disabled: true as const } } }
+      },
+      async rollback(request) {
+        return { rpcId: request.rpcId, result: { ok: false, error: { code: 'bad-request', message: 'not configured', details: { issues: [] } } } }
+      },
+    },
     artifactRegistry: {
       async list(request) {
         return { rpcId: request.rpcId, result: { ok: true, value: { items: [] } } }

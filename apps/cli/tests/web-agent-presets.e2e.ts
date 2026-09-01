@@ -1072,7 +1072,7 @@ describe('the shipped Xiaowei composition', () => {
       expect(toolNames(xiaowei, standard.agent)).toContain('bash')
       expect(toolNames(xiaowei, standard.agent)).toContain('read')
       expect(toolNames(xiaowei, safe.agent)).toEqual(expect.arrayContaining([
-        'html_build', 'document_read', 'web_fetch', 'web_search', 'skill_install', 'ask_user_question', 'todo_write',
+        'html_build', 'document_read', 'web_fetch', 'web_search', 'skill_install', 'business_skill_call', 'ask_user_question', 'todo_write',
         'read', 'write', 'edit', 'glob', 'grep',
       ]))
       expect(toolNames(xiaowei, safe.agent)).not.toEqual(expect.arrayContaining([
@@ -1311,6 +1311,72 @@ describe('the shipped Xiaowei composition', () => {
     } finally {
       muxAbort.abort()
     }
+  })
+
+  it('hot-publishes an account business Skill without accepting identity fields', async () => {
+    const userA = `business-skill-a-${randomUUID()}`
+    const userB = `business-skill-b-${randomUUID()}`
+    const sessionA = await xiaoweiApi.sessions.create(accountRequest({}, userA))
+    const sessionB = await xiaoweiApi.sessions.create(accountRequest({}, userB))
+    if (!sessionA.result.ok || !sessionB.result.ok) throw new Error('business Skill fixture sessions were not created')
+    const manifest = {
+      name: 'xiaowei-metrics',
+      version: '1.0.0',
+      description: 'Read registered account and share-code usage totals.',
+      connectionIds: ['https://business.xiaowei.invalid/api/'],
+      credentialRefs: [],
+      operations: [{
+        id: 'registered-accounts', method: 'GET', path: '/metrics/registered-accounts',
+        input: { type: 'object', additionalProperties: false },
+        output: {
+          type: 'object', properties: { count: { type: 'integer' } }, required: ['count'], additionalProperties: false,
+        },
+        permission: 'metrics.accounts.read', connection: 'https://business.xiaowei.invalid/api/', risk: 'R1',
+      }, {
+        id: 'share-code-usage', method: 'GET', path: '/metrics/share-code-usage',
+        input: { type: 'object', additionalProperties: false },
+        output: {
+          type: 'object', properties: { count: { type: 'integer' } }, required: ['count'], additionalProperties: false,
+        },
+        permission: 'metrics.share-codes.read', connection: 'https://business.xiaowei.invalid/api/', risk: 'R1',
+      }],
+    }
+    const published = await xiaoweiApi.businessSkills.publish(accountRequest({ manifestText: JSON.stringify(manifest) }, userA))
+    expect(published.result).toMatchObject({ ok: true, value: { revision: 1, active: true } })
+    const listA = await xiaoweiApi.skills.list(accountRequest({ sessionId: sessionA.result.value.sessionId }, userA))
+    const listB = await xiaoweiApi.skills.list(accountRequest({ sessionId: sessionB.result.value.sessionId }, userB))
+    expect(listA.result).toMatchObject({ ok: true, value: { skills: expect.arrayContaining([
+      expect.objectContaining({ name: 'xiaowei-metrics' }),
+    ]) } })
+    expect(listB.result).toMatchObject({ ok: true })
+    if (listB.result.ok) expect(listB.result.value.skills.map(skill => skill.name)).not.toContain('xiaowei-metrics')
+
+    const invalid = structuredClone(manifest) as typeof manifest & { userId?: string }
+    invalid.userId = 'model-controlled-user'
+    const rejected = await xiaoweiApi.businessSkills.publish(accountRequest({
+      manifestText: JSON.stringify(invalid), expectedRevision: 1,
+    }, userA))
+    expect(rejected.result).toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    const retained = await xiaoweiApi.businessSkills.list(accountRequest({}, userA))
+    expect(retained.result).toMatchObject({ ok: true, value: { items: [expect.objectContaining({ revision: 1, active: true })] } })
+
+    const disabled = await xiaoweiApi.businessSkills.disable(accountRequest({
+      skill: 'xiaowei-metrics', expectedRevision: 1,
+    }, userA))
+    expect(disabled.result).toMatchObject({ ok: true, value: { disabled: true } })
+    const afterDisable = await xiaoweiApi.skills.list(accountRequest({ sessionId: sessionA.result.value.sessionId }, userA))
+    if (!afterDisable.result.ok) throw new Error('business Skill catalog was unavailable after disable')
+    expect(afterDisable.result.value.skills.map(skill => skill.name)).not.toContain('xiaowei-metrics')
+
+    const rolledBack = await xiaoweiApi.businessSkills.rollback(accountRequest({
+      skill: 'xiaowei-metrics', revision: 1,
+    }, userA))
+    expect(rolledBack.result).toMatchObject({ ok: true, value: { revision: 1, active: true } })
+    const afterRollback = await xiaoweiApi.skills.list(accountRequest({ sessionId: sessionA.result.value.sessionId }, userA))
+    if (!afterRollback.result.ok) throw new Error('business Skill catalog was unavailable after rollback')
+    expect(afterRollback.result.value.skills).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'xiaowei-metrics' }),
+    ]))
   })
 
   it('falls back to the keyless SearXNG provider when the Firecrawl credential is absent', async () => {

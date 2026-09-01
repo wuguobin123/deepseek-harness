@@ -18,6 +18,7 @@ npm scope 为 `@deepseek-ai/dsh-*`；Cordis `Service` 子类和函数插件通�
 | [`feedback/`](feedback/README.zh.md) | 人类反馈 | 产品：稳定 API |
 | [`identity/`](identity/README.zh.md) | 共享匿名身份 | 产品：稳定 API |
 | [`account/`](account/README.zh.md) | 多用户账号与私有 Skill | 产品：演进中 API |
+| [`business/`](business/README.zh.md) | 账号私有的声明式业务 Skill、Connector 与运行时 | 产品：演进中 API |
 | [`llm/`](llm/README.zh.md) | LLM 服务与提供方 | 产品：稳定 API |
 | [`embedding/`](embedding/README.zh.md) | Embedding 服务与提供方 | 产品：演进中 API |
 | [`e2b/`](e2b/README.zh.md) | E2B 提供方 | POC |

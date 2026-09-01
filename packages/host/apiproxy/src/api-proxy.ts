@@ -8,6 +8,7 @@ import { mkdir, realpath, stat, writeFile, rename, rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative } from 'node:path'
 import { z as zod } from 'zod'
+import { parse as parseYaml } from 'yaml'
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type { Agent, ModelSelection, ModelSelectionRef, AgentOptions, AgentStatus } from '@deepseek-ai/dsh-agent'
@@ -43,6 +44,7 @@ import type {
   ModelReasoning, MuxFrame, PromptContentPart, QuestionResponsePayload, SessionListMetadata, SessionProjectionsBlock, SessionSearchItem,
   QueuedInboxItem, SessionSummary, SettingsNamespaceView, SubagentAddress, JobView, ToolEventView,
   WorkspaceId, WorkspaceView, UserContextKey, UserContextKind, UserContextView,
+  BusinessSkillManifestView, BusinessSkillVersionView,
 } from './api/index.ts'
 import {
   DEFAULT_SESSION_LOG_COMPRESSION_LEVEL,
@@ -117,6 +119,9 @@ import type { RpcErrorCode } from './api/rpc.ts'
 import type { InvitationView } from './api/account.ts'
 import type { ModelKeyView } from './api/model-keys.ts'
 import type { AccountPluginView } from '@deepseek-ai/dsh-account-api-provider'
+import { BusinessSkillError } from '@deepseek-ai/dsh-business-skill'
+import type { BusinessSkillManifest, BusinessSkillService, SkillVersion } from '@deepseek-ai/dsh-business-skill'
+import type {} from '@deepseek-ai/dsh-business-connector'
 import type { CustomModelView } from './api/custom-models.ts'
 import {
   ApiRemoteSessionNotFound as SessionNotFound,
@@ -4733,6 +4738,74 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         return accountPluginMutation(ctx, request, 'uninstall')
       },
     },
+    businessSkills: {
+      async list(request) {
+        const resolved = businessSkillService(ctx, request)
+        if ('result' in resolved) return resolved
+        const items = await resolved.service.list(resolved.ownerId)
+        return { rpcId: request.rpcId, result: { ok: true, value: { items: items.map(businessSkillVersionView) } } }
+      },
+      async validate(request) {
+        const resolved = businessSkillService(ctx, request)
+        if ('result' in resolved) return resolved
+        try {
+          const manifest = resolved.service.validate(
+            resolved.ownerId, parseBusinessSkillManifest(request.payload.manifestText),
+          )
+          validateBusinessSkillPolicy(ctx, manifest)
+          return { rpcId: request.rpcId, result: { ok: true, value: { valid: true, issues: [] } } }
+        } catch (error) {
+          if (error instanceof BusinessSkillError) {
+            return { rpcId: request.rpcId, result: { ok: true, value: { valid: false, issues: [error.message] } } }
+          }
+          throw error
+        }
+      },
+      async publish(request) {
+        const resolved = businessSkillService(ctx, request)
+        if ('result' in resolved) return resolved
+        try {
+          const manifest = resolved.service.validate(
+            resolved.ownerId, parseBusinessSkillManifest(request.payload.manifestText),
+          )
+          validateBusinessSkillPolicy(ctx, manifest)
+          const version = await resolved.service.publish(
+            resolved.ownerId, manifest, request.payload.expectedRevision,
+          )
+          ctx.get('skills')?.refresh()
+          return { rpcId: request.rpcId, result: { ok: true, value: businessSkillVersionView(version) } }
+        } catch (error) {
+          return businessSkillRpcError(request, error)
+        }
+      },
+      async disable(request) {
+        const resolved = businessSkillService(ctx, request)
+        if ('result' in resolved) return resolved
+        try {
+          await resolved.service.disable(
+            resolved.ownerId, request.payload.skill, request.payload.expectedRevision,
+          )
+          ctx.get('skills')?.refresh()
+          return { rpcId: request.rpcId, result: { ok: true, value: { disabled: true as const } } }
+        } catch (error) {
+          return businessSkillRpcError(request, error)
+        }
+      },
+      async rollback(request) {
+        const resolved = businessSkillService(ctx, request)
+        if ('result' in resolved) return resolved
+        try {
+          const version = await resolved.service.rollback(
+            resolved.ownerId, request.payload.skill, request.payload.revision,
+            request.payload.expectedRevision,
+          )
+          ctx.get('skills')?.refresh()
+          return { rpcId: request.rpcId, result: { ok: true, value: businessSkillVersionView(version) } }
+        } catch (error) {
+          return businessSkillRpcError(request, error)
+        }
+      },
+    },
     accountWeb: {
       async search(request, signal) {
         if (request.principal?.kind !== 'account') return err(request, { code: 'unauthenticated', message: 'account authentication required', details: {} })
@@ -4775,6 +4848,80 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       },
     },
   }
+}
+
+function businessSkillService<P>(
+  ctx: Context,
+  request: RpcRequest<P>,
+): { service: BusinessSkillService; ownerId: string } | RpcResponse<never> {
+  if (request.principal?.kind !== 'account') {
+    return err(request, { code: 'unauthenticated', message: 'account authentication required', details: {} })
+  }
+  const service = ctx.get('businessSkill')
+  if (service === undefined) {
+    return err(request, { code: 'internal', message: 'business Skill service is not mounted', details: {} })
+  }
+  return { service, ownerId: request.principal.userId }
+}
+
+function parseBusinessSkillManifest(text: string): unknown {
+  try {
+    return parseYaml(text)
+  } catch (error) {
+    throw new BusinessSkillError(
+      'INVALID_MANIFEST', error instanceof Error ? error.message : 'manifest is not valid YAML or JSON',
+    )
+  }
+}
+
+function validateBusinessSkillPolicy(ctx: Context, manifest: BusinessSkillManifest): void {
+  const registry = ctx.get('businessConnectors')
+  if (registry === undefined) {
+    throw new BusinessSkillError('CONNECTOR_UNAVAILABLE', 'business connector registry is not mounted')
+  }
+  for (const operation of manifest.operations) {
+    const connector = registry.get(operation.connection)
+    if (connector === undefined) {
+      throw new BusinessSkillError(
+        'CONNECTOR_UNAVAILABLE', `operation ${operation.id} connection is not approved`,
+      )
+    }
+    if (
+      operation.credentialRef !== undefined
+      && (connector.allowedCredentialRefs === undefined
+        || !connector.allowedCredentialRefs.has(operation.credentialRef))
+    ) {
+      throw new BusinessSkillError(
+        'CREDENTIAL_REF_DENIED', `operation ${operation.id} credential reference is not approved`,
+      )
+    }
+  }
+}
+
+function businessSkillManifestView(manifest: BusinessSkillManifest): BusinessSkillManifestView {
+  return {
+    name: manifest.name,
+    version: manifest.version,
+    description: manifest.description,
+    connectionIds: [...manifest.connectionIds],
+    credentialRefs: [...manifest.credentialRefs],
+    operations: manifest.operations.map(operation => ({ ...operation })),
+  }
+}
+
+function businessSkillVersionView(version: SkillVersion): BusinessSkillVersionView {
+  return {
+    revision: version.revision,
+    manifest: businessSkillManifestView(version.manifest),
+    active: version.active,
+  }
+}
+
+function businessSkillRpcError<P, T>(request: RpcRequest<P>, error: unknown): RpcResponse<T> {
+  if (error instanceof BusinessSkillError) {
+    return err(request, { code: 'bad-request', message: error.message, details: { issues: [] } })
+  }
+  throw error
 }
 
 async function accountPluginMutation(

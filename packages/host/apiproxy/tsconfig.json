@@ -109,6 +109,12 @@
     },
     {
       "path": "../../artifact/artifact"
+    },
+    {
+      "path": "../../business/skill"
+    },
+    {
+      "path": "../../business/connector"
     }
   ]
 }

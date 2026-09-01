@@ -36,6 +36,7 @@
     { "path": "../../context/file-reference-local" },
     { "path": "../../session/session-stats" },
     { "path": "../../account/identity" },
+    { "path": "../../credentials/credentials" },
     { "path": "../../account/email-verification" },
     { "path": "../../account/wallet" },
     { "path": "../../account/model-keys" },

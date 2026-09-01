@@ -1,0 +1,14 @@
+{
+  "name": "@deepseek-ai/dsh-business-gateway",
+  "description": "Loopback-only independent Xiaowei business metrics gateway",
+  "version": "0.1.1-rc.2",
+  "publishConfig": { "access": "public" },
+  "repository": { "type": "git", "url": "git+https://github.com/deepseek-ai/deepseek-harness.git", "directory": "packages/business/gateway" },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": { ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" }, "./server": { "default": "./lib/server.js" } },
+  "files": ["lib/index.js", "lib/server.js", "lib/types/**/*.d.ts"],
+  "scripts": { "bundle": "tsdown", "start": "node lib/server.js" },
+  "license": "MIT"
+}

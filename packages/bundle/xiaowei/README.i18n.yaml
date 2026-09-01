@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/bundle/xiaowei/README.md
-README.md: c05208376a925a9c338c807596bdd91e9a1d1c5c
-README.zh.md: b687904790817a1ab3767f23d7d8ce6a8e300898
+README.md: e86142f46773dc378784efbc0db1fb3ac174a8d1
+README.zh.md: 57b2193fdfff204973295d84f1eeeb95bb8012e3

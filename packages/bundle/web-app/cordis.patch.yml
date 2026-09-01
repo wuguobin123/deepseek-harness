@@ -206,6 +206,9 @@
     - id: ui-settings-plugin-inventory
       name: '@deepseek-ai/dsh-client-ui-settings-plugin-inventory'
 
+    - id: ui-settings-business-skills
+      name: '@deepseek-ai/dsh-client-ui-settings-business-skills'
+
     - id: ui-conversation
       name: '@deepseek-ai/dsh-client-ui-conversation'
 

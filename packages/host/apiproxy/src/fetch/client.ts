@@ -90,6 +90,10 @@ import {
   userContextSetValueSchema, userContextDeleteValueSchema,
 } from '../api/user-context.schema.ts'
 import { accountPluginsListValueSchema, accountPluginsInstallValueSchema, accountPluginsUninstallValueSchema } from '../api/account-plugins.schema.ts'
+import {
+  businessSkillsDisableValueSchema, businessSkillsListValueSchema, businessSkillsPublishValueSchema,
+  businessSkillsRollbackValueSchema, businessSkillsValidateValueSchema,
+} from '../api/business-skills.schema.ts'
 import { accountWebSearchValueSchema } from '../api/account-web.schema.ts'
 
 /**
@@ -237,6 +241,13 @@ export interface IApiClient {
     install(payload: RequestPayload<'account.plugins.install'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.plugins.install'>>>
     uninstall(payload: RequestPayload<'account.plugins.uninstall'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.plugins.uninstall'>>>
   }
+  businessSkills: {
+    list(payload: RequestPayload<'account.businessSkills.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.businessSkills.list'>>>
+    validate(payload: RequestPayload<'account.businessSkills.validate'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.businessSkills.validate'>>>
+    publish(payload: RequestPayload<'account.businessSkills.publish'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.businessSkills.publish'>>>
+    disable(payload: RequestPayload<'account.businessSkills.disable'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.businessSkills.disable'>>>
+    rollback(payload: RequestPayload<'account.businessSkills.rollback'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.businessSkills.rollback'>>>
+  }
   accountWeb: {
     search(payload: RequestPayload<'account.web.search'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'account.web.search'>>>
   }
@@ -334,6 +345,11 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
   'account.plugins.list': accountPluginsListValueSchema,
   'account.plugins.install': accountPluginsInstallValueSchema,
   'account.plugins.uninstall': accountPluginsUninstallValueSchema,
+  'account.businessSkills.list': businessSkillsListValueSchema,
+  'account.businessSkills.validate': businessSkillsValidateValueSchema,
+  'account.businessSkills.publish': businessSkillsPublishValueSchema,
+  'account.businessSkills.disable': businessSkillsDisableValueSchema,
+  'account.businessSkills.rollback': businessSkillsRollbackValueSchema,
   'account.web.search': accountWebSearchValueSchema,
 }
 
@@ -638,6 +654,14 @@ export abstract class AbstractApiClient implements IApiClient {
     list: (payload, signal) => this.callUnary('account.plugins.list', payload, signal),
     install: (payload, signal) => this.callUnary('account.plugins.install', payload, signal),
     uninstall: (payload, signal) => this.callUnary('account.plugins.uninstall', payload, signal),
+  }
+
+  readonly businessSkills: IApiClient['businessSkills'] = {
+    list: (payload, signal) => this.callUnary('account.businessSkills.list', payload, signal),
+    validate: (payload, signal) => this.callUnary('account.businessSkills.validate', payload, signal),
+    publish: (payload, signal) => this.callUnary('account.businessSkills.publish', payload, signal),
+    disable: (payload, signal) => this.callUnary('account.businessSkills.disable', payload, signal),
+    rollback: (payload, signal) => this.callUnary('account.businessSkills.rollback', payload, signal),
   }
 
   readonly accountWeb: IApiClient['accountWeb'] = {

@@ -337,6 +337,14 @@ export class FakeApiClient implements IApiClient {
     }))),
   }
 
+  readonly businessSkills: IApiClient['businessSkills'] = {
+    list: payload => this.record('account.businessSkills.list', payload, Promise.resolve(ok({ items: [] }))),
+    validate: payload => this.record('account.businessSkills.validate', payload, Promise.resolve(ok({ valid: true, issues: [] }))),
+    publish: payload => this.record('account.businessSkills.publish', payload, Promise.reject(new Error('business Skill publish not programmed'))),
+    disable: payload => this.record('account.businessSkills.disable', payload, Promise.resolve(ok({ disabled: true as const }))),
+    rollback: payload => this.record('account.businessSkills.rollback', payload, Promise.reject(new Error('business Skill rollback not programmed'))),
+  }
+
   readonly accountWeb: IApiClient['accountWeb'] = {
     search: payload => this.record('account.web.search', payload, Promise.resolve(ok({
       sources: [],

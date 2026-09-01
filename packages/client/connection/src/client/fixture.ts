@@ -1567,6 +1567,8 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       version: '1', systemDefault: false, installed: false,
     },
   ]
+  /** Retained business Skill revisions for Settings fixture journeys. */
+  const fixtureBusinessSkills: ResponseValue<'account.businessSkills.list'>['items'] = []
   /**
    * Preset compositions the fixture serves. Held as state rather than
    * constants so the settings editor's save and delete are exercisable: the
@@ -3196,6 +3198,58 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         return ok(request, { ...plugin })
       },
     },
+    businessSkills: {
+      list: request => ok(request, { items: fixtureBusinessSkills.map(item => structuredClone(item)) }),
+      validate: (request) => {
+        try {
+          JSON.parse(request.payload.manifestText)
+          return ok(request, { valid: true, issues: [] })
+        } catch (error) {
+          return ok(request, { valid: false, issues: [error instanceof Error ? error.message : String(error)] })
+        }
+      },
+      publish: (request) => {
+        const manifest = JSON.parse(request.payload.manifestText) as ResponseValue<'account.businessSkills.publish'>['manifest']
+        const latest = fixtureBusinessSkills
+          .filter(item => item.manifest.name === manifest.name)
+          .reduce((revision, item) => Math.max(revision, item.revision), 0)
+        if (request.payload.expectedRevision !== undefined && request.payload.expectedRevision !== latest) {
+          return Promise.reject(new Error('business Skill revision conflict'))
+        }
+        for (const item of fixtureBusinessSkills) {
+          if (item.manifest.name === manifest.name) item.active = false
+        }
+        const version = { revision: latest + 1, manifest, active: true }
+        fixtureBusinessSkills.push(version)
+        return ok(request, structuredClone(version))
+      },
+      disable: (request) => {
+        const active = fixtureBusinessSkills.find(item => item.manifest.name === request.payload.skill && item.active)
+        if (
+          active === undefined
+          || (request.payload.expectedRevision !== undefined && active.revision !== request.payload.expectedRevision)
+        ) {
+          return Promise.reject(new Error('business Skill revision conflict'))
+        }
+        active.active = false
+        return ok(request, { disabled: true })
+      },
+      rollback: (request) => {
+        const active = fixtureBusinessSkills.find(item => item.manifest.name === request.payload.skill && item.active)
+        if (request.payload.expectedRevision !== undefined && active?.revision !== request.payload.expectedRevision) {
+          return Promise.reject(new Error('business Skill revision conflict'))
+        }
+        const target = fixtureBusinessSkills.find(
+          item => item.manifest.name === request.payload.skill && item.revision === request.payload.revision,
+        )
+        if (target === undefined) return Promise.reject(new Error('business Skill revision not found'))
+        for (const item of fixtureBusinessSkills) {
+          if (item.manifest.name === request.payload.skill) item.active = false
+        }
+        target.active = true
+        return ok(request, structuredClone(target))
+      },
+    },
     accountWeb: {
       search: request => ok(request, { sources: [], truncated: false }),
     },
@@ -3441,6 +3495,11 @@ export class FixtureApiClient extends AbstractApiClient {
       case 'account.plugins.list': return this.api.accountPlugins.list(request)
       case 'account.plugins.install': return this.api.accountPlugins.install(request)
       case 'account.plugins.uninstall': return this.api.accountPlugins.uninstall(request)
+      case 'account.businessSkills.list': return this.api.businessSkills.list(request)
+      case 'account.businessSkills.validate': return this.api.businessSkills.validate(request)
+      case 'account.businessSkills.publish': return this.api.businessSkills.publish(request)
+      case 'account.businessSkills.disable': return this.api.businessSkills.disable(request)
+      case 'account.businessSkills.rollback': return this.api.businessSkills.rollback(request)
       case 'account.web.search': return this.api.accountWeb.search(request, signal)
       case 'account.wallet.get': return this.api.wallet.get(request)
       case 'account.wallet.credit': return this.api.wallet.credit(request)

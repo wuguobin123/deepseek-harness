@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/specs/xiaowei/business-metrics-integration.md
+business-metrics-integration.md: e1f3009f2bb427fd2fc184ef74d74bd0ccef7932
+business-metrics-integration.zh.md: 58592db5ae137f1294bb39da628702c7a2aae199

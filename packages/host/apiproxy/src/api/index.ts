@@ -23,6 +23,7 @@ import type { CustomModelsApi } from './custom-models.ts'
 import type { ArtifactsApi } from './artifacts.ts'
 import type { UserContextApi } from './user-context.ts'
 import type { AccountPluginsApi } from './account-plugins.ts'
+import type { BusinessSkillsApi } from './business-skills.ts'
 import type { ClientResponse, RpcPrincipal, RpcReceipt } from './rpc.ts'
 import type { AccountInferenceApi } from './account-inference.ts'
 import type { AccountWebApi } from './account-web.ts'
@@ -62,6 +63,8 @@ export interface ApiProxy {
   artifactRegistry: ArtifactsApi
   userContext: UserContextApi
   accountPlugins: AccountPluginsApi
+  /** Account-owned, data-only business Skill manifests. */
+  businessSkills: BusinessSkillsApi
   /** Session-free account-owned model inference stream. */
   accountInference: AccountInferenceApi
   /** Authenticated account-owned web search. */
@@ -109,6 +112,10 @@ export type {
 } from './artifacts.ts'
 export type { UserContextApi, UserContextKey, UserContextKind, UserContextView } from './user-context.ts'
 export type { AccountPluginsApi } from './account-plugins.ts'
+export type {
+  BusinessSkillManifestView, BusinessSkillOperationView, BusinessSkillsApi,
+  BusinessSkillVersionView,
+} from './business-skills.ts'
 export type { AccountWebApi, WebSearchResult } from './account-web.ts'
 export { accountWebSearchRequestSchema, accountWebSearchValueSchema } from './account-web.schema.ts'
 export type { ApprovalResponsePayload } from './approvals.ts'

@@ -54,6 +54,8 @@ dsh --profile web --dump-config
 
 多用户 Host 在宿主平面保存账号安装状态，并在 Agent 发布前应用所选能力。认证 RPC principal 拥有插件工厂修改；持久 Session `ownerId` 拥有 Skill 查询与对话式 Skill 写入。系统插件与 Skill 根目录仍是部署拥有的默认项，可选插件记录与可写 Skill 目录则按账号隔离。每个账号 Session 在创建时记录其可选插件选择；后续安装变化只影响后续 Session，冷恢复与 fork 使用已记录选择，使历史记录保留生成它时的能力集合。参见[实现说明](../.agents/notes/implemented/architecture/2026-08-26-account-scoped-plugin-and-skill-installation.zh.md)。
 
+声明式业务 Skill 是另一组账号私有能力。认证 Account RPC 发布不可变清单版本，并在不替换 Host 进程的情况下刷新 Skill 目录。执行时，Host 只从持久 Session 所有者解析账号，校验模型输入，解析部署侧凭据，并调用白名单内的语义 Connector。模型、浏览器请求与清单都不能提供身份、token、角色、scope 或租户字段。在平台具备权威的租户选择来源之前，不发送 `tenantId`。参见[实现说明](../.agents/notes/implemented/architecture/2026-09-01-declarative-business-skill-runtime.zh.md)。
+
 <a id="events"></a>
 
 ## 事件
@@ -108,6 +110,8 @@ turn/end
 一个 **seam** 是一项可替换能力，包含三种角色：声明接口的 **Service Definition**、实现它的 **Service Provider**，以及使用它的 **Consumer**（通常是面向模型的工具）。一个包可以合并承担多个角色，但单一角色本身不是 seam；添加一项能力意味着把三者一并设计（[能力图](capability-seams.zh.md)）。
 
 seam 正是替换一个提供方就能改变整个产品的原因。文件系统与进程提供方共享同一个执行世界，因此把它们指向远程沙箱，也就把 Bash、PTY 和 LSP 一并搬了过去，无需提供方专用 fork。[subagent 提供方](subsystems/subagent.zh.md)在同一个接口之后同样千差万别，从新建一个子 agent，到把一个轮次委派给另一个产品。
+
+声明式业务 Skill seam 将清单存储、命名 Connector 和面向模型的运行时分离。账号归属保留在 Host，网络与凭据策略来自部署配置，业务授权则由被调用的业务服务负责。
 
 [实验性 Agent Teams](subsystems/agent-team.zh.md) 是 `ctx.agentTeams` 上的私有显式启用协作 seam，在可继续 subagent 之上提供持久 roster、任务板和 mailbox。
 

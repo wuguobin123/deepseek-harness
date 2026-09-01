@@ -8,6 +8,45 @@
 
 同一组合独立于 Session 的对话模型暴露 `web_search` 与 `web_fetch`。搜索使用 Firecrawl，并在缺少凭据时回退到回环 SearXNG。抓取首先使用固定 DNS 公网地址的 HTTP provider，只在安全取得 HTTP 403 或 429 响应后才尝试 Firecrawl；因此读取普通公开页面与 raw 文件不要求 Firecrawl 凭据。
 
+## 业务 Skill 热加载
+
+平台只需部署一次业务 Skill 运行时。此后，已登录账户可在“设置 → 插件 → 业务 Skills”中校验、发布、停用或回滚纯数据 manifest，无需修改平台源代码或重启服务。发布会原子创建不可变版本、切换活动指针，并刷新下一模型步骤使用的 Skill 目录；校验失败或版本冲突时继续使用上一正常版本。
+
+部署侧通过 `XIAOWEI_BUSINESS_SKILL_HOSTS` 和 `XIAOWEI_BUSINESS_SKILL_CREDENTIAL_REFS` 设置允许列表。manifest 只能选择允许主机上的 HTTPS URL，以及该连接器允许的凭据引用。凭据值在每次操作时解析，不进入 manifest、浏览器响应、模型参数或审计事件。增加全新的信任域或凭据引用属于运维安全策略变更；已允许域名上的普通业务 Skill 均可纯配置热接入。
+
+小薇指标端点使用 `XIAOWEI_BUSINESS_API_CREDENTIAL_REF` 选择服务端凭据，使用 `XIAOWEI_BUSINESS_METRICS_GRANTS` 保存从认证用户 ID 到权限数组的 JSON 对象。`XIAOWEI_BUSINESS_SKILL_RETRIES` 将连接器重试次数设为零至五；服务端把每次允许或拒绝的指标决策写入 `DSH_HOME` 下的 `business-metrics-audit.jsonl`。授权映射属于部署策略，客户端和 manifest 不能把自己加入授权，也不能提供身份字段。
+
+所有 manifest 和工具输入都会递归拒绝 `userId` 与 `tenantId`。工具只接受 `skill`、`operation` 和业务 `input`；运行时从认证 Session 派生 `userId`，并通过 `X-Xiaowei-User-Id` 传给业务 API。业务 API 先校验连接器 Bearer 凭据，再针对该可信用户校验 `X-Xiaowei-Required-Permission`，通过后才查询数据。小薇当前没有权威的租户成员选择，因此本版本不会虚构或接收 `tenantId`，也不会发送该字段。
+
+```yaml
+name: xiaowei-metrics
+version: 1.0.0
+description: Query registered-account and share-code usage totals.
+connectionIds:
+  - https://business.example.com/api/
+credentialRefs:
+  - XIAOWEI_BUSINESS_API_TOKEN
+operations:
+  - id: registered-accounts
+    method: GET
+    path: /metrics/registered-accounts
+    input: { type: object, additionalProperties: false }
+    output: { type: object, properties: { count: { type: integer }, observedAt: { type: string } }, required: [count, observedAt], additionalProperties: false }
+    permission: metrics.accounts.read
+    connection: https://business.example.com/api/
+    credentialRef: XIAOWEI_BUSINESS_API_TOKEN
+    risk: R1
+  - id: share-code-usage
+    method: GET
+    path: /metrics/share-code-usage
+    input: { type: object, additionalProperties: false }
+    output: { type: object, properties: { count: { type: integer }, observedAt: { type: string } }, required: [count, observedAt], additionalProperties: false }
+    permission: metrics.share-codes.read
+    connection: https://business.example.com/api/
+    credentialRef: XIAOWEI_BUSINESS_API_TOKEN
+    risk: R1
+```
+
 `tool-capabilities` export 是发布版本地与云端 preset 的机器可读 manifest（元数据清单）。它列出共享工具、位置专属工具及允许的位置感知描述。装配后的 profile 测试会读取已注册定义，并比较每项共享工具的输入和输出 schema、超时、展示回调及并发分类；未声明的差异会被拒绝。只有 manifest 明确声明时，位置感知描述才可以不同，让模型能够判断持久化数据属于本机还是账户。
 
 ## 模型体验
@@ -33,3 +72,4 @@
 - 小薇当前只发布部署安全的 `core-tools` 目录项。通用可选插件机制仍可供其他部署使用；在账户隔离的宿主执行能力就绪前，小薇不发布宿主执行 activator。
 - 账户 Skill 只存在于一个小薇宿主。复制、版本历史、审核流程与跨设备同步尚未实现。
 - 委派的子 Agent 当前继承 preset 组合，不继承挂在父 Agent 精确 scope 上的可选 activator。
+- 业务 Skill 当前只支持只读 `GET` 操作。写操作、用户 OAuth 与租户身份会在相应授权和审批协议实现前保持关闭。

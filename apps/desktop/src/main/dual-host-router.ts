@@ -13,6 +13,8 @@ const CLOUD_ONLY_METHODS = [
   'account.modelKeys.provision', 'account.modelKeys.list', 'account.modelKeys.revoke',
   'account.customModels.create', 'account.customModels.list', 'account.customModels.remove',
   'account.plugins.list', 'account.plugins.install', 'account.plugins.uninstall',
+  'account.businessSkills.list', 'account.businessSkills.validate', 'account.businessSkills.publish',
+  'account.businessSkills.disable', 'account.businessSkills.rollback',
   'account.web.search',
   'userContext.list', 'userContext.get', 'userContext.set', 'userContext.delete',
 ] as const

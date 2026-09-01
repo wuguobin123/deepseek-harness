@@ -69,6 +69,23 @@ describe('DualHostRouter', () => {
     await expect(router.call('account.plugins.list', {})).resolves.toEqual({ items: [{ pluginId: 'office-tools' }] })
   })
 
+  it.each([
+    'account.businessSkills.list',
+    'account.businessSkills.validate',
+    'account.businessSkills.publish',
+    'account.businessSkills.disable',
+    'account.businessSkills.rollback',
+  ])('routes %s only to the authenticated cloud Host', async (method) => {
+    const result = { accepted: method }
+    const cloud = client({ calls: { [method]: result } })
+    const local = client()
+    const router = new DualHostRouter(cloud as never, () => local as never)
+
+    await expect(router.call(method, {})).resolves.toEqual(result)
+    expect(cloud.call).toHaveBeenCalledWith(method, {})
+    expect(local.call).not.toHaveBeenCalled()
+  })
+
   it('tags a cloud-only Workspace result at its creation boundary', async () => {
     const cloud = client({ calls: {
       'workspace.importDirectory': { workspace: { workspaceId: 'cloud-workspace', sessionIds: [] } },

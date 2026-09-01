@@ -56,6 +56,7 @@ import { apply as settingsGeneralApply } from '@deepseek-ai/dsh-client-ui-settin
 import { apply as settingsModelsApply } from '@deepseek-ai/dsh-client-ui-settings-models/client'
 import { apply as settingsPluginsApply } from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import { apply as settingsPluginInventoryApply } from '@deepseek-ai/dsh-client-ui-settings-plugin-inventory/client'
+import { apply as settingsBusinessSkillsApply } from '@deepseek-ai/dsh-client-ui-settings-business-skills/client'
 import { apply as modelSelectionApply } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import { apply as permissionPresetsApply } from '@deepseek-ai/dsh-client-ui-permission-presets/client'
 import { apply as dirPickerNativeApply } from '@deepseek-ai/dsh-client-ui-directory-picker-native/client'
@@ -251,6 +252,7 @@ export async function bootRenderer(
   await activate(settingsModelsApply)
   await activate(settingsPluginsApply)
   await activate(settingsPluginInventoryApply)
+  await activate(settingsBusinessSkillsApply)
   await activate(modelSelectionApply)
   await activate(permissionPresetsApply)
   await activate(ctx => skillManagementApply(ctx, api))

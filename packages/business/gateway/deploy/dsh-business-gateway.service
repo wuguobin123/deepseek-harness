@@ -1,0 +1,29 @@
+[Unit]
+Description=Xiaowei independent business gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/dsh-business-gateway/current
+EnvironmentFile=/etc/dsh-business-gateway/server.env
+Environment=DSH_BUSINESS_GATEWAY_CONFIG=/etc/dsh-business-gateway/config.json
+Environment=DSH_GATEWAY_DATABASE_ROOT=/var/lib/dsh-xiaowei
+Environment=DSH_BUSINESS_GATEWAY_AUDIT=/var/lib/dsh-business-gateway/audit.jsonl
+Environment=DSH_BUSINESS_GATEWAY_PORT=18082
+ExecStart=/usr/bin/env bash -lc 'exec node lib/server.js'
+Restart=on-failure
+RestartSec=3s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/var/lib/dsh-business-gateway
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

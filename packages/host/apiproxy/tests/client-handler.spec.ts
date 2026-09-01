@@ -181,6 +181,13 @@ function scriptedApi(overrides: {
       install: r => ok(r, { ...accountPlugin, pluginId: r.payload.pluginId, installed: true }),
       uninstall: r => ok(r, { ...accountPlugin, pluginId: r.payload.pluginId }),
     },
+    businessSkills: {
+      list: r => ok(r, { items: [] }),
+      validate: r => ok(r, { valid: true, issues: [] }),
+      publish: err,
+      disable: r => ok(r, { disabled: true }),
+      rollback: err,
+    },
     artifactRegistry: {
       list: r => ok(r, { items: [] }),
       read: r => ok(r, { view: { artifactId: 'sha256:0'.repeat(63) + '0' as never, kind: 'html', source: 'tool-html', mediaType: 'text/html', bytes: 0, createdAt: '2026-01-01T00:00:00.000Z' }, bytesBase64: '' }),

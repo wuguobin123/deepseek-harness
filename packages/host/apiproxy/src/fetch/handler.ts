@@ -88,6 +88,10 @@ import {
   userContextSetRequestSchema, userContextDeleteRequestSchema,
 } from '../api/user-context.schema.ts'
 import { accountPluginsListRequestSchema, accountPluginsInstallRequestSchema, accountPluginsUninstallRequestSchema } from '../api/account-plugins.schema.ts'
+import {
+  businessSkillsDisableRequestSchema, businessSkillsListRequestSchema, businessSkillsPublishRequestSchema,
+  businessSkillsRollbackRequestSchema, businessSkillsValidateRequestSchema,
+} from '../api/business-skills.schema.ts'
 import { accountWebSearchRequestSchema } from '../api/account-web.schema.ts'
 import { assertCloudRoutePartition } from '../route-partition.ts'
 import {
@@ -208,6 +212,11 @@ const UNARY_ROUTES: UnaryRoutes = {
   'account.plugins.list': { schema: accountPluginsListRequestSchema, invoke: (api, r) => api.accountPlugins.list(r) },
   'account.plugins.install': { schema: accountPluginsInstallRequestSchema, invoke: (api, r) => api.accountPlugins.install(r) },
   'account.plugins.uninstall': { schema: accountPluginsUninstallRequestSchema, invoke: (api, r) => api.accountPlugins.uninstall(r) },
+  'account.businessSkills.list': { schema: businessSkillsListRequestSchema, invoke: (api, r) => api.businessSkills.list(r) },
+  'account.businessSkills.validate': { schema: businessSkillsValidateRequestSchema, invoke: (api, r) => api.businessSkills.validate(r) },
+  'account.businessSkills.publish': { schema: businessSkillsPublishRequestSchema, invoke: (api, r) => api.businessSkills.publish(r) },
+  'account.businessSkills.disable': { schema: businessSkillsDisableRequestSchema, invoke: (api, r) => api.businessSkills.disable(r) },
+  'account.businessSkills.rollback': { schema: businessSkillsRollbackRequestSchema, invoke: (api, r) => api.businessSkills.rollback(r) },
   'account.web.search': { schema: accountWebSearchRequestSchema, invoke: (api, r, signal) => api.accountWeb.search(r, signal) },
 }
 

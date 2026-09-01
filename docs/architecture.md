@@ -54,6 +54,8 @@ Here are some core packages that contribute to the Cordis tree.
 
 Multi-user hosts keep account installation state on the host plane and apply selected capabilities before an Agent is published. The authenticated RPC principal owns plugin-factory mutations; the durable Session `ownerId` owns Skill lookup and conversational Skill writes. System plugin and Skill roots remain deployment-owned defaults, while optional plugin rows and writable Skill directories are isolated by account. Each account Session records its optional plugin selection at creation. Later installation changes affect only later Sessions; cold restoration and forks use the recorded selection so a history retains the capabilities that produced it. See the [implementation note](../.agents/notes/implemented/architecture/2026-08-26-account-scoped-plugin-and-skill-installation.md).
 
+Declarative business Skills are a separate account-private capability family. Authenticated Account RPC publishes immutable manifest revisions and refreshes the Skill catalog without replacing the Host process. During execution, the Host resolves the account only from the durable Session owner, validates model input, resolves deployment-owned credentials, and calls an allowlisted semantic Connector. The model, browser payload, and manifest cannot supply identity, token, role, scope, or tenant fields. Until the platform has an authoritative tenant-selection source, no `tenantId` is emitted. See the [implementation note](../.agents/notes/implemented/architecture/2026-09-01-declarative-business-skill-runtime.md).
+
 ## Events
 
 Events are the extension points, and picking the right domain is the first decision in most changes.
@@ -104,6 +106,8 @@ The session log is the source of the context the model sees. `deriveMessages()` 
 A **seam** is a swappable capability with three roles: a **Service Definition** declaring the interface, a **Service Provider** implementing it, and a **Consumer** using it, commonly a model-facing tool. A package may combine roles, but one role alone is not a seam; adding a capability means designing all three ([capability graph](capability-seams.md)).
 
 Seams are why one provider swap changes the whole product. Filesystem and subprocess providers share one execution world, so pointing them at a remote sandbox moves Bash, PTY, and LSP with them, with no provider forks. [Subagent providers](subsystems/subagent.md) vary just as widely behind one interface, from a fresh child agent to a delegated turn in another product.
+
+The declarative business-Skill seam separates manifest storage, named Connectors, and the model-facing runtime. This keeps account ownership in the Host, network and credential policy in deployment configuration, and business authorization in the called service.
 
 [Experimental Agent Teams](subsystems/agent-team.md) is a private opt-in coordination seam on `ctx.agentTeams`, with a durable roster, task board, and mailbox layered over continuable subagents.
 

@@ -1,0 +1,24 @@
+.section { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 820px; color: var(--dsw-alias-label-primary); }
+.status, .failure p, .notice, .issues { margin: 0; font-size: 13px; line-height: 20px; }
+.status { color: var(--dsw-alias-label-tertiary); }
+.failure { display: flex; align-items: center; gap: 10px; color: var(--dsw-alias-state-error-primary); }
+.failure button, .actions button, .card button { border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; padding: 5px 10px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.catalog { display: flex; flex-direction: column; gap: 10px; }
+.heading { display: flex; justify-content: space-between; align-items: baseline; }
+.heading h3 { margin: 0; font-size: 14px; }
+.heading span { color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+.cards { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.card { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 9px; padding: 12px; background: var(--dsw-alias-bg-layer-3); }
+.row { display: grid; grid-template-columns: 1.2fr 1fr 1fr .7fr .8fr auto; gap: 10px; align-items: center; font-size: 13px; }
+.row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta { color: var(--dsw-alias-label-secondary); }
+.tag { border-radius: 5px; padding: 2px 6px; font-size: 11px; background: var(--dsw-alias-bg-layer-1); width: fit-content; }
+.tag[data-enabled='true'] { color: var(--dsw-alias-state-success-primary); }
+.editor { display: flex; flex-direction: column; gap: 8px; }
+.editor label { font-size: 12px; color: var(--dsw-alias-label-secondary); }
+.editor textarea { min-height: 130px; resize: vertical; border: 1px solid var(--dsw-alias-border-l2); border-radius: 7px; padding: 9px; background: var(--dsw-alias-bg-layer-1); color: inherit; font: 12px/18px ui-monospace, monospace; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.actions button:disabled, .card button:disabled { opacity: .55; cursor: wait; }
+.rollback { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; }
+.rollback input { width: 90px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 5px; padding: 5px; background: var(--dsw-alias-bg-layer-1); color: inherit; }
+.issues { color: var(--dsw-alias-state-error-primary); padding-left: 18px; }

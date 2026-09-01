@@ -18,6 +18,7 @@ Groups hold `packages/<group>/<pkg>/`; names stay `@deepseek-ai/dsh-<pkg>`. **Gr
 | [`feedback/`](feedback/README.md) | Human feedback | Product — stable API |
 | [`identity/`](identity/README.md) | Shared anonymous identity | Product — stable API |
 | [`account/`](account/README.md) | Multi-user accounts and private Skills | Product — evolving API |
+| [`business/`](business/README.md) | Account-private declarative business Skills, connectors, and runtime | Product — evolving API |
 | [`llm/`](llm/README.md) | LLM service and providers | Product — stable API |
 | [`embedding/`](embedding/README.md) | Embedding service and providers | Product — evolving API |
 | [`e2b/`](e2b/README.md) | E2B providers | POC |

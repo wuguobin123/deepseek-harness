@@ -232,6 +232,29 @@
       config:
         dshHome: !!js "dshHomePath()"
 
+    # Account-owned business Skill manifests are data, not executable plugins.
+    # Publishing a new revision changes the active pointer immediately; the
+    # stable runtime and HTTPS policy stay mounted for the process lifetime.
+    - id: business-skill
+      name: '@deepseek-ai/dsh-business-skill'
+
+    - id: business-skill-sqlite
+      name: '@deepseek-ai/dsh-business-skill-sqlite'
+      config:
+        path: !!js "dshHomePath('business-skills.sqlite')"
+
+    - id: business-connectors
+      name: '@deepseek-ai/dsh-business-connector'
+
+    - id: business-connector-http
+      name: '@deepseek-ai/dsh-business-connector-http'
+      config:
+        hosts: !!js "(process.env.XIAOWEI_BUSINESS_SKILL_HOSTS ?? 'business.xiaowei.invalid').split(',').map(s => s.trim()).filter(Boolean)"
+        credentialRefs: !!js "(process.env.XIAOWEI_BUSINESS_SKILL_CREDENTIAL_REFS ?? '').split(',').map(s => s.trim()).filter(Boolean)"
+        timeoutMs: !!js "Number(process.env.XIAOWEI_BUSINESS_SKILL_TIMEOUT_MS ?? 10000)"
+        maxResponseBytes: !!js "Number(process.env.XIAOWEI_BUSINESS_SKILL_MAX_RESPONSE_BYTES ?? 1048576)"
+        retries: !!js "Number(process.env.XIAOWEI_BUSINESS_SKILL_RETRIES ?? 2)"
+
     # 7. Artifact registry (content-addressed on disk; sha256-keyed).
     - id: artifact-store-fs
       name: '@deepseek-ai/dsh-artifact-store-fs'
@@ -269,6 +292,10 @@
 
     - id: xiaowei-webserver
       name: '@deepseek-ai/dsh-xiaowei/webserver'
+      config:
+        credentialRef: !!js "process.env.XIAOWEI_BUSINESS_API_CREDENTIAL_REF ?? 'XIAOWEI_BUSINESS_API_TOKEN'"
+        grants: !!js "JSON.parse(process.env.XIAOWEI_BUSINESS_METRICS_GRANTS ?? '{}')"
+        auditPath: !!js "dshHomePath('business-metrics-audit.jsonl')"
 
     # 12. SPA fallback (only if the deployment has built the web bundle).
     - id: frontend-static
